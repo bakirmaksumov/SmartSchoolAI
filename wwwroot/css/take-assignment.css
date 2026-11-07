@@ -1,0 +1,423 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   TakeAssignment – Student question-by-question UI
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Question Navigation Pills ─────────────────────────────────────────── */
+.question-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.question-nav .nav-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  border: 1.5px solid #d9dee3;
+  background: #fff;
+  color: #566a7f;
+  font-weight: 600;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+
+.question-nav .nav-btn:hover {
+  border-color: #696cff;
+  color: #696cff;
+}
+
+.question-nav .nav-btn.active {
+  background: #696cff;
+  border-color: #696cff;
+  color: #fff;
+}
+
+.question-nav .nav-btn.answered {
+  background: #71dd37;
+  border-color: #71dd37;
+  color: #fff;
+}
+
+.question-nav .nav-btn.answered.active {
+  background: #696cff;
+  border-color: #696cff;
+}
+
+/* Math preview — keep the student's line breaks instead of collapsing them */
+.math-preview {
+  white-space: pre-wrap;
+  line-height: 1.9;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+/* Instant-feedback verdicts (override the plain "answered" green) */
+.question-nav .nav-btn.correct {
+  background: #71dd37;
+  border-color: #71dd37;
+  color: #fff;
+}
+
+.question-nav .nav-btn.wrong {
+  background: #ff3e1d;
+  border-color: #ff3e1d;
+  color: #fff;
+}
+
+/* The active question stays highlighted whatever its verdict */
+.question-nav .nav-btn.correct.active,
+.question-nav .nav-btn.wrong.active {
+  background: #696cff;
+  border-color: #696cff;
+}
+
+.question-nav .prev-next-btn {
+  width: auto;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ── Question Card ─────────────────────────────────────────────────────── */
+.question-panel {
+  display: none;
+}
+
+.question-panel.active {
+  display: block;
+}
+
+.question-card-main {
+  border: 1px solid #e7e7e8;
+  border-radius: .625rem;
+}
+
+.question-header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e7e7e8;
+  background: #f5f5f9;
+  border-radius: .625rem .625rem 0 0;
+}
+
+.question-title {
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: #566a7f;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.question-title .katex {
+  font-size: 1.15em;
+}
+
+/* ── Solution / Explanation Area ───────────────────────────────────────── */
+.solution-area {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e7e7e8;
+}
+
+.solution-label {
+  font-size: .8125rem;
+  font-weight: 600;
+  color: #a1acb8;
+  margin-bottom: .5rem;
+}
+
+.solution-placeholder {
+  color: #a1acb8;
+  font-style: italic;
+  font-size: .875rem;
+}
+
+/* ── MCQ Option Cards ──────────────────────────────────────────────────── */
+.option-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1.5px solid #e7e7e8;
+  border-radius: .5rem;
+  background: #fff;
+  cursor: pointer;
+  transition: all .15s ease;
+  user-select: none;
+}
+
+.option-card:hover {
+  border-color: #696cff;
+  background: #f0efff;
+}
+
+.option-card.selected {
+  border-color: #696cff;
+  background: #e8e7ff;
+}
+
+.option-card .option-letter {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+  flex-shrink: 0;
+  background: #f5f5f9;
+  color: #566a7f;
+  transition: all .15s ease;
+}
+
+.option-card.selected .option-letter {
+  background: #696cff;
+  color: #fff;
+}
+
+.option-card .option-text {
+  font-size: .9375rem;
+  line-height: 1.5;
+  flex: 1;
+}
+
+.option-card .option-text .katex {
+  font-size: 1.1em;
+}
+
+.option-card input[type="checkbox"],
+.option-card input[type="radio"] {
+  display: none;
+}
+
+/* ── Text / Open Answer ────────────────────────────────────────────────── */
+.answer-textarea {
+  border: 1.5px solid #e7e7e8;
+  border-radius: .5rem;
+  padding: 12px 16px;
+  font-size: .9375rem;
+  min-height: 100px;
+  resize: vertical;
+  transition: border-color .15s ease;
+}
+
+.answer-textarea:focus {
+  border-color: #696cff;
+  box-shadow: 0 0 0 .2rem rgba(105, 108, 255, .1);
+}
+
+/* ── Tutorial Chat Panel ───────────────────────────────────────────────── */
+.tutorial-panel {
+  position: fixed;
+  top: 0;
+  right: -420px;
+  width: 400px;
+  height: 100vh;
+  background: #fff;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, .12);
+  z-index: 1050;
+  display: flex;
+  flex-direction: column;
+  transition: right .3s ease;
+}
+
+.tutorial-panel.open {
+  right: 0;
+}
+
+.tutorial-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, .3);
+  z-index: 1049;
+  display: none;
+}
+
+.tutorial-overlay.open {
+  display: block;
+}
+
+.tutorial-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid #e7e7e8;
+  background: #696cff;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.tutorial-header .tutor-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.tutorial-header .close-btn {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.tutorial-modes {
+  display: flex;
+  gap: 6px;
+  padding: 12px 20px;
+  border-bottom: 1px solid #e7e7e8;
+  flex-shrink: 0;
+}
+
+.tutorial-modes .mode-btn {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1.5px solid #e7e7e8;
+  background: #fff;
+  color: #566a7f;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+
+.tutorial-modes .mode-btn:hover {
+  border-color: #696cff;
+  color: #696cff;
+}
+
+.tutorial-modes .mode-btn.active {
+  background: #696cff;
+  border-color: #696cff;
+  color: #fff;
+}
+
+.tutorial-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-msg {
+  display: flex;
+  gap: 8px;
+  max-width: 88%;
+}
+
+.chat-msg.assistant {
+  align-self: flex-start;
+}
+
+.chat-msg.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.msg-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  background: #f5f5f9;
+}
+
+.msg-bubble {
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-bubble.assistant {
+  background: #f5f5f9;
+  color: #566a7f;
+}
+
+.msg-bubble.user {
+  background: #696cff;
+  color: #fff;
+}
+
+.msg-time {
+  font-size: 11px;
+  color: #a1acb8;
+  margin-top: 2px;
+}
+
+.tutorial-input-wrap {
+  display: flex;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid #e7e7e8;
+  flex-shrink: 0;
+  background: #fff;
+}
+
+.tutorial-input-wrap input {
+  flex: 1;
+  border: 1.5px solid #e7e7e8;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
+.tutorial-input-wrap input:focus {
+  border-color: #696cff;
+  outline: none;
+}
+
+.tutorial-input-wrap .send-btn {
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: 8px;
+  background: #696cff;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.tutorial-input-wrap .send-btn:hover {
+  background: #5a5de8;
+}
+
+.tutorial-input-wrap .send-btn:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 576px) {
+  .tutorial-panel {
+    width: 100%;
+    right: -100%;
+  }
+
+  .question-nav .nav-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 13px;
+  }
+}

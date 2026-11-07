@@ -1,0 +1,394 @@
+@model SmartSchoolAI.ViewModels.AnalyticsViewModel
+@{
+    ViewData["Title"] = "Analytics";
+
+    var classes         = Model.Classes;
+    var selectedClassId = Model.SelectedClassId;
+    var hasData         = Model.HasData;
+    var tab             = Model.Tab;
+    var assignments     = Model.Assignments;
+}
+
+<!-- EduSchool AI Hero Banner for Analytics -->
+<div class="wiut-hero-card mb-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div>
+      <h3 class="fw-bold text-white mb-1"><i class="bx bx-bar-chart-alt-2 me-2"></i>EduSchool AI Analytics Dashboard</h3>
+      <p class="text-white-50 mb-0">Performance Insights & Mastery Metrics for Students and Classes</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── CLASS SELECTOR + TABS ────────────────────────────────────────────── -->
+@if (classes.Any())
+{
+  <div class="d-flex align-items-center gap-3 mb-3 flex-wrap border-bottom pb-3">
+    <!-- Class dropdown -->
+    <select class="form-select form-select-sm" style="width:220px;" id="classSelector"
+            onchange="navigateAnalytics()">
+      @foreach (var cls in classes)
+      {
+        if (selectedClassId == cls.Id)
+        {
+          <option value="@cls.Id" selected>@cls.Name</option>
+        }
+        else
+        {
+
+          <option value="@cls.Id">@cls.Name</option>
+        }
+      }
+    </select>
+
+    <!-- Practice / Assessment tabs -->
+    <ul class="nav nav-underline mb-0" id="analyticsTabs">
+      <li class="nav-item">
+        <a class="nav-link fw-semibold @(tab == "practice" ? "active" : "")"
+           href="#" onclick="switchAnalyticsTab('practice'); return false;">Practice</a>
+      </li>
+      <li class="nav-item">
+        <a class="nav-link fw-semibold @(tab == "assessment" ? "active" : "")"
+           href="#" onclick="switchAnalyticsTab('assessment'); return false;">Assessment</a>
+      </li>
+    </ul>
+
+    <div class="ms-auto">
+      <button class="btn btn-sm btn-icon btn-outline-secondary" onclick="navigateAnalytics()"
+              data-bs-toggle="tooltip" title="Refresh">
+        <i class="bx bx-refresh"></i>
+      </button>
+    </div>
+  </div>
+}
+
+@if (!classes.Any())
+{
+  <!-- No classes -->
+  <div class="card">
+    <div class="card-body text-center py-5">
+      <i class="bx bx-bar-chart-alt-2" style="font-size:3rem; color:#696cff;"></i>
+      <h5 class="mt-3">No classes yet</h5>
+      <p class="text-muted">Create a class and assign students to start seeing analytics.</p>
+      <a href="/Classes/Create" class="btn btn-primary btn-sm"><i class="bx bx-plus me-1"></i>Create Class</a>
+    </div>
+  </div>
+}
+else if (!hasData)
+{
+  <!-- No submissions -->
+  <div class="card">
+    <div class="card-body text-center py-5">
+      <i class="bx bx-bar-chart-alt-2" style="font-size:3rem; color:#696cff;"></i>
+      <h5 class="mt-3">No analytics data yet</h5>
+      <p class="text-muted">Analytics will appear here once students start submitting assignments.</p>
+    </div>
+  </div>
+}
+else
+{
+  <!-- ══ RESULTS HEADER ═══════════════════════════════════════════════════ -->
+  <h5 class="fw-bold mb-3">Results</h5>
+
+  <!-- ── SUMMARY CARDS ────────────────────────────────────────────────── -->
+  <div class="row mb-4">
+    <div class="col-md-3 mb-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Average score</p>
+          <h3 class="fw-bold mb-0">@Model.AverageScore%</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 mb-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Median score</p>
+          <h3 class="fw-bold mb-0">@Model.MedianScore%</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 mb-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Total submissions</p>
+          <h3 class="fw-bold mb-0">@Model.TotalSubmissions</h3>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3 mb-3">
+      <div class="card h-100">
+        <div class="card-body">
+          <p class="text-muted small mb-1">Total learning time</p>
+          <h3 class="fw-bold mb-0">@(Model.TotalHours)h @(Model.TotalMinutes)m</h3>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ASSIGNMENT CHART + STRUGGLING STUDENTS ───────────────────────── -->
+  <div class="row mb-4">
+    <div class="col-lg-8 mb-3">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h6 class="mb-0 fw-bold">Assignment results</h6>
+          <select class="form-select form-select-sm" style="width:160px;" id="chartSort" onchange="updateChart()">
+            <option value="creation">Creation date</option>
+            <option value="score-asc">Score (low → high)</option>
+            <option value="score-desc">Score (high → low)</option>
+          </select>
+        </div>
+        <div class="card-body">
+          @if (assignments.Any())
+          {
+            <div id="assignmentChart" style="min-height:300px;"></div>
+          }
+          else
+          {
+            <div class="text-center text-muted py-5">
+              <i class="bx bx-bar-chart" style="font-size:2rem;"></i>
+              <p class="mt-2">No assignment data to chart yet.</p>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4 mb-3">
+      <div class="card h-100">
+        <div class="card-header">
+          <h6 class="mb-0 fw-bold">Struggling students</h6>
+          <small class="text-muted">Students with average below 50%</small>
+        </div>
+        <div class="card-body" style="max-height:350px; overflow-y:auto;">
+          @if (Model.StrugglingStudents.Any())
+          {
+            <div class="list-group list-group-flush">
+              @foreach (var s in Model.StrugglingStudents)
+              {
+                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="avatar avatar-xs">
+                      <span class="avatar-initial rounded-circle bg-label-danger">@s.FullName[0]</span>
+                    </div>
+                    <span class="fw-semibold small">@s.FullName</span>
+                  </div>
+                  <span class="badge bg-label-danger">@s.AverageScore%</span>
+                </div>
+              }
+            </div>
+          }
+          else
+          {
+            <div class="text-center text-muted py-4">
+              <i class="bx bx-happy-heart-eyes" style="font-size:2rem; color:#71dd37;"></i>
+              <p class="mt-2 mb-0 small">All students are doing well!</p>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── STUDENT RESULTS GRID ──────────────────────────────────────────── -->
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <h6 class="mb-0 fw-bold">Student results</h6>
+      <div class="d-flex gap-2">
+        <button class="btn btn-sm btn-icon btn-outline-secondary" id="fullscreenBtn"
+                onclick="toggleFullscreen()" data-bs-toggle="tooltip" title="Fullscreen">
+          <i class="bx bx-fullscreen"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-primary" onclick="exportCsv()">
+          <i class="bx bx-download me-1"></i>Export CSV
+        </button>
+      </div>
+    </div>
+    <div class="table-responsive" id="studentGridWrap">
+      <table class="table table-bordered table-hover mb-0" id="studentGridTable" style="font-size:.85rem;">
+        <thead class="table-light">
+          <tr>
+            <th style="min-width:140px; position:sticky; left:0; background:#f5f5f9; z-index:2;">Student</th>
+            <th style="min-width:90px;">Average score</th>
+            @foreach (var a in assignments)
+            {
+              <th style="min-width:120px;">
+                <div class="fw-semibold" style="max-width:120px; white-space:normal; line-height:1.3;">
+                  @(a.Title.Length > 35 ? a.Title[..35] + "…" : a.Title)
+                </div>
+                <small class="text-muted">@a.CreatedAt.ToString("MMM dd, yyyy")</small>
+              </th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          @foreach (var row in Model.StudentRows)
+          {
+            <tr>
+              <td style="position:sticky; left:0; background:#fff; z-index:1;">
+                <strong>@row.FullName</strong>
+              </td>
+              <td>
+                @if (row.AverageScore >= 0)
+                {
+                  <span class="fw-semibold @(row.AverageScore >= 70 ? "text-success" : row.AverageScore >= 50 ? "text-warning" : "text-danger")">
+                    @row.AverageScore%
+                  </span>
+                }
+                else
+                {
+                  <span class="text-muted">—</span>
+                }
+              </td>
+              @foreach (var cell in row.Cells)
+              {
+                <td class="text-center">
+                  @if (cell.Score.HasValue)
+                  {
+                    var score   = cell.Score.Value;
+                    var bgColor = score >= 70 ? "#71dd37" : score >= 50 ? "#ffab00" : "#ff3e1d";
+                    <a href="/Assignments/SubmissionDetail?resultId=@cell.ResultId"
+                       class="badge text-white px-3 py-2 text-decoration-none"
+                       style="background-color:@bgColor; font-size:.8rem;"
+                       data-bs-toggle="tooltip" title="Click to view details">
+                      @score%
+                    </a>
+                  }
+                  else
+                  {
+                    <span class="text-muted">—</span>
+                  }
+                </td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+}
+
+@section Scripts {
+  <script src="~/sneat/vendor/libs/apex-charts/apexcharts.js"></script>
+  <script>
+    // ── Navigation helpers ──────────────────────────────────────────────────
+    function navigateAnalytics() {
+      var classId = document.getElementById('classSelector')?.value || '';
+      var activeTab = document.querySelector('#analyticsTabs .nav-link.active');
+      var tab = activeTab?.textContent?.trim().toLowerCase() === 'assessment' ? 'assessment' : 'practice';
+      window.location.href = '/Analytics?classId=' + classId + '&tab=' + tab;
+    }
+
+    function switchAnalyticsTab(tab) {
+      var classId = document.getElementById('classSelector')?.value || '';
+      window.location.href = '/Analytics?classId=' + classId + '&tab=' + tab;
+    }
+
+    // ── Chart data ──────────────────────────────────────────────────────────
+    var chartLabels = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.ChartLabel)));
+    var chartScores = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.AverageScore)));
+    var chartDates  = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.CreatedAt.ToString("MMM dd, yyyy"))));
+    var chartSubs   = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.Submissions)));
+    var chartInstance = null;
+
+    function buildChart(labels, scores) {
+      if (chartInstance) chartInstance.destroy();
+      var el = document.getElementById('assignmentChart');
+      if (!el) return;
+
+      var colors = scores.map(function(s) {
+        return s >= 70 ? '#696cff' : s >= 50 ? '#ffab00' : '#ff3e1d';
+      });
+
+      chartInstance = new ApexCharts(el, {
+        chart: { type: 'bar', height: 300, toolbar: { show: false } },
+        series: [{ name: 'Avg Score', data: scores }],
+        xaxis: {
+          categories: labels,
+          labels: { rotate: -30, style: { fontSize: '11px' }, maxHeight: 80 }
+        },
+        yaxis: { min: 0, max: 100, labels: { formatter: function(v) { return v + '%'; } } },
+        plotOptions: {
+          bar: { borderRadius: 4, columnWidth: '55%', distributed: true }
+        },
+        colors: colors,
+        legend: { show: false },
+        dataLabels: {
+          enabled: true,
+          formatter: function(v) { return v + '%'; },
+          style: { fontSize: '11px' }
+        },
+        tooltip: {
+          custom: function({ seriesIndex, dataPointIndex }) {
+            return '<div class="p-2">' +
+              '<strong>' + chartLabels[dataPointIndex] + '</strong><br/>' +
+              'Avg Score: <b>' + chartScores[dataPointIndex] + '%</b><br/>' +
+              'Submissions: ' + chartSubs[dataPointIndex] + '<br/>' +
+              '<small class="text-muted">' + chartDates[dataPointIndex] + '</small>' +
+              '</div>';
+          }
+        }
+      });
+      chartInstance.render();
+    }
+
+    function updateChart() {
+      var sort = document.getElementById('chartSort').value;
+      var indices = chartLabels.map(function(_, i) { return i; });
+
+      if (sort === 'score-asc') {
+        indices.sort(function(a, b) { return chartScores[a] - chartScores[b]; });
+      } else if (sort === 'score-desc') {
+        indices.sort(function(a, b) { return chartScores[b] - chartScores[a]; });
+      }
+      // default: creation order (original)
+
+      var sortedLabels = indices.map(function(i) { return chartLabels[i]; });
+      var sortedScores = indices.map(function(i) { return chartScores[i]; });
+      buildChart(sortedLabels, sortedScores);
+    }
+
+    // Initialize chart on load
+    if (chartLabels.length > 0) {
+      document.addEventListener('DOMContentLoaded', function() {
+        buildChart(chartLabels, chartScores);
+      });
+    }
+
+    // ── Fullscreen toggle ───────────────────────────────────────────────────
+    function toggleFullscreen() {
+      var wrap = document.getElementById('studentGridWrap');
+      if (!wrap) return;
+      if (!document.fullscreenElement) {
+        wrap.requestFullscreen().catch(function() {});
+        wrap.style.background = '#fff';
+        wrap.style.padding = '1rem';
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    // ── CSV Export ──────────────────────────────────────────────────────────
+    function exportCsv() {
+      var table = document.getElementById('studentGridTable');
+      if (!table) return;
+
+      var rows = [];
+      table.querySelectorAll('tr').forEach(function(tr) {
+        var cols = [];
+        tr.querySelectorAll('th, td').forEach(function(td) {
+          var text = td.innerText.replace(/"/g, '""').trim();
+          cols.push('"' + text + '"');
+        });
+        rows.push(cols.join(','));
+      });
+
+      var csv = rows.join('\n');
+      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'student_results.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  </script>
+}

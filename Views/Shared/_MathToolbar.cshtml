@@ -1,0 +1,28 @@
+@*
+    Math insert buttons for a MathLive <math-field> (wired in take-assignment.js).
+    Each button's `data-insert` is LaTeX inserted at the caret; a bare `{}`/`[]`
+    pair is MathLive's own placeholder — it lands the caret inside automatically
+    and Tab moves to the next one, so "click a button, type into the slot you
+    land in" needs nothing extra from us. There is no "$…$" wrap button anymore:
+    a math-field's whole content is already math, unlike the old plain textarea
+    where LaTeX had to be delimited by hand.
+*@
+<div class="math-toolbar d-flex flex-wrap gap-1 mb-2">
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Square root"     data-insert="\sqrt{}">√</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Cube root"       data-insert="\sqrt[3]{}">ⁿ√</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Fraction"        data-insert="\frac{}{}">a⁄b</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Power"           data-insert="^{}">xⁿ</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Subscript"       data-insert="_{}">xₙ</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Degree"          data-insert="^{\circ}">°</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Integral"        data-insert="\int_{}^{}">∫</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Multiply"        data-insert="\times">×</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Divide"          data-insert="\div">÷</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Less or equal"   data-insert="\leq">≤</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Greater or equal" data-insert="\geq">≥</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Pi"              data-insert="\pi">π</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Absolute value"  data-insert="\left|\right|">|x|</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="nth root (custom index)" data-insert="\sqrt[]{}">ⁿ√x</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Delta"           data-insert="\Delta">Δ</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Not equal"       data-insert="\neq">≠</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" title="Angle"           data-insert="\angle">∠</button>
+</div>

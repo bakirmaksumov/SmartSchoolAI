@@ -1,0 +1,233 @@
+@model SmartSchoolAI.ViewModels.ProfileViewModel
+@{
+    ViewData["Title"] = "My Profile";
+    var avatarSrc = string.IsNullOrEmpty(Model.AvatarUrl)
+        ? Url.Content("~/sneat/img/avatars/1.png")
+        : Url.Content(Model.AvatarUrl);
+}
+
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">SmartSchool AI /</span> My Profile
+    </h4>
+  </div>
+</div>
+
+@* ── Toast notifications ── *@
+@if (TempData["Success"] != null)
+{
+  <div class="alert alert-success alert-dismissible d-flex align-items-center mb-4" role="alert">
+    <i class="bx bx-check-circle me-2 fs-5"></i>
+    <div>@TempData["Success"]</div>
+    <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
+  </div>
+}
+@if (TempData["Error"] != null)
+{
+  <div class="alert alert-danger alert-dismissible d-flex align-items-center mb-4" role="alert">
+    <i class="bx bx-error-circle me-2 fs-5"></i>
+    <div>@TempData["Error"]</div>
+    <button type="button" class="btn-close ms-auto" data-bs-dismiss="alert"></button>
+  </div>
+}
+
+<div class="row">
+
+  @* ── Left card: avatar + photo upload ── *@
+  <div class="col-md-4 mb-4">
+    <div class="card">
+      <div class="card-body text-center pt-4 pb-4">
+
+        @* Avatar with click-to-upload overlay *@
+        <div class="position-relative d-inline-block mb-3" id="avatarWrapper">
+          <img id="avatarPreview" src="@avatarSrc"
+               class="rounded-circle border"
+               style="width:100px;height:100px;object-fit:cover;cursor:pointer;"
+               alt="Profile photo"
+               title="Click to change photo"
+               onclick="document.getElementById('photoInput').click()" />
+          <span class="position-absolute bottom-0 end-0 badge rounded-circle bg-primary p-1"
+                style="cursor:pointer;" onclick="document.getElementById('photoInput').click()">
+            <i class="bx bx-camera" style="font-size:14px;"></i>
+          </span>
+        </div>
+
+        <h5 class="mb-0" id="displayName">@Model.FullName</h5>
+        <small class="text-muted">@Model.Role</small>
+        @if (!string.IsNullOrEmpty(Model.School))
+        {
+          <p class="text-muted small mt-1 mb-0"><i class="bx bx-building-house me-1"></i>@Model.School</p>
+        }
+
+        @* Hidden photo upload form *@
+        <form method="post" asp-action="UploadPhoto" asp-controller="Profile"
+              enctype="multipart/form-data" id="photoForm" class="mt-3">
+          @Html.AntiForgeryToken()
+          <input type="file" id="photoInput" name="photo"
+                 accept="image/jpeg,image/png,image/gif,image/webp"
+                 class="d-none" onchange="previewAndSubmit(this)" />
+          <button type="button" class="btn btn-outline-primary btn-sm"
+                  onclick="document.getElementById('photoInput').click()">
+            <i class="bx bx-camera me-1"></i> Change Photo
+          </button>
+        </form>
+        <small class="text-muted d-block mt-1">JPG, PNG or WEBP · max 2 MB</small>
+
+      </div>
+    </div>
+
+    <!-- EduSchool AI Badges & Achievements Showcase Card -->
+    <div class="card card-hover mt-4">
+      <div class="card-header border-bottom py-3">
+        <h5 class="mb-0 fw-bold text-primary">
+          <i class="bx bx-award me-1 text-danger"></i> EduSchool Academic Achievements
+        </h5>
+      </div>
+      <div class="card-body py-3">
+        <div class="d-flex align-items-center mb-3">
+          <div class="avatar avatar-md bg-label-primary p-2 rounded-circle me-3">
+            <i class="bx bx-award fs-3 text-primary"></i>
+          </div>
+          <div>
+            <h6 class="mb-0 fw-bold">EduSchool Scholar</h6>
+            <small class="text-muted">Completed 5+ assignments with high accuracy</small>
+          </div>
+        </div>
+        <div class="d-flex align-items-center mb-3">
+          <div class="avatar avatar-md bg-label-danger p-2 rounded-circle me-3">
+            <i class="bx bx-target-lock fs-3 text-danger"></i>
+          </div>
+          <div>
+            <h6 class="mb-0 fw-bold">Math Master</h6>
+            <small class="text-muted">Achieved 100% on Math Quizzes</small>
+          </div>
+        </div>
+        <div class="d-flex align-items-center">
+          <div class="avatar avatar-md p-2 rounded-circle me-3" style="background-color: var(--wiut-gold-light);">
+            <i class="bx bx-time-five fs-3" style="color:var(--wiut-gold);"></i>
+          </div>
+          <div>
+            <h6 class="mb-0 fw-bold">Early Bird</h6>
+            <small class="text-muted">Submitted assignment 24h before deadline</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  @* ── Right card: profile details ── *@
+  <div class="col-md-8 mb-4">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Profile Details</h5>
+        <button type="button" class="btn btn-primary btn-sm" id="editBtn" onclick="enableEdit()">
+          <i class="bx bx-edit me-1"></i> Edit Profile
+        </button>
+      </div>
+      <div class="card-body">
+
+        <form method="post" asp-action="Save" asp-controller="Profile" id="profileForm">
+          @Html.AntiForgeryToken()
+
+          <div class="row mb-3">
+            <div class="col-md-6">
+              <label class="form-label">First Name</label>
+              <input type="text" class="form-control" name="firstName"
+                     value="@Model.FirstName" id="inp_firstName" readonly />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label">Last Name</label>
+              <input type="text" class="form-control" name="lastName"
+                     value="@Model.LastName" id="inp_lastName" readonly />
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-control" name="email"
+                   value="@Model.Email" id="inp_email" readonly />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">School</label>
+            <input type="text" class="form-control" name="school"
+                   value="@Model.School" id="inp_school"
+                   placeholder="Your school or institution" readonly />
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label">Bio <span class="text-muted small">(optional)</span></label>
+            <textarea class="form-control" name="bio" id="inp_bio" rows="3"
+                      placeholder="A short description about yourself..." readonly>@Model.Bio</textarea>
+          </div>
+
+          @* Action buttons — hidden until Edit is clicked *@
+          <div id="formActions" class="d-none d-flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="bx bx-save me-1"></i> Save Changes
+            </button>
+            <button type="button" class="btn btn-outline-secondary" onclick="cancelEdit()">
+              Cancel
+            </button>
+          </div>
+        </form>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+@section Scripts {
+<script>
+  // Store original values for cancel
+  const origValues = {};
+
+  function enableEdit() {
+    const fields = ['inp_firstName','inp_lastName','inp_email','inp_school','inp_bio'];
+    fields.forEach(id => {
+      const el = document.getElementById(id);
+      origValues[id] = el.tagName === 'TEXTAREA' ? el.value : el.value;
+      el.removeAttribute('readonly');
+      el.classList.add('bg-white');
+    });
+    document.getElementById('formActions').classList.remove('d-none');
+    document.getElementById('editBtn').classList.add('d-none');
+    document.getElementById('inp_firstName').focus();
+  }
+
+  function cancelEdit() {
+    const fields = ['inp_firstName','inp_lastName','inp_email','inp_school','inp_bio'];
+    fields.forEach(id => {
+      const el = document.getElementById(id);
+      el.value = origValues[id] ?? el.value;
+      el.setAttribute('readonly', true);
+      el.classList.remove('bg-white');
+    });
+    document.getElementById('formActions').classList.add('d-none');
+    document.getElementById('editBtn').classList.remove('d-none');
+  }
+
+  function previewAndSubmit(input) {
+    if (!input.files || !input.files[0]) return;
+    const file   = input.files[0];
+    const reader = new FileReader();
+    reader.onload = e => {
+      document.getElementById('avatarPreview').src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+    // Auto-submit after short delay so preview shows first
+    setTimeout(() => document.getElementById('photoForm').submit(), 400);
+  }
+
+  // Auto-dismiss success alert after 4 s
+  document.addEventListener('DOMContentLoaded', () => {
+    const alert = document.querySelector('.alert-success');
+    if (alert) setTimeout(() => {
+      const bsAlert = bootstrap.Alert.getOrCreateInstance(alert);
+      bsAlert.close();
+    }, 4000);
+  });
+</script>
+}

@@ -1,0 +1,1256 @@
+@{
+    ViewData["Title"] = "Add Question";
+    var assignmentId = ViewBag.AssignmentId as Guid?;
+    var defaultType  = ViewBag.DefaultType  as int?;
+    var inIframe     = assignmentId.HasValue;
+}
+
+@if (!inIframe)
+{
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">
+        SmartSchool AI / <a href="/ContentLibrary">Library</a> /
+      </span> Add Question
+    </h4>
+  </div>
+</div>
+}
+
+@if (!string.IsNullOrEmpty(ViewBag.Error?.ToString()))
+{
+  <div class="alert alert-danger alert-dismissible mb-4">
+    <i class="bx bx-error-circle me-1"></i> @ViewBag.Error
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+}
+
+<form method="post" asp-action="Create" asp-controller="ContentLibrary" id="questionForm">
+  @Html.AntiForgeryToken()
+  @if (assignmentId.HasValue)
+  {
+    <input type="hidden" name="assignmentId" value="@assignmentId" />
+  }
+  <!-- hidden mirror of the rich editor content -->
+  <input type="hidden" name="title" id="titleHidden" />
+
+  <div class="row">
+
+    <!-- ── LEFT: Question + Answer ── -->
+    <div class="col-lg-8">
+
+      <div class="card mb-4">
+        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <h6 class="mb-0"><i class="bx bx-question-mark me-2 text-primary"></i>Question</h6>
+          <div class="d-flex gap-2 align-items-center">
+            <!-- Hidden real input posted with the form -->
+            <input type="hidden" name="type" id="questionType" value="0" />
+            <!-- Custom dropdown -->
+            <div class="dropdown" id="typeDropdown">
+              <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle d-flex align-items-center gap-1 px-3"
+                      id="typeDropBtn" data-bs-toggle="dropdown" aria-expanded="false" style="min-width:180px;">
+                <span id="typeDropIcon"><i class="bx bx-text"></i></span>
+                <span id="typeDropLabel">Text / Numeric</span>
+              </button>
+              <ul class="dropdown-menu shadow" style="min-width:220px;" aria-labelledby="typeDropBtn">
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt active" data-val="0"><i class="bx bx-text text-primary"></i> Text / Numeric</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="4"><i class="bx bx-check-circle text-success"></i> Single choice</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="1"><i class="bx bx-list-check text-primary"></i> Multiple choice</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="5"><i class="bx bx-line-chart text-info"></i> Graphing</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="6"><i class="bx bx-shape-triangle text-warning"></i> Geometry drawing</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="7"><i class="bx bx-right-arrow-alt text-secondary"></i> Number line</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="8"><i class="bx bx-dots-horizontal-rounded text-danger"></i> Dot plot</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="9"><i class="bx bx-grid-alt text-primary"></i> Table check</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="10"><i class="bx bx-table text-secondary"></i> Table text</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="11"><i class="bx bx-list-ol text-info"></i> Vertical operation</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="12"><i class="bx bx-compass text-danger"></i> Protractor</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="13"><i class="bx bx-grid text-success"></i> Rectangular fraction model</button></li>
+              </ul>
+            </div>
+            <select class="form-select form-select-sm" name="difficulty" style="width:auto;">
+              <option value="1">🌶 Easy</option>
+              <option value="2" selected>🌶🌶 Medium</option>
+              <option value="3">🌶🌶🌶 Hard</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-body pb-2">
+
+          <!-- ── TOOLBAR ── -->
+          <div class="qeditor-wrap mb-3">
+            <div class="qeditor-toolbar" id="editorToolbar">
+
+              <!-- Insert Equation -->
+              <button type="button" class="tb-btn" onclick="openEqModal()" title="Insert equation">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 7h16M4 12h10M4 17h7"/><text x="17" y="19" font-size="9" fill="currentColor" stroke="none">∑</text>
+                </svg>
+                Insert equation
+              </button>
+
+              <div class="tb-sep"></div>
+
+              <!-- Bold -->
+              <button type="button" class="tb-btn" id="btnBold" onclick="execCmd('bold')" title="Bold (Ctrl+B)">
+                <strong>B</strong>
+              </button>
+
+              <div class="tb-sep"></div>
+
+              <!-- Insert Table (dropdown) -->
+              <div class="dropdown">
+                <button type="button" class="tb-btn dropdown-toggle" id="tblDropBtn"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" title="Insert table">
+                  <i class="bx bx-table"></i>
+                </button>
+                <div class="dropdown-menu p-0 shadow-sm" style="min-width:0;" id="tblDropMenu">
+                  <div class="tbl-picker" id="tblPicker"></div>
+                  <div class="tbl-picker-label" id="tblPickerLabel">Insert table</div>
+                  <div class="px-2 pb-2">
+                    <button type="button" class="btn btn-sm btn-outline-danger w-100" onclick="deleteTable()">
+                      Delete table
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tb-sep"></div>
+
+              <!-- Insert Diagram -->
+              <button type="button" class="tb-btn" onclick="openDiagramModal()" title="Insert diagram">
+                <i class="bx bx-shape-square"></i> Insert diagram
+              </button>
+
+              <div class="tb-sep"></div>
+
+              <!-- Insert Image -->
+              <button type="button" class="tb-btn" onclick="document.getElementById('imgUpload').click()" title="Insert image">
+                <i class="bx bx-image-add"></i> Insert image
+              </button>
+              <input type="file" id="imgUpload" accept="image/*" style="display:none" onchange="insertImage(this)" />
+
+              <div class="tb-sep"></div>
+
+              <!-- Undo / Redo -->
+              <button type="button" class="tb-btn" onclick="execCmd('undo')" title="Undo (Ctrl+Z)">
+                <i class="bx bx-undo"></i>
+              </button>
+              <button type="button" class="tb-btn" onclick="execCmd('redo')" title="Redo (Ctrl+Y)">
+                <i class="bx bx-redo"></i>
+              </button>
+
+            </div>
+
+            <!-- ── EDITOR BODY ── -->
+            <div id="questionEditor" class="qeditor-body" contenteditable="true"
+                 data-placeholder="Type your question here… use the toolbar to insert equations, tables, or images.">
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ═══ ANSWER TYPE PANELS ═══ -->
+
+      <!-- Single choice / Multiple choice options (types 4 & 1) -->
+      <div class="card mb-4 answer-panel" id="panelChoices" style="display:none;">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h6 class="mb-0" id="choicesCardTitle"><i class="bx bx-list-check me-2 text-primary"></i>Answer Choices</h6>
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="addOption()">
+            <i class="bx bx-plus me-1"></i> Add Option
+          </button>
+        </div>
+        <div class="card-body">
+          <div id="optionsList">
+            <div class="input-group mb-2">
+              <span class="input-group-text fw-bold">A</span>
+              <input type="text" class="form-control" name="options" placeholder="Option A" />
+              <button type="button" class="btn btn-outline-danger" onclick="removeOption(this)"><i class="bx bx-x"></i></button>
+            </div>
+            <div class="input-group mb-2">
+              <span class="input-group-text fw-bold">B</span>
+              <input type="text" class="form-control" name="options" placeholder="Option B" />
+              <button type="button" class="btn btn-outline-danger" onclick="removeOption(this)"><i class="bx bx-x"></i></button>
+            </div>
+          </div>
+          <small class="text-muted">Min 2 options. Answer Key = A, B, C…</small>
+        </div>
+      </div>
+
+      <!-- Number line (type 7) -->
+      <!-- ═══ NUMBER LINE PANEL (type 7) ═══ -->
+      <div class="card mb-4 answer-panel" id="panelNumberLine" style="display:none;">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bx bx-right-arrow-alt me-2 text-secondary"></i>Customise number line</h6>
+        </div>
+
+        <!-- Settings bar -->
+        <div class="card-body border-bottom pb-3">
+          <div class="d-flex align-items-end gap-3 flex-wrap">
+            <div>
+              <label class="form-label fw-semibold small mb-1">Range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="nl-min"  value="-10" style="max-width:80px;" />
+                <input type="number" class="form-control form-control-sm" id="nl-max"  value="10"  style="max-width:80px;" />
+              </div>
+            </div>
+            <div>
+              <label class="form-label fw-semibold small mb-1">Step</label>
+              <input type="number" class="form-control form-control-sm" id="nl-step" value="2" min="0.01" step="0.01" style="max-width:80px;" />
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="applyNlSettings()">Apply changes</button>
+          </div>
+        </div>
+
+        <!-- Canvas + sidebar -->
+        <div class="card-body p-0">
+          <div class="d-flex" style="min-height:180px;">
+            <!-- Canvas -->
+            <div class="flex-grow-1 position-relative p-3" style="min-width:0;">
+              <canvas id="nlCanvas" style="display:block;width:100%;touch-action:none;"></canvas>
+            </div>
+            <!-- Sidebar tools -->
+            <div class="border-start px-3 py-3 d-flex flex-column gap-2" style="min-width:130px;">
+              <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary nl-mode-btn active" data-mode="select" title="Select / Move" style="width:42px;height:38px;">
+                  <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 2l5 12 2-4 4-2z" fill="currentColor"/></svg>
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger" title="Delete selected" onclick="nlDeleteSelected()" style="width:42px;height:38px;">
+                  <i class="bx bx-trash"></i>
+                </button>
+              </div>
+              <button type="button" class="btn btn-sm btn-outline-secondary" title="Undo" onclick="nlUndo()" style="width:42px;height:38px;">
+                <i class="bx bx-undo"></i>
+              </button>
+              <hr class="my-1" />
+              <p class="small fw-semibold text-primary mb-1">Add elements</p>
+              <button type="button" class="btn btn-sm btn-outline-secondary nl-mode-btn" data-mode="point">
+                <i class="bx bx-radio-circle me-1"></i>Point
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary nl-mode-btn" data-mode="segment">
+                <svg width="14" height="10" viewBox="0 0 14 10"><circle cx="1" cy="5" r="2" fill="currentColor"/><line x1="3" y1="5" x2="11" y2="5" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="5" r="2" fill="currentColor"/></svg>
+                <span class="ms-1">Segment</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Available tools for students -->
+        <div class="card-footer">
+          <p class="fw-semibold small mb-2">Available graphing tools:</p>
+          <div class="d-flex flex-wrap gap-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="nlTools" value="point" id="nlToolPoint" />
+              <label class="form-check-label small" for="nlToolPoint">Point</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="nlTools" value="segment" id="nlToolSegment" />
+              <label class="form-check-label small" for="nlToolSegment">Segment</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hidden serialised state -->
+        <input type="hidden" name="nlState" id="nlStateHidden" />
+      </div>
+
+      <!-- Table (types 9 & 10) -->
+      <div class="card mb-4 answer-panel" id="panelTable" style="display:none;">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h6 class="mb-0" id="tableCardTitle"><i class="bx bx-table me-2 text-secondary"></i>Table</h6>
+        </div>
+        <div class="card-body p-0" style="overflow-x:auto;">
+          <div class="sst-wrap">
+            <!-- grid rendered by JS into #sstGrid -->
+            <div id="sstGrid" class="sst-grid"></div>
+            <!-- add-row bar -->
+            <div class="sst-add-row" onclick="sstAddRow()">
+              <span class="sst-add-row-btn"><i class="bx bx-plus"></i></span>
+            </div>
+          </div>
+        </div>
+        <div class="card-footer"><small class="text-muted">Fill correct values in the cells — these become the answer key.</small></div>
+      </div>
+
+      <!-- Vertical operation (type 11) -->
+      <div class="card mb-4 answer-panel" id="panelVertical" style="display:none;">
+        <div class="card-header"><h6 class="mb-0"><i class="bx bx-list-ol me-2 text-info"></i>Vertical Operation</h6></div>
+        <div class="card-body">
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Operation</label>
+              <select class="form-select" name="vertOp">
+                <option value="+">Addition (+)</option>
+                <option value="-">Subtraction (−)</option>
+                <option value="×">Multiplication (×)</option>
+                <option value="÷">Division (÷)</option>
+              </select>
+            </div>
+          </div>
+          <div class="d-flex flex-column align-items-start gap-2" id="vertOperandList">
+            <div class="input-group" style="max-width:220px;">
+              <span class="input-group-text bg-transparent border-end-0"> </span>
+              <input type="text" class="form-control text-end font-monospace" name="vertOperands" placeholder="e.g. 348" />
+            </div>
+            <div class="input-group" style="max-width:220px;">
+              <span class="input-group-text bg-transparent border-end-0" id="vertOpSign">+</span>
+              <input type="text" class="form-control text-end font-monospace" name="vertOperands" placeholder="e.g. 127" />
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="addVertOperand()"><i class="bx bx-plus me-1"></i>Add row</button>
+        </div>
+      </div>
+
+      <!-- Fraction model (type 13) -->
+      <div class="card mb-4 answer-panel" id="panelFraction" style="display:none;">
+        <div class="card-header"><h6 class="mb-0"><i class="bx bx-grid me-2 text-success"></i>Rectangular Fraction Model</h6></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Rows</label>
+              <input type="number" class="form-control" name="fracRows" value="2" min="1" max="10" oninput="renderFractionPreview()" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Columns</label>
+              <input type="number" class="form-control" name="fracCols" value="4" min="1" max="20" oninput="renderFractionPreview()" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Shaded cells</label>
+              <input type="number" class="form-control" name="fracShaded" value="3" min="0" oninput="renderFractionPreview()" />
+            </div>
+          </div>
+          <div class="mt-3" id="fracPreview"></div>
+        </div>
+      </div>
+
+      <!-- Open text hint (type 2) -->
+      <div class="card mb-4 answer-panel" id="panelOpenText" style="display:none;">
+        <div class="card-header"><h6 class="mb-0"><i class="bx bx-edit me-2 text-muted"></i>Open Text</h6></div>
+        <div class="card-body">
+          <label class="form-label fw-semibold">Rubric / Grading notes <span class="text-muted fw-normal">(optional)</span></label>
+          <textarea class="form-control" name="rubric" rows="3" placeholder="Key points to award marks for…"></textarea>
+        </div>
+      </div>
+
+      <!-- ═══ GRAPHING PANEL (type 5) ═══ -->
+      <div class="card mb-4 answer-panel" id="panelGraphing" style="display:none;">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bx bx-line-chart me-2 text-info"></i>Customise coordinate plane</h6>
+        </div>
+        <div class="card-body border-bottom pb-3">
+          <div class="row g-3 align-items-end">
+            <div class="col-md-3">
+              <label class="form-label fw-semibold small">Plane type</label>
+              <select class="form-select form-select-sm" id="gph-planeType" onchange="applyGraphSettings()">
+                <option value="all">All Quadrants</option>
+                <option value="q1">First Quadrant</option>
+                <option value="pos-x">Positive X only</option>
+              </select>
+            </div>
+            <div class="col-md-5">
+              <label class="form-label fw-semibold small">X-axis</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="gph-xMin" value="-10" style="max-width:80px;" />
+                <input type="number" class="form-control form-control-sm" id="gph-xMax" value="10"  style="max-width:80px;" />
+              </div>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold small">Y-axis</label>
+              <div class="d-flex gap-2 align-items-center">
+                <input type="number" class="form-control form-control-sm" id="gph-yMin" value="-10" style="max-width:80px;" />
+                <input type="number" class="form-control form-control-sm" id="gph-yMax" value="10"  style="max-width:80px;" />
+                <button type="button" class="btn btn-sm btn-secondary text-nowrap" onclick="applyGraphSettings()">Apply changes</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Canvas + sidebar -->
+        <div class="card-body p-0">
+          <div class="d-flex" style="min-height:480px;">
+            <!-- Canvas -->
+            <div class="flex-grow-1 position-relative" style="min-width:0;">
+              <canvas id="gphCanvas" style="display:block;width:100%;touch-action:none;"></canvas>
+            </div>
+            <!-- Sidebar tools -->
+            <div class="border-start px-3 py-3 d-flex flex-column gap-2" style="min-width:130px;">
+              <!-- Mode buttons -->
+              <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn active" data-mode="select" title="Select / Move">
+                <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 2l5 12 2-4 4-2z" fill="currentColor"/></svg>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-danger" id="gphDeleteBtn" title="Delete selected" onclick="gphDeleteSelected()">
+                <i class="bx bx-trash"></i>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" title="Undo" onclick="gphUndo()">
+                <i class="bx bx-undo"></i>
+              </button>
+              <hr class="my-1" />
+              <p class="small fw-semibold text-muted mb-1">Add elements</p>
+              <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn" data-mode="point">
+                <i class="bx bx-radio-circle me-1"></i>Point
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn" data-mode="segment">
+                <svg width="14" height="10" viewBox="0 0 14 10"><circle cx="1" cy="5" r="2" fill="currentColor"/><line x1="3" y1="5" x2="11" y2="5" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="5" r="2" fill="currentColor"/></svg>
+                <span class="ms-1">Segment</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn" data-mode="linear">
+                <svg width="14" height="10" viewBox="0 0 14 10"><line x1="0" y1="8" x2="14" y2="2" stroke="currentColor" stroke-width="1.5"/></svg>
+                <span class="ms-1">Linear</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn" data-mode="quadratic">
+                <svg width="14" height="12" viewBox="0 0 14 12"><path d="M1 11 Q7 0 13 11" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+                <span class="ms-1">Quadratic</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn" data-mode="ray">
+                <svg width="14" height="10" viewBox="0 0 14 10"><circle cx="1" cy="5" r="2" fill="currentColor"/><line x1="3" y1="5" x2="14" y2="5" stroke="currentColor" stroke-width="1.5"/><polygon points="12,2 14,5 12,8" fill="currentColor"/></svg>
+                <span class="ms-1">Ray</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn" data-mode="circle">
+                <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" fill="none"/><circle cx="7" cy="7" r="2" fill="currentColor"/></svg>
+                <span class="ms-1">Circle</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Available tools for students -->
+        <div class="card-footer">
+          <p class="fw-semibold small mb-2">Available graphing tools:</p>
+          <div class="d-flex flex-wrap gap-3">
+            @foreach (var tool in new[]{ "Point","Segment","Linear","Quadratic","Ray","Circle" })
+            {
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="gphTools" value="@tool.ToLower()" id="gphTool@tool" />
+                <label class="form-check-label small" for="gphTool@tool">@tool</label>
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- Hidden serialised state -->
+        <input type="hidden" name="graphState" id="graphStateHidden" />
+      </div>
+
+      <!-- ═══ GEOMETRY DRAWING PANEL (type 6) ═══ -->
+      <div class="card mb-4 answer-panel" id="panelGeometry" style="display:none;">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bx bx-shape-triangle me-2 text-warning"></i>Customise drawing plane</h6>
+        </div>
+        <div class="card-body border-bottom pb-3">
+          <div class="d-flex align-items-end gap-3">
+            <div>
+              <label class="form-label fw-semibold small">Grid size</label>
+              <input type="number" class="form-control form-control-sm" id="geo-gridSize" value="20" min="5" max="100" style="max-width:90px;" />
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="applyGeoSettings()">Apply changes</button>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div class="d-flex" style="min-height:480px;">
+            <div class="flex-grow-1 position-relative" style="min-width:0;">
+              <canvas id="geoCanvas" style="display:block;width:100%;touch-action:none;"></canvas>
+            </div>
+            <div class="border-start px-3 py-3 d-flex flex-column gap-2" style="min-width:130px;">
+              <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn active" data-mode="select" title="Select / Move">
+                <svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 2l5 12 2-4 4-2z" fill="currentColor"/></svg>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-danger" title="Delete selected" onclick="geoDeleteSelected()">
+                <i class="bx bx-trash"></i>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary" title="Undo" onclick="geoUndo()">
+                <i class="bx bx-undo"></i>
+              </button>
+              <hr class="my-1" />
+              <p class="small fw-semibold text-muted mb-1">Add elements</p>
+              <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn" data-mode="point">
+                <i class="bx bx-radio-circle me-1"></i>Point
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn" data-mode="segment">
+                <svg width="14" height="10" viewBox="0 0 14 10"><circle cx="1" cy="5" r="2" fill="currentColor"/><line x1="3" y1="5" x2="11" y2="5" stroke="currentColor" stroke-width="1.5"/><circle cx="13" cy="5" r="2" fill="currentColor"/></svg>
+                <span class="ms-1">Segment</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn" data-mode="line">
+                <svg width="14" height="10" viewBox="0 0 14 10"><line x1="0" y1="8" x2="14" y2="2" stroke="currentColor" stroke-width="1.5"/></svg>
+                <span class="ms-1">Line</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn" data-mode="ray">
+                <svg width="14" height="10" viewBox="0 0 14 10"><circle cx="1" cy="5" r="2" fill="currentColor"/><line x1="3" y1="5" x2="11" y2="5" stroke="currentColor" stroke-width="1.5"/><polygon points="11,2 14,5 11,8" fill="currentColor"/></svg>
+                <span class="ms-1">Ray</span>
+              </button>
+              <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn" data-mode="circle">
+                <svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.5" fill="none"/><circle cx="7" cy="7" r="2" fill="currentColor"/></svg>
+                <span class="ms-1">Circle</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="card-footer">
+          <p class="fw-semibold small mb-2">Available drawing tools:</p>
+          <div class="d-flex flex-wrap gap-3">
+            @foreach (var tool in new[]{ "Point","Segment","Line","Ray","Circle" })
+            {
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="geoTools" value="@tool.ToLower()" id="geoTool@tool" />
+                <label class="form-check-label small" for="geoTool@tool">@tool</label>
+              </div>
+            }
+          </div>
+        </div>
+        <input type="hidden" name="geoState" id="geoStateHidden" />
+      </div>
+
+      <!-- ═══ DOT PLOT PANEL (type 8) ═══ -->
+      <div class="card mb-4 answer-panel" id="panelDotPlot" style="display:none;">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bx bx-scatter-chart me-2 text-danger"></i>Customise dot plot</h6>
+        </div>
+
+        <!-- Settings bar -->
+        <div class="card-body border-bottom pb-3">
+          <div class="d-flex align-items-end gap-3 flex-wrap">
+            <div>
+              <label class="form-label fw-semibold small mb-1">Column size</label>
+              <input type="number" class="form-control form-control-sm" id="dp-colSize" value="10" min="1" max="30" style="max-width:80px;" />
+            </div>
+            <div>
+              <label class="form-label fw-semibold small mb-1">Label step</label>
+              <input type="number" class="form-control form-control-sm" id="dp-labelStep" value="1" min="1" style="max-width:80px;" />
+            </div>
+            <div>
+              <label class="form-label fw-semibold small mb-1">Label</label>
+              <input type="text" class="form-control form-control-sm" id="dp-label" placeholder="" style="max-width:160px;" />
+            </div>
+            <div>
+              <label class="form-label fw-semibold small mb-1">Item type</label>
+              <select class="form-select form-select-sm" id="dp-itemType" style="max-width:110px;" onchange="dpApplySettings()">
+                <option value="cross" selected>Cross</option>
+                <option value="dot">Dot</option>
+              </select>
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="form-label fw-semibold small mb-1">Labeled ticks <span class="text-muted fw-normal">(semicolon-separated)</span></label>
+            <div class="d-flex gap-2 align-items-center">
+              <input type="text" class="form-control form-control-sm" id="dp-ticks" value="0; 1; 2; 3; 4" style="max-width:360px;" />
+              <button type="button" class="btn btn-sm btn-secondary" onclick="dpApplySettings()">Apply changes</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Canvas -->
+        <div class="card-body p-3">
+          <canvas id="dpCanvas" style="display:block;max-width:100%;touch-action:none;"></canvas>
+        </div>
+
+        <!-- Hidden serialised state -->
+        <input type="hidden" name="dpState" id="dpStateHidden" />
+      </div>
+
+      <!-- Protractor (type 12) -->
+      <div class="card mb-4 answer-panel" id="panelProtractor" style="display:none;">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bx bx-compass me-2 text-danger"></i>Customise protractor</h6>
+        </div>
+        <div class="card-body">
+          <!-- Settings row -->
+          <div class="d-flex flex-wrap gap-4 mb-3">
+            <div>
+              <label class="form-label mb-1 small fw-semibold">Arrow precision</label>
+              <input type="number" id="protPrecision" class="form-control form-control-sm" style="width:80px;" value="5" min="1" max="90" />
+            </div>
+            <div>
+              <label class="form-label mb-1 small fw-semibold">Angle direction</label>
+              <select id="protDirection" class="form-select form-select-sm" style="width:140px;">
+                <option value="cw">Clockwise</option>
+                <option value="ccw">Counter-clockwise</option>
+              </select>
+            </div>
+          </div>
+          <!-- Canvas -->
+          <div class="d-flex justify-content-center" style="overflow-x:auto; padding: 0 50px;">
+            <canvas id="protCanvas" style="max-width:100%; display:block;"></canvas>
+          </div>
+          <!-- Hidden state -->
+          <input type="hidden" name="protState" id="protStateHidden" />
+        </div>
+      </div>
+
+      <!-- Answer Key (always visible) -->
+      <div class="card mb-4" id="answerKeyCard">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bx bx-check-circle me-2 text-success"></i>Answer Key</h6>
+        </div>
+        <div class="card-body">
+          <div class="mb-3" id="answerKeyInputWrap">
+            <label class="form-label fw-semibold">
+              Correct Answer <span class="text-danger">*</span>
+            </label>
+            <input type="text" class="form-control" name="answerKey"
+                   placeholder="e.g. 9   or   A   or   42.5" required />
+          </div>
+          <div>
+            <label class="form-label fw-semibold">
+              Explanation <span class="text-muted fw-normal">(optional)</span>
+            </label>
+            <textarea class="form-control" name="explanation" rows="2"
+              placeholder="Step-by-step explanation shown to students after submission…"></textarea>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── RIGHT: Metadata ── -->
+    <div class="col-lg-4">
+
+      <div class="card mb-4">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bx bx-category me-2 text-primary"></i>Category</h6>
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Subject</label>
+            <input type="text" class="form-control" name="subject"
+                   placeholder="e.g. Mathematics" list="subjectList" />
+            <datalist id="subjectList">
+              <option value="Mathematics"></option>
+              <option value="Physics"></option>
+              <option value="Chemistry"></option>
+              <option value="Biology"></option>
+              <option value="History"></option>
+              <option value="Geography"></option>
+              <option value="English"></option>
+            </datalist>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Grade Level</label>
+            <select class="form-select" name="gradeLevel">
+              <option value="">— Not specified —</option>
+              @for (int g = 1; g <= 12; g++)
+              {
+                <option value="@g">Grade @g</option>
+              }
+            </select>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox"
+                   name="isPublic" id="isPublic" value="true" />
+            <label class="form-check-label small" for="isPublic">
+              Make visible to other teachers
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-grid gap-2">
+        <button type="submit" class="btn btn-primary btn-lg">
+          <i class="bx bx-save me-1"></i> Save Question
+        </button>
+        <a href="/ContentLibrary" class="btn btn-outline-secondary">Cancel</a>
+      </div>
+
+    </div>
+  </div>
+</form>
+
+<!-- ═══════════════════════════════════════════
+     INSERT EQUATION MODAL
+═══════════════════════════════════════════════ -->
+<div class="modal fade" id="eqModal" tabindex="-1" aria-labelledby="eqModalLabel">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-3">
+        <h6 class="modal-title fw-semibold" id="eqModalLabel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" class="me-2"><path d="M4 7h16M4 12h10M4 17h7"/>
+          </svg>Insert equation
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <!-- LaTeX input -->
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">LaTeX</label>
+          <input type="text" id="eqInput" class="form-control font-monospace"
+                 placeholder="e.g.  1.28 \times 10^3"
+                 oninput="updateEqPreview()" />
+        </div>
+        <!-- Live preview -->
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Preview</label>
+          <div class="eq-preview" id="eqPreview"></div>
+        </div>
+        <!-- Symbol keyboard – two tabs -->
+        <ul class="nav nav-tabs nav-tabs-bordered mb-3" id="eqTabs">
+          <li class="nav-item">
+            <button class="nav-link active small px-3 py-2" data-bs-toggle="tab" data-bs-target="#eqTabMain">Symbols</button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link small px-3 py-2" data-bs-toggle="tab" data-bs-target="#eqTabFn">Functions</button>
+          </li>
+        </ul>
+        <div class="tab-content">
+          <div class="tab-pane fade show active" id="eqTabMain">
+            <div class="eq-keys" id="eqKeysMain"></div>
+          </div>
+          <div class="tab-pane fade" id="eqTabFn">
+            <div class="eq-keys" id="eqKeysFn"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="insertEquation()">
+          <i class="bx bx-check me-1"></i> Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     INSERT DIAGRAM MODAL
+═══════════════════════════════════════════════ -->
+<div class="modal fade" id="diagramModal" tabindex="-1" aria-labelledby="diagramModalLabel">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-3">
+        <h6 class="modal-title fw-semibold" id="diagramModalLabel">
+          <i class="bx bx-line-chart me-2 text-primary"></i>Insert diagram
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Diagram type selector -->
+        <p class="text-primary fw-semibold small mb-2">Select diagram type</p>
+        <div class="d-flex flex-wrap gap-2 mb-4" id="dgTypeRow">
+          <button type="button" class="btn btn-sm btn-outline-primary dg-type-btn active" data-type="scatter">Scatter plot</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary dg-type-btn" data-type="bar">Bar plot</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary dg-type-btn" data-type="dot">Dot plot</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary dg-type-btn" data-type="pdf">Probability density function</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary dg-type-btn" data-type="box">Box plot</button>
+        </div>
+
+        <!-- ── SCATTER ── -->
+        <div class="dg-panel" id="dgPanel-scatter">
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label small">Number of samples</label>
+              <input type="number" class="form-control form-control-sm" id="sc-samples" value="60" min="5" max="500" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Number of outliers <span class="text-muted">(optional)</span></label>
+              <input type="number" class="form-control form-control-sm" id="sc-outliers" placeholder="" min="0" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small">Line of best fit</label>
+            <div class="d-flex align-items-center gap-2">
+              <span class="small text-nowrap">y =</span>
+              <input type="number" class="form-control form-control-sm" id="sc-slope" value="1" placeholder="slope" style="max-width:90px" />
+              <span class="small text-nowrap">x +</span>
+              <input type="number" class="form-control form-control-sm" id="sc-intercept" value="0" placeholder="intercept" style="max-width:90px" />
+              <span class="small text-nowrap ms-2">Correlation (r):</span>
+              <input type="number" class="form-control form-control-sm" id="sc-r" value="0.8" min="-1" max="1" step="0.1" style="max-width:90px" />
+            </div>
+          </div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis data range <span class="text-muted">(optional)</span></label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="sc-xmin" placeholder="min" />
+                <input type="number" class="form-control form-control-sm" id="sc-xmax" placeholder="max" />
+              </div>
+            </div>
+          </div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sc-bestfit" />
+                <label class="form-check-label small" for="sc-bestfit">Show line of best fit</label>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sc-labelout" checked />
+                <label class="form-check-label small" for="sc-labelout">Label outliers</label>
+              </div>
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure plane</p>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span> <span class="text-muted float-end">0/30</span></label>
+              <input type="text" class="form-control form-control-sm" id="sc-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="sc-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="sc-axmax" value="10" />
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis label <span class="text-muted">(optional)</span> <span class="text-muted float-end">0/30</span></label>
+              <input type="text" class="form-control form-control-sm" id="sc-ylabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis range <span class="text-muted">(optional)</span></label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="sc-aymin" placeholder="min" />
+                <input type="number" class="form-control form-control-sm" id="sc-aymax" placeholder="max" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── BAR ── -->
+        <div class="dg-panel d-none" id="dgPanel-bar">
+          <p class="text-primary fw-semibold small mb-2">Select data distribution</p>
+          <div class="d-flex flex-wrap gap-2 mb-4" id="barDistRow">
+            <button type="button" class="btn btn-sm btn-outline-primary dg-dist-btn active" data-dist="normal">Normal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="skewed">Skewed</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="bimodal">Bimodal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="uniform">Uniform</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="list">List of data points</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="exponential">Exponential</button>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label small">Number of samples</label>
+              <input type="number" class="form-control form-control-sm" id="bar-samples" value="60" min="5" max="500" />
+            </div>
+          </div>
+          <!-- Normal distribution fields -->
+          <div class="row g-3 mb-3" id="bar-normal-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="bar-mean" placeholder="" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="bar-std" placeholder="" />
+            </div>
+          </div>
+          <!-- Skewed distribution fields -->
+          <div class="row g-3 mb-3 d-none" id="bar-skewed-fields">
+            <div class="col-md-4">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="bar-skew-mean" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="bar-skew-std" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Skewness</label>
+              <input type="number" class="form-control form-control-sm" id="bar-skew-skewness" placeholder="" />
+            </div>
+          </div>
+          <!-- Bimodal distribution fields -->
+          <div class="d-none" id="bar-bimodal-fields">
+            <div class="row g-3 mb-2">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 1</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-mean1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 1</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-std1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 1</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-w1" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 2</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-mean2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 2</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-std2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 2</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-w2" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+          </div>
+          <!-- Exponential distribution fields -->
+          <div class="row g-3 mb-3 d-none" id="bar-exp-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Lambda</label>
+              <input type="number" class="form-control form-control-sm" id="bar-lambda" placeholder="" min="0.01" step="0.01" />
+            </div>
+          </div>
+          <!-- List of data points fields -->
+          <div class="row g-3 mb-3 d-none" id="bar-list-fields">
+            <div class="col-12">
+              <label class="form-label small">Data points <span class="text-muted">(comma-separated)</span></label>
+              <input type="text" class="form-control form-control-sm" id="bar-list" placeholder="e.g. 1,2,3,4,5" />
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure bar plot</p>
+          <div class="row g-3 mb-3">
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="bar-continuous" checked />
+                <label class="form-check-label small" for="bar-continuous">Continuous data</label>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Bin size</label>
+              <input type="number" class="form-control form-control-sm" id="bar-binsize" placeholder="" min="1" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">First bin start <span class="text-muted">(optional)</span></label>
+              <input type="number" class="form-control form-control-sm" id="bar-binstart" placeholder="" />
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="bar-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="bar-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="bar-axmax" value="10" />
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="bar-ylabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis range <span class="text-muted">(optional)</span></label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="bar-aymin" placeholder="min" />
+                <input type="number" class="form-control form-control-sm" id="bar-aymax" placeholder="max" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── DOT ── -->
+        <div class="dg-panel d-none" id="dgPanel-dot">
+          <p class="text-primary fw-semibold small mb-2">Select data distribution</p>
+          <div class="d-flex flex-wrap gap-2 mb-4" id="dotDistRow">
+            <button type="button" class="btn btn-sm btn-outline-primary dg-dist-btn active" data-dist="normal">Normal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="skewed">Skewed</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="bimodal">Bimodal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="uniform">Uniform</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="list">List of data points</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="exponential">Exponential</button>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <!-- Samples row: hidden for list -->
+          <div class="row g-3 mb-3" id="dot-samples-row">
+            <div class="col-md-6">
+              <label class="form-label small">Number of samples</label>
+              <input type="number" class="form-control form-control-sm" id="dot-samples" value="60" min="5" max="500" />
+            </div>
+          </div>
+          <!-- Normal -->
+          <div class="row g-3 mb-3" id="dot-normal-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="dot-mean" placeholder="" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="dot-std" placeholder="" />
+            </div>
+          </div>
+          <!-- Skewed -->
+          <div class="row g-3 mb-3 d-none" id="dot-skewed-fields">
+            <div class="col-md-4">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="dot-skew-mean" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="dot-skew-std" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Skewness</label>
+              <input type="number" class="form-control form-control-sm" id="dot-skew-skewness" placeholder="" />
+            </div>
+          </div>
+          <!-- Bimodal -->
+          <div class="d-none" id="dot-bimodal-fields">
+            <div class="row g-3 mb-2">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 1</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-mean1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 1</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-std1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 1</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-w1" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 2</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-mean2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 2</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-std2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 2</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-w2" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+          </div>
+          <!-- Exponential -->
+          <div class="row g-3 mb-3 d-none" id="dot-exp-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Lambda</label>
+              <input type="number" class="form-control form-control-sm" id="dot-lambda" placeholder="" min="0.01" step="0.01" />
+            </div>
+          </div>
+          <!-- List -->
+          <div class="row g-3 mb-3 d-none" id="dot-list-fields">
+            <div class="col-12">
+              <label class="form-label small">Data points <span class="text-muted">(comma-separated)</span></label>
+              <input type="text" class="form-control form-control-sm" id="dot-list" placeholder="e.g. 1,2,3,4,5" />
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure dot plot</p>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label small">Step size</label>
+              <input type="number" class="form-control form-control-sm" id="dot-step" placeholder="" min="0.01" step="0.01" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">First step start <span class="text-muted">(optional)</span></label>
+              <input type="number" class="form-control form-control-sm" id="dot-start" placeholder="" />
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="dot-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="dot-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="dot-axmax" value="10" />
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="dot-ylabel" maxlength="30" />
+            </div>
+          </div>
+        </div>
+
+        <!-- ── PDF ── -->
+        <div class="dg-panel d-none" id="dgPanel-pdf">
+          <p class="text-primary fw-semibold small mb-2">Select data distribution</p>
+          <div class="d-flex flex-wrap gap-2 mb-4" id="pdfDistRow">
+            <button type="button" class="btn btn-sm btn-outline-primary dg-dist-btn active" data-dist="normal">Normal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="skewed">Skewed</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="bimodal">Bimodal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="uniform">Uniform</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="list">List of data points</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="exponential">Exponential</button>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <!-- Normal -->
+          <div class="row g-3 mb-3" id="pdf-normal-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-mean" placeholder="" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-std" placeholder="" />
+            </div>
+          </div>
+          <!-- Skewed -->
+          <div class="row g-3 mb-3 d-none" id="pdf-skewed-fields">
+            <div class="col-md-4">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-skew-mean" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-skew-std" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Skewness</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-skew-skewness" placeholder="" />
+            </div>
+          </div>
+          <!-- Bimodal -->
+          <div class="d-none" id="pdf-bimodal-fields">
+            <div class="row g-3 mb-2">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 1</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-mean1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 1</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-std1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 1</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-w1" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 2</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-mean2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 2</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-std2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 2</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-w2" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+          </div>
+          <!-- Exponential -->
+          <div class="row g-3 mb-3 d-none" id="pdf-exp-fields">
+            <div class="col-12">
+              <label class="form-label small">Lambda</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-lambda" placeholder="" min="0.01" step="0.01" />
+            </div>
+          </div>
+          <!-- List -->
+          <div class="row g-3 mb-3 d-none" id="pdf-list-fields">
+            <div class="col-12">
+              <label class="form-label small">Data points <span class="text-muted">(comma-separated)</span></label>
+              <input type="text" class="form-control form-control-sm" id="pdf-list" placeholder="e.g. 1,2,3,4,5" />
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure plane</p>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="pdf-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="pdf-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="pdf-axmax" value="10" />
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="pdf-ylabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis range <span class="text-muted">(optional)</span></label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="pdf-aymin" placeholder="min" />
+                <input type="number" class="form-control form-control-sm" id="pdf-aymax" placeholder="max" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── BOX ── -->
+        <div class="dg-panel d-none" id="dgPanel-box">
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label class="form-label small">Min</label>
+              <input type="number" class="form-control form-control-sm" id="box-min" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Q1</label>
+              <input type="number" class="form-control form-control-sm" id="box-q1" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Median</label>
+              <input type="number" class="form-control form-control-sm" id="box-median" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Average <span class="text-muted">(optional)</span></label>
+              <input type="number" class="form-control form-control-sm" id="box-avg" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Q3</label>
+              <input type="number" class="form-control form-control-sm" id="box-q3" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Max</label>
+              <input type="number" class="form-control form-control-sm" id="box-max" placeholder="" />
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure plane</p>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="box-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="box-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="box-axmax" value="10" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hidden canvas used for chart rendering -->
+        <canvas id="dgCanvas" style="display:none;"></canvas>
+
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="generateDiagram()">
+          <i class="bx bx-check me-1"></i> Generate
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+@section Scripts {
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script src="~/js/content-library-create.js" asp-append-version="true"></script>
+@if (defaultType.HasValue)
+{
+<script>
+// Auto-select the question type when opened from assignment editor
+document.addEventListener('DOMContentLoaded', function() {
+  var btn = document.querySelector('.type-opt[data-val="@defaultType"]');
+  if (btn) btn.click();
+});
+</script>
+}
+@if (inIframe)
+{
+<style>
+  /* In iframe mode: remove outer page padding/chrome */
+  body { background: #fff !important; }
+  .content-wrapper { padding: 0 !important; }
+  .content-footer, #layout-menu, #layout-navbar, .layout-overlay { display:none !important; }
+  .layout-page { margin: 0 !important; padding: 0 !important; }
+  .container-xxl { max-width: 100% !important; padding: 16px !important; }
+</style>
+}
+}

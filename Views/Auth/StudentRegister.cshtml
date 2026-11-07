@@ -1,0 +1,93 @@
+@{
+    ViewData["Title"] = "Student Sign Up";
+    Layout = "_AuthLayout";
+}
+
+<div class="container-xxl">
+  <div class="authentication-wrapper authentication-basic container-p-y">
+    <div class="authentication-inner">
+      <div class="card">
+        <div class="card-body">
+
+          <!-- Logo -->
+          <div class="app-brand justify-content-center mb-4">
+            <a href="/" class="app-brand-link gap-2 align-items-center">
+              <span class="eduai-logo-badge" style="width: 44px; height: 44px;">
+                <i class="bx bxs-graduation eduai-icon-cap" style="font-size: 26px;"></i>
+                <i class="bx bx-sparkles eduai-icon-spark" style="font-size: 15px;"></i>
+              </span>
+              <span class="app-brand-text demo text-body fw-bolder ms-1" style="font-size: 1.5rem; letter-spacing: -0.3px;">
+                EduSchool<span style="color:var(--wiut-crimson);">AI</span>
+              </span>
+            </a>
+          </div>
+
+          <h4 class="mb-2">Join Your Class 🎒</h4>
+          <p class="mb-4 text-muted">Enter your invite code from your teacher to register</p>
+
+          @if (!string.IsNullOrEmpty(ViewBag.Error?.ToString()))
+          {
+            <div class="alert alert-danger">
+              <i class="bx bx-error-circle me-1"></i> @ViewBag.Error
+            </div>
+          }
+
+          <form method="post" asp-action="StudentRegister" asp-controller="Auth">
+            @Html.AntiForgeryToken()
+
+            <div class="mb-3">
+              <label class="form-label">Invite Code</label>
+              <input type="text" name="inviteCode" class="form-control text-uppercase"
+                     placeholder="e.g. AB3XY7" maxlength="6" required autofocus />
+              <div class="form-text">6-character code provided by your teacher</div>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Full Name</label>
+              <input type="text" name="fullName" class="form-control"
+                     placeholder="Your full name" required />
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Email</label>
+              <input type="email" name="email" class="form-control"
+                     placeholder="your@@email.com" required />
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label">Password</label>
+              <div class="input-group input-group-merge">
+                <input type="password" name="password" class="form-control"
+                       placeholder="Min 8 characters" required />
+                <span class="input-group-text cursor-pointer">
+                  <i class="bx bx-hide"></i>
+                </span>
+              </div>
+            </div>
+
+            <div class="mb-4">
+              <label class="form-label">Confirm Password</label>
+              <div class="input-group input-group-merge">
+                <input type="password" name="confirmPassword" class="form-control"
+                       placeholder="Repeat password" required />
+                <span class="input-group-text cursor-pointer">
+                  <i class="bx bx-hide"></i>
+                </span>
+              </div>
+            </div>
+
+            <button class="btn btn-primary d-grid w-100" type="submit">
+              Create Account &amp; Join Class
+            </button>
+          </form>
+
+          <p class="text-center mt-3">
+            <span>Already have an account?</span>
+            <a href="/Auth/Login"> Sign in</a>
+          </p>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

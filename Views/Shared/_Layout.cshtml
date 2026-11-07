@@ -1,0 +1,520 @@
+﻿<!DOCTYPE html>
+<html lang="en"
+      class="layout-menu-fixed"
+      dir="ltr"
+      data-theme="theme-default"
+      data-assets-path="~/sneat/"
+      data-template="vertical-menu-template-free">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+    <title>@ViewData["Title"] - EduSchool AI Platform</title>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="~/sneat/img/favicon/favicon.ico" />
+
+    <!-- Google Fonts: Public Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap" rel="stylesheet" />
+
+    <!-- Boxicons -->
+    <link rel="stylesheet" href="~/sneat/vendor/fonts/boxicons.css" />
+
+    <!-- Core CSS (Sneat) -->
+    <link rel="stylesheet" href="~/sneat/vendor/css/core.css" />
+    <link rel="stylesheet" href="~/sneat/vendor/css/theme-default.css" />
+    <link rel="stylesheet" href="~/sneat/css/demo.css" />
+    <link rel="stylesheet" href="~/css/wiut-brand.css" />
+
+    <!-- Perfect Scrollbar CSS -->
+    <link rel="stylesheet" href="~/sneat/vendor/libs/perfect-scrollbar/perfect-scrollbar.css" />
+
+    <!-- ApexCharts CSS (for analytics pages) -->
+    <link rel="stylesheet" href="~/sneat/vendor/libs/apex-charts/apex-charts.css" />
+
+    <!-- KaTeX (math rendering) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" />
+
+    <!-- Preserve real line breaks in AI-imported / generated question text -->
+    <style>.math-render { white-space: pre-wrap; }</style>
+
+    <!-- Page-specific CSS -->
+    @RenderSection("Styles", required: false)
+
+    <!-- Sneat helpers (MUST be before config.js) -->
+    <script src="~/sneat/vendor/js/helpers.js"></script>
+    <script src="~/sneat/js/config.js"></script>
+    <!-- Dark mode — runs before paint to prevent flash -->
+    <script src="~/sneat/js/darkMode.js"></script>
+</head>
+
+<body>
+  <div class="layout-wrapper layout-content-navbar">
+    <div class="layout-container">
+
+      <!-- ═══════════ SIDEBAR MENU ═══════════ -->
+      <aside id="layout-menu" class="layout-menu menu-vertical menu bg-menu-theme">
+
+        <!-- Logo / Brand -->
+        <div class="app-brand demo">
+          <a href="/" class="app-brand-link">
+            <span class="app-brand-logo demo">
+              <span class="eduai-logo-badge">
+                <i class="bx bxs-graduation eduai-icon-cap"></i>
+                <i class="bx bx-sparkles eduai-icon-spark"></i>
+              </span>
+            </span>
+            <span class="app-brand-text demo menu-text fw-bolder ms-2" style="font-size: 1.3rem; letter-spacing: -0.3px;">
+              EduSchool<span style="color:var(--wiut-crimson);">AI</span>
+            </span>
+          </a>
+          <a href="javascript:void(0);" class="layout-menu-toggle menu-link text-large ms-auto d-block d-xl-none">
+            <i class="bx bx-chevron-left bx-sm align-middle"></i>
+          </a>
+        </div>
+
+        <div class="menu-inner-shadow"></div>
+
+        <!-- Navigation items -->
+        <ul class="menu-inner py-1">
+
+          @if (User.IsInRole("Student"))
+          {
+            <!-- ── STUDENT SECTION ── -->
+
+            <!-- Dashboard -->
+            <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Student" && ViewContext.RouteData.Values["action"]?.ToString() == "Index" ? "active" : "")">
+              <a href="/Student" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-home-circle"></i>
+                <div>My Dashboard</div>
+              </a>
+            </li>
+
+            <li class="menu-header small text-uppercase">
+              <span class="menu-header-text">EduSchool AI Student</span>
+            </li>
+
+            <!-- My Classes -->
+            <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Student" && (ViewContext.RouteData.Values["action"]?.ToString() == "Classes" || ViewContext.RouteData.Values["action"]?.ToString() == "Assignments") ? "active" : "")">
+              <a href="/Student/Classes" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-book-open"></i>
+                <div>My Classes</div>
+              </a>
+            </li>
+          }
+          else
+          {
+            <!-- ── TEACHER / ADMIN SECTION ── -->
+
+            <!-- Dashboard -->
+            <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Home" ? "active" : "")">
+              <a href="/" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-home-circle"></i>
+                <div>Dashboard</div>
+              </a>
+            </li>
+
+            <li class="menu-header small text-uppercase">
+              <span class="menu-header-text">Teacher</span>
+            </li>
+
+            <!-- My Classes -->
+            <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Classes"
+                                   && ViewContext.RouteData.Values["action"]?.ToString() != "Students" ? "active" : "")">
+              <a href="/Classes" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-group"></i>
+                <div>My Classes</div>
+              </a>
+            </li>
+
+            <!-- Students -->
+            <li class="menu-item @(ViewContext.RouteData.Values["action"]?.ToString() == "Students" ? "active" : "")">
+              <a href="/Classes/Students" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-user-voice"></i>
+                <div>Students</div>
+              </a>
+            </li>
+
+            <!-- Assignments -->
+            <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Assignments" ? "active" : "")">
+              <a href="/Assignments" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-task"></i>
+                <div>Assignments</div>
+              </a>
+            </li>
+
+            <!-- Content Library -->
+            <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "ContentLibrary" ? "active" : "")">
+              <a href="/ContentLibrary" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-book-open"></i>
+                <div>Content Library</div>
+              </a>
+            </li>
+
+            <!-- Analytics -->
+            <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Analytics" ? "active" : "")">
+              <a href="/Analytics" class="menu-link">
+                <i class="menu-icon tf-icons bx bx-bar-chart-alt-2"></i>
+                <div>Analytics</div>
+              </a>
+            </li>
+
+            @if (User.IsInRole("Admin"))
+            {
+              <!-- Admin Panel -->
+              <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Admin" ? "active" : "")">
+                <a href="/Admin" class="menu-link">
+                  <i class="menu-icon tf-icons bx bx-shield-quarter"></i>
+                  <div>Admin Panel</div>
+                </a>
+              </li>
+            }
+          }
+
+          <!-- ── ACCOUNT SECTION (shared) ── -->
+          <li class="menu-header small text-uppercase">
+            <span class="menu-header-text">Account</span>
+          </li>
+
+          <!-- Profile Settings -->
+          <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Profile" ? "active" : "")">
+            <a href="/Profile" class="menu-link">
+              <i class="menu-icon tf-icons bx bx-user"></i>
+              <div>My Profile</div>
+            </a>
+          </li>
+
+          <!-- Logout -->
+          <li class="menu-item">
+            <a href="/Auth/Logout" class="menu-link">
+              <i class="menu-icon tf-icons bx bx-power-off"></i>
+              <div>Log Out</div>
+            </a>
+          </li>
+
+        </ul>
+      </aside>
+      <!-- ═══════════ /SIDEBAR MENU ═══════════ -->
+
+      <!-- Layout page -->
+      <div class="layout-page">
+
+        <!-- ═══════════ TOP NAVBAR ═══════════ -->
+        <nav class="layout-navbar container-xxl navbar navbar-expand-xl navbar-detached align-items-center bg-navbar-theme" id="layout-navbar">
+
+          <!-- Mobile menu toggle -->
+          <div class="layout-menu-toggle navbar-nav align-items-xl-center me-3 me-xl-0 d-xl-none">
+            <a class="nav-item nav-link px-0 me-xl-4" href="javascript:void(0)">
+              <i class="bx bx-menu bx-sm"></i>
+            </a>
+          </div>
+
+          <div class="navbar-nav-right d-flex align-items-center" id="navbar-collapse">
+            <!-- Search -->
+            <div class="navbar-nav align-items-center">
+              <div class="nav-item d-flex align-items-center">
+                <i class="bx bx-search fs-4 lh-0"></i>
+                <input type="text" class="form-control border-0 shadow-none" placeholder="Search..." />
+              </div>
+            </div>
+
+            <ul class="navbar-nav flex-row align-items-center ms-auto">
+              <!-- Dark / Light mode toggle -->
+              <li class="nav-item me-2">
+                <a class="nav-link theme-toggle-btn" href="javascript:void(0);" title="Toggle dark mode">
+                  <i class="bx bx-moon bx-sm theme-icon-moon"></i>
+                  <i class="bx bx-sun  bx-sm theme-icon-sun d-none"></i>
+                </a>
+              </li>
+
+              <!-- Notifications bell dropdown -->
+              <li class="nav-item dropdown-notifications navbar-dropdown dropdown me-3">
+                <a class="nav-link dropdown-toggle hide-arrow" href="javascript:void(0);" data-bs-toggle="dropdown" aria-expanded="false">
+                  <i class="bx bx-bell bx-sm"></i>
+                  <span class="badge bg-danger rounded-pill badge-notifications" style="font-size:0.65rem; padding: 0.2em 0.45em; position: absolute; top: 8px; right: 2px;">3</span>
+                </a>
+                <ul class="dropdown-menu dropdown-menu-end py-0 shadow" style="min-width: 320px;">
+                  <li class="dropdown-menu-header border-bottom">
+                    <div class="dropdown-header d-flex align-items-center py-3">
+                      <h6 class="mb-0 me-auto fw-bold text-primary">Notifications</h6>
+                      <span class="badge bg-label-primary rounded-pill">3 New</span>
+                    </div>
+                  </li>
+                  <li class="dropdown-notifications-list scrollable-container">
+                    <ul class="list-group list-group-flush">
+                      <li class="list-group-item list-group-item-action dropdown-notifications-item">
+                        <div class="d-flex">
+                          <div class="flex-shrink-0 me-3">
+                            <div class="avatar avatar-sm">
+                              <span class="avatar-initial rounded-circle bg-label-primary"><i class="bx bx-book-open"></i></span>
+                            </div>
+                          </div>
+                          <div class="flex-grow-1">
+                            <h6 class="mb-1 text-sm fw-semibold">New Assignment Posted</h6>
+                            <p class="mb-0 text-muted small">Math Assignment #4 has been published.</p>
+                            <small class="text-muted">10 mins ago</small>
+                          </div>
+                        </div>
+                      </li>
+                      <li class="list-group-item list-group-item-action dropdown-notifications-item">
+                        <div class="d-flex">
+                          <div class="flex-shrink-0 me-3">
+                            <div class="avatar avatar-sm">
+                              <span class="avatar-initial rounded-circle bg-label-success"><i class="bx bx-check-circle"></i></span>
+                            </div>
+                          </div>
+                          <div class="flex-grow-1">
+                            <h6 class="mb-1 text-sm fw-semibold">Grade Verified</h6>
+                            <p class="mb-0 text-muted small">Your teacher reviewed Quiz #2.</p>
+                            <small class="text-muted">1 hour ago</small>
+                          </div>
+                        </div>
+                      </li>
+                      <li class="list-group-item list-group-item-action dropdown-notifications-item">
+                        <div class="d-flex">
+                          <div class="flex-shrink-0 me-3">
+                            <div class="avatar avatar-sm">
+                              <span class="avatar-initial rounded-circle bg-label-warning"><i class="bx bx-award"></i></span>
+                            </div>
+                          </div>
+                          <div class="flex-grow-1">
+                            <h6 class="mb-1 text-sm fw-semibold">Badge Unlocked!</h6>
+                            <p class="mb-0 text-muted small">You unlocked WIUT Academic Scholar badge.</p>
+                            <small class="text-muted"> Yesterday</small>
+                          </div>
+                        </div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+              </li>
+
+              <!-- User dropdown (avatar loaded from DB via ViewComponent) -->
+              @await Component.InvokeAsync("UserAvatar")
+            </ul>
+          </div>
+        </nav>
+        <!-- ═══════════ /TOP NAVBAR ═══════════ -->
+
+        <!-- Content wrapper -->
+        <div class="content-wrapper">
+          <div class="container-xxl flex-grow-1 container-p-y">
+
+            <!-- Flash messages (TempData) -->
+            @if (TempData["Success"] != null)
+            {
+              <div class="alert alert-success alert-dismissible mb-4" role="alert">
+                <i class="bx bx-check-circle me-1"></i> @TempData["Success"]
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              </div>
+            }
+            @if (TempData["Error"] != null)
+            {
+              <div class="alert alert-danger alert-dismissible mb-4" role="alert">
+                <i class="bx bx-error-circle me-1"></i> @TempData["Error"]
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              </div>
+            }
+            @if (TempData["ResetPasswordPlain"] != null)
+            {
+              <div class="alert alert-warning alert-dismissible mb-4" role="alert">
+                <i class="bx bx-key me-1"></i>
+                Password reset for <strong>@TempData["ResetPasswordFor"]</strong>.
+                Give them this password now — it will not be shown again:
+                <code class="ms-1 fw-bold">@TempData["ResetPasswordPlain"]</code>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              </div>
+            }
+
+            <!-- ★ PAGE CONTENT ★ -->
+            @RenderBody()
+
+          </div>
+
+          <!-- Footer -->
+          <footer class="content-footer footer bg-footer-theme">
+            <div class="container-xxl d-flex flex-wrap justify-content-between py-2 flex-md-row flex-column">
+              <div class="mb-2 mb-md-0">
+                © @DateTime.Now.Year <strong>EduSchool AI Platform</strong> — All rights reserved
+              </div>
+              <div>
+                <a href="#" class="footer-link me-3">Privacy</a>
+                <a href="javascript:void(0);" onclick="toggleHelpChat()" class="footer-link">Support</a>
+              </div>
+            </div>
+          </footer>
+
+          <!-- ═══════════ FLOATING AI HELP SUPPORT MESSENGER ═══════════ -->
+          <div id="eduschoolHelpMessenger" class="eduschool-help-container">
+            <!-- Chat Window -->
+            <div id="helpChatCard" class="card shadow-lg eduschool-chat-window d-none">
+              <!-- Chat Header -->
+              <div class="card-header bg-primary text-white d-flex align-items-center justify-content-between p-3 rounded-top">
+                <div class="d-flex align-items-center">
+                  <div class="avatar avatar-sm me-2 position-relative">
+                    <span class="avatar-initial rounded-circle bg-white text-primary fw-bold">
+                      <i class="bx bx-bot fs-4" style="color:var(--wiut-navy);"></i>
+                    </span>
+                    <span class="badge rounded-circle bg-success position-absolute bottom-0 end-0" style="width:8px; height:8px; padding:0;"></span>
+                  </div>
+                  <div>
+                    <h6 class="text-white mb-0 fw-bold">EduSchool Assistant</h6>
+                    <small class="text-white-50" style="font-size:0.72rem;">Online · Support & Help</small>
+                  </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" onclick="toggleHelpChat()"></button>
+              </div>
+
+              <!-- Chat Body -->
+              <div class="card-body p-3 eduschool-chat-body" id="helpChatMessages">
+                <div class="d-flex justify-content-start mb-3 gap-2 chat-msg-anim">
+                  <div class="avatar avatar-xs flex-shrink-0">
+                    <span class="avatar-initial rounded-circle bg-label-primary"><i class="bx bx-bot"></i></span>
+                  </div>
+                  <div class="bg-lighter text-dark rounded-3 p-2 px-3 small border">
+                    👋 Hello! I am your <strong>EduSchool Assistant</strong>. How can I help you today?
+                  </div>
+                </div>
+              </div>
+
+              <!-- Quick Prompt Pills -->
+              <div class="px-3 pb-2 d-flex gap-1 flex-wrap">
+                <span class="badge bg-label-primary cursor-pointer" onclick="sendQuickHelp('How to join a class?')">🔑 Join Class</span>
+                <span class="badge bg-label-primary cursor-pointer" onclick="sendQuickHelp('Where are my grades?')">📊 My Grades</span>
+                <span class="badge bg-label-primary cursor-pointer" onclick="sendQuickHelp('How to ask AI Tutor?')">🤖 AI Tutor</span>
+                <span class="badge bg-label-danger cursor-pointer" onclick="sendQuickHelp('I have a problem / report error')">⚠️ Report Problem</span>
+              </div>
+
+              <!-- Chat Footer Input -->
+              <div class="card-footer p-2 border-top bg-light">
+                <form onsubmit="handleHelpSubmit(event)" class="d-flex gap-2">
+                  <input type="text" id="helpInput" class="form-control form-control-sm border-0 shadow-none bg-white" placeholder="Ask a support question..." autocomplete="off" />
+                  <button type="submit" class="btn btn-primary btn-sm px-3"><i class="bx bx-send"></i></button>
+                </form>
+              </div>
+            </div>
+
+            <!-- Trigger Floating Button -->
+            <button id="helpChatTrigger" class="btn btn-primary rounded-circle shadow-lg eduschool-chat-btn" onclick="toggleHelpChat()" title="Need Help? Chat with Us">
+              <i class="bx bx-message-rounded-dots fs-3" id="helpIconOpen"></i>
+              <i class="bx bx-x fs-3 d-none" id="helpIconClose"></i>
+              <span class="badge bg-danger rounded-circle position-absolute top-0 start-100 translate-middle p-1 border border-light" id="helpBadge"></span>
+            </button>
+          </div>
+          <!-- ═══════════ /FLOATING AI HELP SUPPORT MESSENGER ═══════════ -->
+
+          <div class="content-backdrop fade"></div>
+        </div>
+        <!-- /Content wrapper -->
+
+      </div>
+      <!-- /Layout page -->
+    </div>
+
+    <!-- Overlay (mobile) -->
+    <div class="layout-overlay layout-menu-toggle"></div>
+  </div>
+
+  <!-- ═══════════ SCRIPTS ═══════════ -->
+  <script src="~/sneat/vendor/libs/jquery/jquery.js"></script>
+  <script src="~/sneat/vendor/libs/popper/popper.js"></script>
+  <script src="~/sneat/vendor/js/bootstrap.js"></script>
+  <script src="~/sneat/vendor/libs/perfect-scrollbar/perfect-scrollbar.js"></script>
+  <script src="~/sneat/vendor/js/menu.js"></script>
+  <script src="~/sneat/js/main.js"></script>
+
+  <script>
+    function toggleHelpChat() {
+      var card = document.getElementById('helpChatCard');
+      var iconOpen = document.getElementById('helpIconOpen');
+      var iconClose = document.getElementById('helpIconClose');
+      var badge = document.getElementById('helpBadge');
+      if (card) {
+        card.classList.toggle('d-none');
+        if (!card.classList.contains('d-none')) {
+          card.classList.add('eduschool-chat-animate');
+          if (badge) badge.classList.add('d-none');
+        }
+      }
+      if (iconOpen && iconClose) {
+        iconOpen.classList.toggle('d-none');
+        iconClose.classList.toggle('d-none');
+      }
+    }
+
+    function sendQuickHelp(txt) {
+      var input = document.getElementById('helpInput');
+      if (input) {
+        input.value = txt;
+        handleHelpSubmit(new Event('submit'));
+      }
+    }
+
+    function handleHelpSubmit(e) {
+      if (e) e.preventDefault();
+      var input = document.getElementById('helpInput');
+      var messages = document.getElementById('helpChatMessages');
+      if (!input || !messages || !input.value.trim()) return;
+
+      var userTxt = input.value.trim();
+      input.value = '';
+
+      // Append User Bubble with animation
+      var userHtml = '<div class="d-flex justify-content-end mb-3 chat-msg-anim"><div class="bg-primary text-white rounded-3 p-2 px-3 small shadow-sm" style="max-width:80%; border-bottom-right-radius:2px !important;">' + escapeHtml(userTxt) + '</div></div>';
+      messages.insertAdjacentHTML('beforeend', userHtml);
+      messages.scrollTop = messages.scrollHeight;
+
+      var lower = userTxt.toLowerCase();
+      var isCriticalBug = lower.includes('bug') || lower.includes('error') || lower.includes('crash') || 
+                          lower.includes('ошибк') || lower.includes('не работа') || lower.includes('сломал');
+
+      fetch('/Home/SubmitSupportTicket', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userTxt, isCritical: isCriticalBug })
+      }).catch(function(err) { console.log('Support Ticket API err:', err); });
+
+      // Show Typing Indicator
+      var typingId = 'typing_' + Date.now();
+      var typingHtml = '<div id="' + typingId + '" class="d-flex justify-content-start mb-3 gap-2 chat-msg-anim"><div class="avatar avatar-xs flex-shrink-0"><span class="avatar-initial rounded-circle bg-label-primary"><i class="bx bx-bot"></i></span></div><div class="bg-lighter text-dark rounded-3 p-2 px-3 small border d-flex align-items-center"><span class="chat-typing-dots"><span></span><span></span><span></span></span></div></div>';
+      messages.insertAdjacentHTML('beforeend', typingHtml);
+      messages.scrollTop = messages.scrollHeight;
+
+      setTimeout(function() {
+        var elTyping = document.getElementById(typingId);
+        if (elTyping) elTyping.remove();
+
+        var reply = getBotReply(userTxt);
+        var botHtml = '<div class="d-flex justify-content-start mb-3 gap-2 chat-msg-anim"><div class="avatar avatar-xs flex-shrink-0"><span class="avatar-initial rounded-circle bg-label-primary"><i class="bx bx-bot"></i></span></div><div class="bg-lighter text-dark rounded-3 p-2 px-3 small border shadow-sm" style="max-width:80%; border-bottom-left-radius:2px !important;">' + reply + '</div></div>';
+        messages.insertAdjacentHTML('beforeend', botHtml);
+        messages.scrollTop = messages.scrollHeight;
+      }, 750);
+    }
+
+    function getBotReply(txt) {
+      var t = txt.toLowerCase();
+      if (t.includes('hi') || t.includes('hello') || t.includes('hey') || t.includes('привет') || t.includes('здравствуй')) {
+        return '👋 Hello! How can I help you today? Ask me any question about your classes, assignments, or platform features!';
+      } else if (t.includes('join') || t.includes('class') || t.includes('класс')) {
+        return 'To join a class, click the <strong>"+ Join a Class"</strong> button on your Dashboard and enter the Invite Code provided by your instructor.';
+      } else if (t.includes('grade') || t.includes('result') || t.includes('score') || t.includes('оценк')) {
+        return 'You can view your assignment grades on <strong>My Dashboard</strong> or open the specific assignment to see detailed AI and teacher feedback.';
+      } else if (t.includes('tutor') || t.includes('hint') || t.includes('explain') || t.includes('помощ')) {
+        return 'Click on <strong>"Get a Hint"</strong> or <strong>"Explain Answer"</strong> after submitting any assignment to open a step-by-step chat with your AI Tutor!';
+      } else if (t.includes('error') || t.includes('bug') || t.includes('crash') || t.includes('ошибк') || t.includes('не работа') || t.includes('сломал')) {
+        return '⚠️ <strong>Bug report logged!</strong> We have forwarded your report to the technical team at <code>maksumov1988@gmail.com</code>. Thank you!';
+      } else {
+        return 'I am your EduSchool Assistant! You can ask me how to join a class, check your grades, or use the AI Tutor, or click one of the quick buttons below.';
+      }
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+  </script>
+
+  <!-- ApexCharts (load on analytics pages only) -->
+  @RenderSection("Scripts", required: false)
+</body>
+</html>

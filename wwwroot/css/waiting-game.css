@@ -1,0 +1,57 @@
+/* Tic-tac-toe shown while the server checks an answer. See waiting-game.js. */
+
+.wg-board {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  width: 240px;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.wg-cell {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.1rem;
+  font-weight: 700;
+  line-height: 1;
+  border: 2px solid var(--bs-border-color, #d9dee3);
+  border-radius: .5rem;
+  background: var(--bs-body-bg, #fff);
+  color: var(--bs-body-color, #566a7f);
+  cursor: pointer;
+  transition: background-color .15s ease, transform .05s ease;
+}
+
+.wg-cell:hover:not(:disabled) { background: rgba(105, 108, 255, .08); }
+.wg-cell:active:not(:disabled) { transform: scale(.96); }
+.wg-cell:disabled { cursor: default; }
+
+.wg-cell.wg-x   { color: #696cff; }   /* Sneat primary */
+.wg-cell.wg-o   { color: #ff3e1d; }   /* Sneat danger  */
+.wg-cell.wg-win { background: rgba(113, 221, 55, .18); border-color: #71dd37; }
+
+.wg-game-status {
+  text-align: center;
+  min-height: 1.5rem;
+  margin-top: 1rem;
+  font-weight: 500;
+  color: var(--bs-secondary-color, #a1acb8);
+}
+.wg-game-status.wg-final { color: var(--bs-body-color, #566a7f); font-weight: 600; }
+
+/* The check runs behind the game: a quiet spinner, then a clear way out. */
+.wg-checking { color: var(--bs-secondary-color, #a1acb8); }
+.wg-reveal-btn { animation: wg-pulse 1.6s ease-in-out infinite; }
+
+@keyframes wg-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(105, 108, 255, .45); }
+  50%      { box-shadow: 0 0 0 .5rem rgba(105, 108, 255, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wg-reveal-btn { animation: none; }
+  .wg-cell { transition: none; }
+}

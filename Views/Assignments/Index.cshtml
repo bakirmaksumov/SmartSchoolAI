@@ -1,0 +1,148 @@
+@model SmartSchoolAI.ViewModels.AssignmentListViewModel
+@{
+    ViewData["Title"] = "Assignments";
+    var classes     = Model.Classes;
+    var assignments = Model.Assignments;
+}
+
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">SmartSchool AI /</span> Assignments
+    </h4>
+  </div>
+  <div class="col-auto">
+    <a href="/Assignments/Create" class="btn btn-primary">
+      <i class="bx bx-plus me-1"></i> New Assignment
+    </a>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-4">
+  <div class="card-body py-3">
+    <form method="get" class="row g-3 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label text-muted small mb-1">Filter by Class</label>
+        <select name="classId" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="">All Classes</option>
+          @{
+            var selClassId = Model.SelectedClassId?.ToString() ?? "";
+            var selStatus  = Model.SelectedStatus ?? "";
+          }
+          @foreach (var cls in classes)
+          {
+            if (selClassId == cls.Id.ToString())
+            {
+              <option value="@cls.Id" selected>@cls.Name</option>
+            }
+            else
+            {
+              <option value="@cls.Id">@cls.Name</option>
+            }
+          }
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label text-muted small mb-1">Filter by Status</label>
+        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="">All Statuses</option>
+          @foreach (var s in new[] { "Draft", "Active", "Closed", "Archived" })
+          {
+            if (selStatus == s)
+            {
+              <option value="@s" selected>@s</option>
+            }
+            else
+            {
+              <option value="@s">@s</option>
+            }
+          }
+        </select>
+      </div>
+      <div class="col-md-4">
+        <a href="/Assignments" class="btn btn-outline-secondary btn-sm">
+          <i class="bx bx-x me-1"></i> Clear Filters
+        </a>
+      </div>
+    </form>
+  </div>
+</div>
+
+@if (!assignments.Any())
+{
+  <div class="card">
+    <div class="card-body text-center py-5">
+      <i class="bx bx-task" style="font-size:3rem; color:#696cff;"></i>
+      <h5 class="mt-3">No assignments found</h5>
+      <p class="text-muted">Create your first assignment to get started.</p>
+      <a href="/Assignments/Create" class="btn btn-primary">Create Assignment</a>
+    </div>
+  </div>
+}
+else
+{
+  <div class="card">
+    <div class="table-responsive text-nowrap">
+      <table class="table table-hover">
+        <thead class="table-light">
+          <tr>
+            <th>Title</th>
+            <th>Class</th>
+            <th>Type</th>
+            <th>Status</th>
+            <th>Deadline</th>
+            <th>Submissions</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          @foreach (var a in assignments)
+          {
+            <tr>
+              <td><strong>@a.Title</strong></td>
+              <td>@a.Class.Name</td>
+              <td>
+                <span class="badge bg-label-@(a.Type == SmartSchoolAI.Models.AssignmentType.Homework ? "primary" : "info")">
+                  @a.Type
+                </span>
+              </td>
+              <td>
+                <span class="badge bg-@(a.Status == SmartSchoolAI.Models.AssignmentStatus.Active   ? "success" :
+                                        a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft    ? "secondary" :
+                                        a.Status == SmartSchoolAI.Models.AssignmentStatus.Closed   ? "warning" : "dark")">
+                  @a.Status
+                </span>
+              </td>
+              <td>@(a.Deadline?.ToString("dd MMM yyyy") ?? "\u2014")</td>
+              <td>@a.StudentResults.Count</td>
+              <td>
+                <a href="/Assignments/Details/@a.Id"
+                   class="btn btn-sm btn-icon btn-outline-primary"
+                   data-bs-toggle="tooltip" title="View Details">
+                  <i class="bx bx-show"></i>
+                </a>
+                @if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft)
+                {
+                <a href="/Assignments/Edit/@a.Id"
+                   class="btn btn-sm btn-icon btn-outline-secondary"
+                   data-bs-toggle="tooltip" title="Edit Questions">
+                  <i class="bx bx-pencil"></i>
+                </a>
+                }
+                @if (a.Status != SmartSchoolAI.Models.AssignmentStatus.Archived)
+                {
+                <a href="/Assignments/Edit/@a.Id?tab=settings"
+                   class="btn btn-sm btn-icon btn-outline-secondary"
+                   data-bs-toggle="tooltip" title="Settings">
+                  <i class="bx bx-cog"></i>
+                </a>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+}

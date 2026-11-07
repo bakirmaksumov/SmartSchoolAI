@@ -1,0 +1,1930 @@
+@model SmartSchoolAI.ViewModels.AssignmentEditViewModel
+@using System.Text.Json
+@{
+    var a = Model.Assignment;
+    ViewData["Title"] = a.Title;
+    var questions = JsonSerializer.Deserialize<List<JsonElement>>(a.Questions ?? "[]") ?? new();
+    var classes = Model.Classes;
+    // Allows deep-linking straight to the settings tab (/Assignments/Edit/{id}?tab=settings)
+    var activeTab = Context.Request.Query["tab"].ToString() == "settings" ? "settings" : "questions";
+    var canEditQuestions = Model.CanEditQuestions;
+    var statusColor = a.Status switch {
+        SmartSchoolAI.Models.AssignmentStatus.Draft    => "secondary",
+        SmartSchoolAI.Models.AssignmentStatus.Active   => "success",
+        SmartSchoolAI.Models.AssignmentStatus.Closed   => "warning",
+        _                                              => "dark"
+    };
+}
+
+<!-- ── TOP BAR ──────────────────────────────────────────────────────────── -->
+<div class="d-flex align-items-center gap-3 mb-3 py-2 border-bottom">
+    <a href="/Assignments" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1">
+        <i class="bx bx-arrow-back"></i> Back
+    </a>
+    <span class="fw-semibold text-truncate" style="max-width:260px;" id="assignTitleDisplay">@a.Title</span>
+    <span class="badge bg-@statusColor">@a.Status</span>
+    <span class="badge bg-success d-none" id="savedBadge"><i class="bx bx-check me-1"></i>Saved</span>
+    <div class="ms-auto d-flex gap-2">
+        <button class="btn btn-sm btn-outline-secondary" onclick="previewAsStudent()">
+            <i class="bx bx-show me-1"></i>Preview as student
+        </button>
+        @if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft)
+        {
+            <form method="post" asp-action="Publish" asp-route-id="@a.Id" class="d-inline"
+                  onsubmit="return confirm('Assign this to your students? They can start straight away. You can still fix questions until someone submits — after the first submission the questions are locked.')">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-sm btn-primary">
+                    Assign <i class="bx bx-right-arrow-alt ms-1"></i>
+                </button>
+            </form>
+        }
+    </div>
+</div>
+
+<!-- ── TABS ─────────────────────────────────────────────────────────────── -->
+<ul class="nav nav-underline mb-4" id="assignTabs">
+    <li class="nav-item">
+        <a class="nav-link @(activeTab == "questions" ? "active" : "") fw-semibold" href="#" data-tab="questions"
+           onclick="switchTab('questions',this);return false;">
+            Questions
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link @(activeTab == "settings" ? "active" : "") fw-semibold" href="#" data-tab="settings"
+           onclick="switchTab('settings',this);return false;">
+            Settings
+        </a>
+    </li>
+</ul>
+
+<!-- ══ TAB: QUESTIONS ════════════════════════════════════════════════════ -->
+<div id="tabQuestions" class="@(activeTab == "questions" ? "" : "d-none")">
+    <div class="row justify-content-center">
+        <div class="col-lg-7">
+
+            @if (!canEditQuestions)
+            {
+                <div class="alert alert-warning d-flex align-items-center gap-2">
+                    <i class="bx bx-lock-alt fs-5"></i>
+                    <div>
+                        <strong>Questions are locked.</strong>
+                        Students have already submitted answers. Changing the questions now would
+                        mis-align the answers already graded, so this set is frozen.
+                    </div>
+                </div>
+            }
+
+            <!-- Empty state -->
+            <div id="emptyState" class="card @(questions.Any() ? "d-none" : "")">
+                <div class="card-body text-center py-5">
+                    <i class="bx bx-question-mark" style="font-size:3.5rem;color:#696cff;"></i>
+                    <h5 class="mt-3 fw-semibold">There are no questions in your assignment yet.</h5>
+                    <button class="btn btn-primary mt-2" onclick="openAddPanel()">
+                        <i class="bx bx-plus me-1"></i>Add questions
+                    </button>
+                </div>
+            </div>
+
+            <!-- Questions list -->
+            @{
+                // Group the flat list into top-level questions + their subpoints
+                // (e.g. "2" with children "2a"/"2b"), purely for display/labelling —
+                // storage stays flat; grouping is derived from groupId each render.
+                string? IdOf(JsonElement e) => e.TryGetProperty("id", out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+                string? GroupIdOf(JsonElement e) => e.TryGetProperty("groupId", out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+                var idToIndex = new Dictionary<string, int>();
+                for (int i = 0; i < questions.Count; i++)
+                {
+                    var qid = IdOf(questions[i]);
+                    if (!string.IsNullOrEmpty(qid)) idToIndex[qid] = i;
+                }
+
+                var topLevel = new List<int>();
+                var childrenOf = new Dictionary<int, List<int>>();
+                for (int i = 0; i < questions.Count; i++)
+                {
+                    if (string.IsNullOrEmpty(GroupIdOf(questions[i]))) topLevel.Add(i);
+                }
+                for (int i = 0; i < questions.Count; i++)
+                {
+                    var gid = GroupIdOf(questions[i]);
+                    if (!string.IsNullOrEmpty(gid) && idToIndex.TryGetValue(gid, out var parentIdx))
+                    {
+                        if (!childrenOf.ContainsKey(parentIdx)) childrenOf[parentIdx] = new List<int>();
+                        childrenOf[parentIdx].Add(i);
+                    }
+                }
+
+                var renderItems = new List<(int idx, string label, bool isChild, int topLevelPos)>();
+                for (int t = 0; t < topLevel.Count; t++)
+                {
+                    var headerIdx = topLevel[t];
+                    renderItems.Add((headerIdx, (t + 1).ToString(), false, t));
+                    if (childrenOf.TryGetValue(headerIdx, out var kids))
+                    {
+                        for (int c = 0; c < kids.Count; c++)
+                            renderItems.Add((kids[c], $"{t + 1}{(char)('a' + c)}", true, t));
+                    }
+                }
+            }
+            <div id="questionsList">
+                @foreach (var item in renderItems)
+                {
+                    var idx = item.idx;
+                    var q = questions[idx];
+                    var qTitle = q.TryGetProperty("title", out var t) ? t.GetString() ?? "Untitled" : "Untitled";
+                    var qType  = q.TryGetProperty("type", out var ty)
+                        ? (ty.ValueKind == System.Text.Json.JsonValueKind.String
+                            ? ty.GetString() ?? ""
+                            : ty.ToString())
+                        : "";
+                    var qDiff  = q.TryGetProperty("difficulty", out var d)
+                        ? (d.ValueKind == System.Text.Json.JsonValueKind.String
+                            ? d.GetString() ?? "Medium"
+                            : d.ToString())
+                        : "Medium";
+
+                    // Map numeric type codes to readable labels
+                    var typeLabels = new Dictionary<string, string> {
+                        {"0","Text/Numeric"},{"1","Multiple choice"},{"2","Fill in the blank"},
+                        {"3","Open text"},{"4","Single choice"},{"5","Graphing"},
+                        {"6","Geometry drawing"},{"7","Number line"},{"8","Dot plot"},
+                        {"9","Table check"},{"10","Table text"},{"11","Vertical operation"},
+                        {"12","Protractor"},{"13","Rectangular fraction model"}
+                    };
+                    if (typeLabels.ContainsKey(qType)) qType = typeLabels[qType];
+
+                    // Extract options and answer key
+                    var qOptions = new List<string>();
+                    if (q.TryGetProperty("options", out var opts) && opts.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        foreach (var o in opts.EnumerateArray())
+                            qOptions.Add(o.GetString() ?? "");
+                    }
+                    var qAnswer = q.TryGetProperty("answerKey", out var ak)
+                        ? (ak.ValueKind == System.Text.Json.JsonValueKind.String ? ak.GetString() ?? "" : ak.ToString())
+                        : "";
+                    var qImagePath = q.TryGetProperty("imagePath", out var qip) && qip.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? qip.GetString() : null;
+                    var qAnswerKeyImagePath = q.TryGetProperty("answerKeyImagePath", out var qakip) && qakip.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? qakip.GetString() : null;
+                    var qRequireWork = q.TryGetProperty("requireWork", out var rw) && rw.ValueKind == System.Text.Json.JsonValueKind.True;
+                    var qDiagramHint = q.TryGetProperty("diagramHint", out var qdh) && qdh.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? qdh.GetString() : null;
+                    var qValidationWarning = q.TryGetProperty("validationWarning", out var qvw) && qvw.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? qvw.GetString() : null;
+
+                    <div class="card mb-3 question-card @(item.isChild ? "ms-4 border-start border-primary border-3" : "")" data-index="@idx">
+                        <div class="card-body">
+                            <div class="d-flex align-items-start gap-3">
+                                <div class="flex-grow-1">
+                                    <div class="d-flex align-items-center gap-2 mb-1">
+                                        <span class="badge bg-label-secondary">Q@(item.label)</span>
+                                        <span class="badge bg-label-primary">@qType</span>
+                                        <span class="badge bg-label-@(qDiff=="Easy"?"success":qDiff=="Hard"?"danger":"warning")">@qDiff</span>
+                                    </div>
+                                    <div class="fw-semibold mb-1 math-render">@qTitle</div>
+
+                                    @if (!string.IsNullOrEmpty(qImagePath))
+                                    {
+                                        <img src="@qImagePath" class="img-fluid rounded border mt-1 mb-2" style="max-height:180px;" />
+                                    }
+
+                                    @if (qOptions.Any())
+                                    {
+                                        <div class="mt-2">
+                                            @foreach (var (opt, oi) in qOptions.Select((o,i) => (o,i)))
+                                            {
+                                                var letter = (char)('A' + oi);
+                                                var isCorrect = !string.IsNullOrEmpty(qAnswer) &&
+                                                    (qAnswer.Trim().Equals(opt.Trim(), StringComparison.OrdinalIgnoreCase)
+                                                     || qAnswer.Trim().Equals(letter.ToString(), StringComparison.OrdinalIgnoreCase));
+                                                <div class="d-flex align-items-center gap-2 py-1">
+                                                    <span class="badge rounded-pill @(isCorrect ? "bg-success" : "bg-label-secondary")"
+                                                          style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:.75rem;">
+                                                        @letter
+                                                    </span>
+                                                    <span class="small math-render @(isCorrect ? "fw-semibold text-success" : "")">@opt</span>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+
+                                    @if (!string.IsNullOrEmpty(qAnswer) && !qOptions.Any())
+                                    {
+                                        <div class="mt-2 small text-muted">
+                                            <i class="bx bx-check-circle text-success me-1"></i>Answer: <span class="fw-semibold">@qAnswer</span>
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrEmpty(qAnswerKeyImagePath))
+                                    {
+                                        <div class="mt-1 small text-muted">
+                                            <i class="bx bx-image text-primary me-1"></i>Reference solution image attached
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrEmpty(qDiagramHint) && string.IsNullOrEmpty(qImagePath))
+                                    {
+                                        <div class="alert alert-warning py-1 px-2 small mt-2 mb-0">
+                                            <i class="bx bx-image me-1"></i>Likely needs a diagram this import couldn't carry over: @qDiagramHint
+                                            — attach it via <strong>Edit</strong>.
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrEmpty(qValidationWarning))
+                                    {
+                                        <div class="alert alert-danger py-1 px-2 small mt-2 mb-0 d-flex align-items-center justify-content-between gap-2">
+                                            <span><i class="bx bx-error-circle me-1"></i>Incorrect question: @qValidationWarning</span>
+                                            @if (canEditQuestions)
+                                            {
+                                                <form method="post" asp-action="DismissValidationWarning" asp-route-id="@a.Id" class="d-inline flex-shrink-0">
+                                                    @Html.AntiForgeryToken()
+                                                    <input type="hidden" name="index" value="@idx" />
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-2">Dismiss</button>
+                                                </form>
+                                            }
+                                        </div>
+                                    }
+                                    <div class="mt-2 d-flex align-items-center gap-2">
+                                        <div class="form-check form-switch mb-0">
+                                            @if (canEditQuestions)
+                                            {
+                                                <input type="checkbox" class="form-check-input" role="switch"
+                                                       id="requireWork_@idx" @(qRequireWork ? "checked" : null)
+                                                       onchange="document.getElementById('requireWorkForm_@idx').submit();" />
+                                            }
+                                            else
+                                            {
+                                                <input type="checkbox" class="form-check-input" role="switch"
+                                                       id="requireWork_@idx" @(qRequireWork ? "checked" : null) disabled />
+                                            }
+                                            <label class="form-check-label small text-muted" for="requireWork_@idx">
+                                                Require students to show their work
+                                            </label>
+                                        </div>
+                                        @if (canEditQuestions)
+                                        {
+                                            <form id="requireWorkForm_@idx" method="post" asp-action="ToggleRequireWork" asp-route-id="@a.Id" class="d-none">
+                                                @Html.AntiForgeryToken()
+                                                <input type="hidden" name="index" value="@idx" />
+                                            </form>
+                                        }
+                                    </div>
+                                    @if (canEditQuestions && !item.isChild)
+                                    {
+                                        <form method="post" asp-action="AddSubpoint" asp-route-id="@a.Id" class="mt-2">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="parentIndex" value="@idx" />
+                                            <button type="submit" class="btn btn-sm btn-outline-primary">
+                                                <i class="bx bx-plus me-1"></i>Add subpoint
+                                            </button>
+                                        </form>
+                                    }
+                                </div>
+                                @if (canEditQuestions)
+                                {
+                                    <div class="d-flex flex-column gap-2">
+                                        @if (!item.isChild)
+                                        {
+                                            <form method="post" asp-action="MoveQuestion" asp-route-id="@a.Id">
+                                                @Html.AntiForgeryToken()
+                                                <input type="hidden" name="index" value="@idx" />
+                                                <input type="hidden" name="direction" value="-1" />
+                                                <button type="submit" class="btn btn-sm btn-outline-secondary" title="Move up"
+                                                        @(item.topLevelPos == 0 ? "disabled" : null)>
+                                                    <i class="bx bx-up-arrow-alt"></i>
+                                                </button>
+                                            </form>
+                                            <form method="post" asp-action="MoveQuestion" asp-route-id="@a.Id">
+                                                @Html.AntiForgeryToken()
+                                                <input type="hidden" name="index" value="@idx" />
+                                                <input type="hidden" name="direction" value="1" />
+                                                <button type="submit" class="btn btn-sm btn-outline-secondary" title="Move down"
+                                                        @(item.topLevelPos == topLevel.Count - 1 ? "disabled" : null)>
+                                                    <i class="bx bx-down-arrow-alt"></i>
+                                                </button>
+                                            </form>
+                                        }
+                                        <button type="button" class="btn btn-sm btn-outline-primary" title="Edit"
+                                                onclick="openEditDrawer(@idx)">
+                                            <i class="bx bx-edit"></i>
+                                        </button>
+                                        <form method="post" asp-action="DuplicateQuestion" asp-route-id="@a.Id">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="index" value="@idx" />
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Duplicate">
+                                                <i class="bx bx-copy"></i>
+                                            </button>
+                                        </form>
+                                        <form method="post" asp-action="RemoveQuestion" asp-route-id="@a.Id"
+                                              onsubmit="return confirm('@(!item.isChild && childrenOf.ContainsKey(idx) ? "Remove this question and all its subpoints?" : "Remove this question?")')">
+                                            @Html.AntiForgeryToken()
+                                            <input type="hidden" name="index" value="@idx" />
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove">
+                                                <i class="bx bx-trash"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Add more button (shown when list has items) -->
+            @if (canEditQuestions)
+            {
+                <div id="addMoreBtn" class="@(questions.Any() ? "" : "d-none") text-center mt-2 mb-4">
+                    <button class="btn btn-outline-primary" onclick="openAddPanel()">
+                        <i class="bx bx-plus me-1"></i>Add questions
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- ══ TAB: SETTINGS ═════════════════════════════════════════════════════ -->
+<div id="tabSettings" class="@(activeTab == "settings" ? "" : "d-none")">
+    <div class="row justify-content-center">
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-header"><h6 class="mb-0"><i class="bx bx-cog me-2"></i>Assignment Settings</h6></div>
+                <div class="card-body">
+                    <form method="post" asp-action="SaveSettings" asp-route-id="@a.Id" id="settingsForm">
+                        @Html.AntiForgeryToken()
+
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Title <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="title" value="@a.Title" required />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Description / Instructions</label>
+                            <textarea class="form-control" name="description" rows="3">@a.Description</textarea>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-semibold">Class <span class="text-danger">*</span></label>
+                                <select class="form-select" name="classId" required>
+                                    @foreach (var cls in classes)
+                                    {
+                                        if (cls.Id == a.ClassId)
+                                        {
+                                            <option value="@cls.Id" selected>@cls.Name</option>
+                                        }
+                                        else
+                                        {
+                                            <option value="@cls.Id">@cls.Name</option>
+                                        }
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-semibold">Type</label>
+                                <select class="form-select" name="type" id="settingsTypeSelect">
+                                    @if (a.Type == SmartSchoolAI.Models.AssignmentType.ClassroomPractice)
+                                    {
+                                        <option value="0" selected>Classroom Practice</option>
+                                        <option value="1">Homework</option>
+                                    }
+                                    else
+                                    {
+                                        <option value="0">Classroom Practice</option>
+                                        <option value="1" selected>Homework</option>
+                                    }
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3" id="settingsDeadlineGroup">
+                                <label class="form-label fw-semibold">Deadline <span class="text-danger" id="settingsDeadlineReq">*</span></label>
+                                <input type="datetime-local" class="form-control" name="deadline"
+                                       value="@(a.Deadline.HasValue ? a.Deadline.Value.ToString("yyyy-MM-ddTHH:mm") : "")"
+                                       id="settingsDeadlineInput" />
+                            </div>
+                            <div class="col-md-6 mb-3 d-flex align-items-end pb-1">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="allowLateSubmission"
+                                           value="true"
+                                           id="settingsLateCheck" @(a.AllowLateSubmission ? "checked" : "") />
+                                    <label class="form-check-label" for="settingsLateCheck">Allow late submissions</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label fw-semibold">Grading scale</label>
+                                <select class="form-select" name="gradingType">
+                                    @foreach (var g in Enum.GetValues<SmartSchoolAI.Models.GradingType>())
+                                    {
+                                        var label = g switch {
+                                            SmartSchoolAI.Models.GradingType.Percentage => "Percentage (85%)",
+                                            SmartSchoolAI.Models.GradingType.Letter     => "Letter (A–F)",
+                                            SmartSchoolAI.Models.GradingType.PassFail   => "Pass / Fail",
+                                            _                                            => "GPA (4.0)"
+                                        };
+                                        if (g == a.GradingType)
+                                        {
+                                            <option value="@g" selected>@label</option>
+                                        }
+                                        else
+                                        {
+                                            <option value="@g">@label</option>
+                                        }
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label fw-semibold">Pass mark (%)</label>
+                                <input type="number" class="form-control" name="passThreshold"
+                                       value="@a.PassThreshold" min="1" max="100" />
+                                <div class="form-text">Score needed to pass this assignment.</div>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label fw-semibold">Attempts</label>
+                                <input type="number" class="form-control" name="maxAttempts"
+                                       value="@a.MaxAttempts" min="0" max="50" />
+                                <div class="form-text">0 = unlimited retries.</div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-12 mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="antiCopyPaste"
+                                           value="true"
+                                           id="settingsPasteCheck" @(a.AntiCopyPaste ? "checked" : "") />
+                                    <label class="form-check-label" for="settingsPasteCheck">
+                                        Block pasting into answer fields
+                                        <span class="text-muted small d-block">
+                                            Discourages pasting answers straight from a chatbot. A soft deterrent —
+                                            a determined student can still get around it.
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-12 mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="allowSolutionReveal"
+                                           value="true"
+                                           id="settingsRevealCheck" @(a.AllowSolutionReveal ? "checked" : "") />
+                                    <label class="form-check-label" for="settingsRevealCheck">
+                                        Let the AI tutor reveal full solutions
+                                        <span class="text-muted small d-block">
+                                            When off, the tutor gives escalating hints but never states the final answer.
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-12 mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="allowInstantFeedback"
+                                           value="true"
+                                           id="settingsInstantCheck" @(a.AllowInstantFeedback ? "checked" : "") />
+                                    <label class="form-check-label" for="settingsInstantCheck">
+                                        Let students check each answer while solving
+                                        <span class="text-muted small d-block">
+                                            Shows right/wrong per question straight away. Always on for classroom
+                                            practice; leave off for graded homework so answers can't be guessed.
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2 mt-2">
+                            <a href="/Assignments" class="btn btn-outline-secondary">Cancel</a>
+                            <button type="submit" class="btn btn-primary"><i class="bx bx-save me-1"></i>Save Settings</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ══ ADD QUESTIONS PANEL (slide-in from right) ═════════════════════════ -->
+<div id="addPanelBackdrop" class="position-fixed top-0 start-0 w-100 h-100 d-none"
+     style="background:rgba(0,0,0,.35);z-index:1040;" onclick="closeAddPanel()"></div>
+
+<div id="addPanel" class="position-fixed top-0 end-0 h-100 bg-white shadow-lg d-flex flex-column"
+     style="width:520px;max-width:96vw;z-index:1050;transform:translateX(100%);transition:transform .25s ease;">
+    <div class="d-flex align-items-center justify-content-between p-4 border-bottom">
+        <h5 class="mb-0 fw-bold">Content library</h5>
+        <button class="btn-close" onclick="closeAddPanel()"></button>
+    </div>
+    <div class="p-4 overflow-auto flex-grow-1">
+
+        <!-- Generate with AI (hero action) -->
+        <button type="button" class="btn btn-primary w-100 mb-2 py-2" onclick="openImportModal('generate')">
+            <i class="bx bx-bulb me-1"></i>Generate with AI
+        </button>
+
+        <!-- Add from content library -->
+        <button type="button" class="btn btn-outline-primary w-100 mb-4 py-2" onclick="openLibraryModal()">
+            <i class="bx bx-book-open me-1"></i>Add from content library
+        </button>
+
+        <!-- Create from scratch -->
+        <h6 class="fw-bold mb-3">Create from scratch</h6>
+        <div class="row g-2" id="scratchTypeGrid">
+            <!-- filled by JS from SCRATCH_TYPES -->
+        </div>
+
+        <!-- Import from PDF / Image -->
+        <div class="border-top mt-4 pt-3 d-flex flex-column gap-2">
+            <button class="btn btn-outline-secondary w-100" onclick="openImportModal('pdf')">
+                <i class="bx bx-file-pdf me-1 text-danger"></i>Import from PDF
+            </button>
+            <button class="btn btn-outline-secondary w-100" onclick="openImportModal('image')">
+                <i class="bx bx-image-alt me-1 text-info"></i>Import from Image / Photo
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ UNIFIED IMPORT MODAL (PDF + Image) ══════════════════════════════ -->
+<div class="modal fade" id="pdfImportModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+
+            <div class="modal-header border-0 pb-0">
+                <h5 class="modal-title fw-bold">
+                    <i id="importModalIcon" class="bx bx-file-pdf text-danger me-2"></i>
+                    <span id="importModalTitleText">Upload questions from PDF</span>
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+
+            <!-- STEP 1: pick file -->
+            <div class="modal-body" id="pdfStep1">
+                <p class="text-muted small mb-3" id="importModalDesc">The AI will read your PDF exam / worksheet and create questions automatically.</p>
+                <div id="pdfDropZone"
+                     class="border border-2 rounded-3 text-center py-5 px-3 mb-3"
+                     style="border-style:dashed!important;border-color:#c8d0da!important;cursor:pointer;"
+                     onclick="document.getElementById('pdfFileInput').click()"
+                     ondragover="pdfDragOver(event)" ondragleave="pdfDragLeave(event)" ondrop="pdfDrop(event)">
+                    <i class="bx bx-cloud-upload text-primary" style="font-size:2.5rem;"></i>
+                    <p class="mb-1 fw-semibold mt-2" id="dropZoneLabel">Drop a PDF here</p>
+                    <p class="text-muted small mb-3">or, if you prefer&hellip;</p>
+                    <button type="button" class="btn btn-primary btn-sm px-4"
+                            onclick="event.stopPropagation();document.getElementById('pdfFileInput').click()">
+                        <i class="bx bx-folder-open me-1"></i>Choose a file
+                    </button>
+                    <input type="file" id="pdfFileInput" accept=".pdf" class="d-none" onchange="pdfFileSelected(this)">
+                </div>
+                <!-- Image preview (shown only in image mode after selecting a file) -->
+                <div id="imgPreviewWrap" class="d-none mb-3 text-center">
+                    <img id="imgPreview" src="" alt="preview"
+                         style="max-height:260px;max-width:100%;border-radius:8px;border:1px solid #dee2e6;" />
+                </div>
+                <div id="pdfFileChip" class="d-none alert alert-info py-2 d-flex align-items-center gap-2">
+                    <i id="fileChipIcon" class="bx bx-file-pdf text-danger fs-5"></i>
+                    <span id="pdfFileName" class="flex-grow-1 small fw-semibold"></span>
+                    <button type="button" class="btn-close" onclick="pdfClearFile()"></button>
+                </div>
+
+                <!-- Generation form (shown only in 'generate' mode) -->
+                <div id="genForm" class="d-none">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">
+                            Topic / instructions <span class="text-danger">*</span>
+                        </label>
+                        <textarea id="genTopic" class="form-control" rows="3"
+                                  placeholder="e.g. Solving two-step linear equations for one variable"
+                                  oninput="genValidate()"></textarea>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-semibold">Number of questions</label>
+                            <input type="number" id="genCount" class="form-control" value="5" min="1" max="20" />
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-semibold">Difficulty</label>
+                            <select id="genDifficulty" class="form-select">
+                                <option value="Easy">Easy</option>
+                                <option value="Medium" selected>Medium</option>
+                                <option value="Hard">Hard</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label fw-semibold">Grade level</label>
+                            <select id="genGrade" class="form-select">
+                                <option value="">Any</option>
+                                @for (int g = 1; g <= 12; g++)
+                                {
+                                    <option value="@g">Grade @g</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-1">
+                        <label class="form-label fw-semibold">Question types</label>
+                        <div class="d-flex flex-wrap gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input gen-type" type="checkbox" value="MultipleChoice"
+                                       id="genTypeMcq" checked>
+                                <label class="form-check-label small" for="genTypeMcq">Multiple choice</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input gen-type" type="checkbox" value="SingleChoice"
+                                       id="genTypeSingle">
+                                <label class="form-check-label small" for="genTypeSingle">Single choice</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input gen-type" type="checkbox" value="ShortAnswer"
+                                       id="genTypeShort" checked>
+                                <label class="form-check-label small" for="genTypeShort">Short answer</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input gen-type" type="checkbox" value="OpenText"
+                                       id="genTypeOpen">
+                                <label class="form-check-label small" for="genTypeOpen">Open text</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="pdfUploadError" class="d-none alert alert-danger py-2 small"></div>
+            </div>
+
+            <!-- STEP 2: analysing progress -->
+            <div class="modal-body d-none" id="pdfStep2">
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary mb-3" role="status"></div>
+                    <p class="fw-semibold mb-1" id="analysingLabel">Analysing&hellip;</p>
+                    <p class="text-muted small mb-3" id="analysingPercent">0%</p>
+                    <div class="progress mx-auto" style="max-width:280px; height:6px;">
+                        <div class="progress-bar" id="analysingProgressBar" role="progressbar" style="width:0%"
+                             aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- STEP 3: review -->
+            <div class="modal-body d-none" id="pdfStep3">
+                <p class="text-muted small mb-3">Review the questions the AI found. Uncheck any you don't want to add.</p>
+                <div id="pdfQuestionList" class="list-group mb-2"></div>
+                <p class="text-muted small mt-2" id="pdfCountLabel"></p>
+            </div>
+
+            <div class="modal-footer">
+                <div id="pdfFooter1" class="w-100 d-flex justify-content-end gap-2">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="pdfAnalyseBtn" onclick="pdfStartAnalysis()" disabled>
+                        <i class="bx bx-brain me-1"></i><span id="analyseLabel">Analyse</span>
+                    </button>
+                </div>
+                <div id="pdfFooter3" class="w-100 d-flex justify-content-between align-items-center d-none">
+                    <button type="button" class="btn btn-outline-secondary" onclick="pdfBackToStep1()">
+                        <i class="bx bx-arrow-back me-1"></i>Back
+                    </button>
+                    <button type="button" class="btn btn-success" id="pdfAddBtn" onclick="pdfAddSelected()">
+                        <i class="bx bx-plus me-1"></i>Add selected questions
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- ══ CONTENT LIBRARY MODAL ════════════════════════════════════════════ -->
+<div class="modal fade" id="libraryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header pb-2">
+                <h5 class="modal-title fw-bold">
+                    <i class="bx bx-book-open text-primary me-2"></i>Import from Content Library
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Filters -->
+                <div class="row g-2 mb-3">
+                    <div class="col-md-4">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text"><i class="bx bx-search"></i></span>
+                            <input type="text" class="form-control" id="libSearch" placeholder="Search questions…"
+                                   oninput="libDebounceLoad()">
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select form-select-sm" id="libSubject" onchange="libLoadQuestions()">
+                            <option value="">All Subjects</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select form-select-sm" id="libGrade" onchange="libLoadQuestions()">
+                            <option value="">All Grades</option>
+                            @for (int g = 1; g <= 12; g++)
+                            {
+                                <option value="@g">Grade @g</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <select class="form-select form-select-sm" id="libDifficulty" onchange="libLoadQuestions()">
+                            <option value="">All Levels</option>
+                            <option value="Easy">Easy</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Hard">Hard</option>
+                        </select>
+                    </div>
+                    <div class="col-md-1 text-end">
+                        <button class="btn btn-sm btn-outline-secondary w-100" onclick="libClearFilters()" title="Clear filters">
+                            <i class="bx bx-x"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Select all + counter -->
+                <div class="d-flex align-items-center gap-3 mb-2">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="libSelectAll" onchange="libToggleAll()">
+                        <label class="form-check-label small fw-semibold" for="libSelectAll">Select all</label>
+                    </div>
+                    <span class="text-muted small" id="libCounter">0 questions</span>
+                    <span class="badge bg-primary d-none" id="libSelectedBadge">0 selected</span>
+                </div>
+
+                <!-- Loading spinner -->
+                <div id="libLoading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="text-muted small mt-2">Loading questions…</p>
+                </div>
+
+                <!-- Empty state -->
+                <div id="libEmpty" class="text-center py-5 d-none">
+                    <i class="bx bx-search-alt text-muted" style="font-size:2.5rem;"></i>
+                    <p class="text-muted mt-2">No questions found matching your filters.</p>
+                </div>
+
+                <!-- Question list -->
+                <div id="libQuestionList" class="list-group d-none" style="max-height:55vh;overflow-y:auto;">
+                </div>
+            </div>
+
+            <div class="modal-footer d-flex justify-content-between">
+                <span class="text-muted small" id="libFooterCount">Select questions to add</span>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" id="libAddBtn" onclick="libAddSelected()" disabled>
+                        <i class="bx bx-plus me-1"></i>Add selected (<span id="libAddCount">0</span>)
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ══ EDIT QUESTION DRAWER ═════════════════════════════════════════════ -->
+<!-- Backdrop -->
+<div id="editPanelBackdrop" class="d-none"
+     style="position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1040;"
+     onclick="closeEditDrawer()"></div>
+
+<!-- Drawer -->
+<div id="editPanel"
+     style="position:fixed;top:0;right:0;width:480px;max-width:100vw;height:100vh;
+            background:#fff;z-index:1050;transform:translateX(100%);
+            transition:transform .3s ease;overflow-y:auto;box-shadow:-4px 0 24px rgba(0,0,0,.12);">
+    <div class="d-flex align-items-center justify-content-between px-4 py-3 border-bottom">
+        <h6 class="mb-0 fw-bold"><i class="bx bx-edit me-2 text-primary"></i>Edit question</h6>
+        <button type="button" class="btn-close" onclick="closeEditDrawer()"></button>
+    </div>
+    <div class="px-4 py-3">
+
+        <!-- Question text -->
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Question text <span class="text-danger">*</span></label>
+
+            <!-- Math insert toolbar -->
+            <div class="d-flex flex-wrap gap-1 mb-2" id="mathToolbar">
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Square root"  onclick="mathInsert('\\sqrt{', '}')">√</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="nth root"      onclick="mathInsert('\\sqrt[3]{', '}')">ⁿ√</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Fraction"      onclick="mathInsert('\\frac{', '}{}')">a⁄b</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Power"         onclick="mathInsert('^{', '}')">xⁿ</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Subscript"     onclick="mathInsert('_{', '}')">xₙ</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Integral"      onclick="mathInsert('\\int ', '')">∫</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Multiply"      onclick="mathInsert('\\times ', '')">×</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Divide"        onclick="mathInsert('\\div ', '')">÷</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Less or equal" onclick="mathInsert('\\leq ', '')">≤</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Greater or equal" onclick="mathInsert('\\geq ', '')">≥</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Pi"            onclick="mathInsert('\\pi ', '')">π</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Degree"        onclick="mathInsert('^{\\circ} ', '')">°</button>
+                <button type="button" class="btn btn-sm btn-outline-primary"   title="Wrap in math $…$" onclick="mathWrap()">$…$</button>
+            </div>
+
+            <textarea id="eq_title" class="form-control" rows="3"
+                      placeholder="Enter the question… use the buttons above or $…$ for math"
+                      oninput="mathPreview()"></textarea>
+
+            <div class="mt-1 small text-muted">Preview:</div>
+            <div class="border rounded p-2 bg-light math-render" id="eq_preview" style="min-height:40px;"></div>
+        </div>
+
+        <!-- Diagram attachment -->
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Diagram <span class="text-muted fw-normal small">(optional — attach a screenshot/photo; PDF import can't carry figures)</span></label>
+            <div id="eq_imagePreviewWrap" class="d-none mb-2 position-relative d-inline-block">
+                <img id="eq_imagePreview" src="" class="img-fluid rounded border" style="max-height:160px;" />
+                <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0 m-1"
+                        style="padding:.1rem .4rem;" onclick="eqRemoveImage()" title="Remove">
+                    <i class="bx bx-x"></i>
+                </button>
+            </div>
+            <input type="file" id="eq_imageFile" class="form-control" accept="image/*" onchange="eqUploadFile(this, 'diagram')" />
+            <div id="eq_imageUploadStatus" class="small text-muted mt-1"></div>
+        </div>
+
+        <!-- Type + Difficulty row -->
+        <div class="row g-3 mb-3">
+            <div class="col-7">
+                <label class="form-label fw-semibold">Type</label>
+                <select id="eq_type" class="form-select" onchange="eqTypeChanged()">
+                    <option value="0">Text / Numeric</option>
+                    <option value="4">Single choice</option>
+                    <option value="1">Multiple choice</option>
+                    <option value="3">Open text</option>
+                    <option value="5">Graphing</option>
+                    <option value="6">Geometry drawing</option>
+                    <option value="7">Number line</option>
+                    <option value="8">Dot plot</option>
+                    <option value="9">Table check</option>
+                    <option value="10">Table text</option>
+                    <option value="11">Vertical operation</option>
+                    <option value="12">Protractor</option>
+                    <option value="13">Rectangular fraction model</option>
+                </select>
+            </div>
+            <div class="col-5">
+                <label class="form-label fw-semibold">Difficulty</label>
+                <select id="eq_difficulty" class="form-select">
+                    <option value="Easy">Easy</option>
+                    <option value="Medium" selected>Medium</option>
+                    <option value="Hard">Hard</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Options (shown for Single/Multiple choice) -->
+        <div id="eq_optionsSection" class="mb-3 d-none">
+            <label class="form-label fw-semibold">Answer options</label>
+            <div id="eq_optionsList"></div>
+            <button type="button" class="btn btn-outline-secondary btn-sm mt-2" onclick="eqAddOption()">
+                <i class="bx bx-plus me-1"></i>Add option
+            </button>
+        </div>
+
+        <!-- Answer key -->
+        <div class="mb-4" id="eq_answerSection">
+            <label class="form-label fw-semibold">Answer key <span class="text-muted fw-normal small">(optional)</span></label>
+            <input type="text" id="eq_answerKey" class="form-control" placeholder="Correct answer or option letter…" />
+
+            <div class="mt-2">
+                <label class="form-label small text-muted mb-1">Or attach a reference solution image <span class="text-muted">(used to visually compare a student's photographed work)</span></label>
+                <div id="eq_answerKeyImagePreviewWrap" class="d-none mb-2 position-relative d-inline-block">
+                    <img id="eq_answerKeyImagePreview" src="" class="img-fluid rounded border" style="max-height:160px;" />
+                    <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0 m-1"
+                            style="padding:.1rem .4rem;" onclick="eqRemoveAnswerKeyImage()" title="Remove">
+                        <i class="bx bx-x"></i>
+                    </button>
+                </div>
+                <input type="file" id="eq_answerKeyImageFile" class="form-control" accept="image/*" onchange="eqUploadFile(this, 'answerkey')" />
+                <div id="eq_answerKeyImageUploadStatus" class="small text-muted mt-1"></div>
+            </div>
+        </div>
+
+        <div id="eq_saveError" class="d-none alert alert-danger py-2 small mb-3"></div>
+
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-primary flex-grow-1" onclick="eqSave()">
+                <i class="bx bx-save me-1"></i>Save changes
+            </button>
+            <button type="button" class="btn btn-outline-secondary" onclick="closeEditDrawer()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- ══ SCRATCH QUESTION MODAL ════════════════════════════════════════════ -->
+<div class="modal fade" id="scratchModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="scratchModalTitle">New Question</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <!-- Embed the Create question form in an iframe so we reuse existing logic -->
+                <iframe id="scratchFrame" src="" style="width:100%;height:75vh;border:none;"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+<script>
+// crypto.randomUUID requires a secure context (HTTPS or localhost).
+// Fall back to a manual UUIDv4 generator when served over plain HTTP.
+function genUUID() {
+  if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return window.crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+// ── Math rendering (KaTeX) ────────────────────────────────────────────────
+const MATH_DELIMS = [
+  { left: '$$', right: '$$', display: true },
+  { left: '$',  right: '$',  display: false },
+  { left: '\\(', right: '\\)', display: false },
+  { left: '\\[', right: '\\]', display: true }
+];
+
+function renderMath(el) {
+  if (el && typeof renderMathInElement === 'function') {
+    renderMathInElement(el, { delimiters: MATH_DELIMS, throwOnError: false });
+  }
+}
+
+// Render all question cards once the page is ready.
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('.math-render').forEach(renderMath);
+});
+
+// ── Math input helpers (edit drawer) ──────────────────────────────────────
+
+// Inserts a LaTeX snippet at the cursor. Auto-wraps in $…$ when the cursor is
+// not already inside a math span, so teachers don't have to think about mode.
+function mathInsert(before, after) {
+  const ta = document.getElementById('eq_title');
+  if (!ta) return;
+  const start = ta.selectionStart, end = ta.selectionEnd;
+  const val = ta.value;
+  const selected = val.slice(start, end);
+
+  const dollarsBefore = (val.slice(0, start).match(/\$/g) || []).length;
+  const inMath = dollarsBefore % 2 === 1;
+
+  const open  = inMath ? before : '$' + before;
+  const close = inMath ? after  : after + '$';
+  const insert = open + selected + close;
+
+  ta.value = val.slice(0, start) + insert + val.slice(end);
+  const caret = start + open.length + selected.length;
+  ta.focus();
+  ta.setSelectionRange(caret, caret);
+  mathPreview();
+}
+
+// Wraps the current selection (or the caret) in $…$.
+function mathWrap() {
+  const ta = document.getElementById('eq_title');
+  if (!ta) return;
+  const start = ta.selectionStart, end = ta.selectionEnd;
+  const val = ta.value;
+  const selected = val.slice(start, end);
+  ta.value = val.slice(0, start) + '$' + selected + '$' + val.slice(end);
+  const caret = start + 1 + selected.length;
+  ta.focus();
+  ta.setSelectionRange(caret, caret);
+  mathPreview();
+}
+
+// Live preview of the question text with math rendered.
+function mathPreview() {
+  const ta = document.getElementById('eq_title');
+  const box = document.getElementById('eq_preview');
+  if (!ta || !box) return;
+  const text = ta.value.trim();
+  if (!text) { box.innerHTML = '<span class="text-muted">Preview appears here…</span>'; return; }
+  box.textContent = text;
+  renderMath(box);
+}
+
+// ── type definitions ─────────────────────────────────────────────────────
+const SCRATCH_TYPES = [
+  { val:0,  label:'Text/Numeric',             icon:'bx-text',              color:'primary' },
+  { val:4,  label:'Single choice',            icon:'bx-check-circle',      color:'success' },
+  { val:1,  label:'Multiple choice',          icon:'bx-list-check',        color:'primary' },
+  { val:5,  label:'Graphing',                 icon:'bx-line-chart',        color:'info' },
+  { val:6,  label:'Geometry drawing',         icon:'bx-shape-triangle',    color:'warning' },
+  { val:7,  label:'Number line',              icon:'bx-right-arrow-alt',   color:'secondary' },
+  { val:8,  label:'Dot plot',                 icon:'bx-dots-horizontal-rounded', color:'danger' },
+  { val:9,  label:'Table check',              icon:'bx-grid-alt',          color:'primary' },
+  { val:10, label:'Table text',               icon:'bx-table',             color:'secondary' },
+  { val:11, label:'Vertical operation',       icon:'bx-list-ol',           color:'info' },
+  { val:12, label:'Protractor',               icon:'bx-compass',           color:'danger' },
+  { val:13, label:'Rectangular fraction model', icon:'bx-grid',            color:'success' },
+];
+
+// ── build type grid ──────────────────────────────────────────────────────
+(function buildGrid() {
+  const grid = document.getElementById('scratchTypeGrid');
+  SCRATCH_TYPES.forEach(t => {
+    const col = document.createElement('div');
+    col.className = 'col-4';
+    col.innerHTML = `
+      <button type="button" class="btn btn-outline-primary w-100 text-start d-flex align-items-center gap-2 p-2"
+              style="font-size:.82rem;" onclick="openScratch(${t.val},'${t.label}')">
+        <i class="bx ${t.icon} text-${t.color}" style="font-size:1.1rem;flex-shrink:0;"></i>
+        <span>${t.label}</span>
+      </button>`;
+    grid.appendChild(col);
+  });
+})();
+
+// ── tab switching ────────────────────────────────────────────────────────
+function switchTab(name, el) {
+  document.getElementById('tabQuestions').classList.toggle('d-none', name !== 'questions');
+  document.getElementById('tabSettings').classList.toggle('d-none',  name !== 'settings');
+  document.querySelectorAll('#assignTabs .nav-link').forEach(a => a.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// ── add panel ────────────────────────────────────────────────────────────
+function openAddPanel() {
+  document.getElementById('addPanelBackdrop').classList.remove('d-none');
+  document.getElementById('addPanel').style.transform = 'translateX(0)';
+}
+function closeAddPanel() {
+  document.getElementById('addPanelBackdrop').classList.add('d-none');
+  document.getElementById('addPanel').style.transform = 'translateX(100%)';
+}
+
+// ── Edit question drawer ──────────────────────────────────────────────────
+const QUESTIONS_DATA = @Html.Raw(a.Questions ?? "[]");
+let eqCurrentIndex = -1;
+let eqImagePath = null;
+let eqAnswerKeyImagePath = null;
+
+function openEditDrawer(idx) {
+  eqCurrentIndex = idx;
+  const q = QUESTIONS_DATA[idx];
+  if (!q) return;
+
+  // Populate fields
+  document.getElementById('eq_title').value      = q.title      ?? '';
+  document.getElementById('eq_answerKey').value  = q.answerKey  ?? '';
+  document.getElementById('eq_difficulty').value = q.difficulty ?? 'Medium';
+  document.getElementById('eq_type').value       = String(q.type ?? 0);
+  document.getElementById('eq_saveError').classList.add('d-none');
+
+  // Populate options + math preview
+  eqRenderOptions(q.options ?? []);
+  eqTypeChanged();
+  mathPreview();
+
+  // Populate attached images
+  eqImagePath = q.imagePath ?? null;
+  eqSetImagePreview('eq_imagePreviewWrap', 'eq_imagePreview', eqImagePath);
+  document.getElementById('eq_imageFile').value = '';
+  document.getElementById('eq_imageUploadStatus').textContent = '';
+
+  eqAnswerKeyImagePath = q.answerKeyImagePath ?? null;
+  eqSetImagePreview('eq_answerKeyImagePreviewWrap', 'eq_answerKeyImagePreview', eqAnswerKeyImagePath);
+  document.getElementById('eq_answerKeyImageFile').value = '';
+  document.getElementById('eq_answerKeyImageUploadStatus').textContent = '';
+
+  // Open drawer
+  document.getElementById('editPanelBackdrop').classList.remove('d-none');
+  document.getElementById('editPanel').style.transform = 'translateX(0)';
+}
+
+function closeEditDrawer() {
+  document.getElementById('editPanelBackdrop').classList.add('d-none');
+  document.getElementById('editPanel').style.transform = 'translateX(100%)';
+  eqCurrentIndex = -1;
+}
+
+// ── Question image attachments (diagram + answer-key reference) ───────────
+
+function eqSetImagePreview(wrapId, imgId, path) {
+  const wrap = document.getElementById(wrapId);
+  const img  = document.getElementById(imgId);
+  if (path) {
+    img.src = path;
+    wrap.classList.remove('d-none');
+  } else {
+    img.src = '';
+    wrap.classList.add('d-none');
+  }
+}
+
+function eqRemoveImage() {
+  eqImagePath = null;
+  eqSetImagePreview('eq_imagePreviewWrap', 'eq_imagePreview', null);
+  document.getElementById('eq_imageFile').value = '';
+}
+
+function eqRemoveAnswerKeyImage() {
+  eqAnswerKeyImagePath = null;
+  eqSetImagePreview('eq_answerKeyImagePreviewWrap', 'eq_answerKeyImagePreview', null);
+  document.getElementById('eq_answerKeyImageFile').value = '';
+}
+
+// Uploads immediately on file selection. `kind` is 'diagram' or 'answerkey' — picks
+// the endpoint and which stashed path/preview/status elements get updated.
+async function eqUploadFile(input, kind) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+
+  const isAnswerKey = kind === 'answerkey';
+  const statusEl = document.getElementById(isAnswerKey ? 'eq_answerKeyImageUploadStatus' : 'eq_imageUploadStatus');
+  const endpoint = isAnswerKey ? 'UploadAnswerKeyImage' : 'UploadQuestionImage';
+
+  if (eqCurrentIndex < 0) {
+    statusEl.textContent = 'Save the question once first, then attach an image.';
+    input.value = '';
+    return;
+  }
+
+  const original = QUESTIONS_DATA[eqCurrentIndex] ?? {};
+  const questionId = original.id;
+  if (!questionId) {
+    statusEl.textContent = 'This question needs to be saved once before attaching an image.';
+    input.value = '';
+    return;
+  }
+
+  const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+  const fd = new FormData();
+  fd.append('questionId', questionId);
+  fd.append('file', file);
+  fd.append('__RequestVerificationToken', token);
+
+  statusEl.textContent = 'Uploading…';
+
+  try {
+    const res = await fetch(`/Assignments/${endpoint}/@a.Id`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Upload failed.');
+
+    if (isAnswerKey) {
+      eqAnswerKeyImagePath = data.path;
+      eqSetImagePreview('eq_answerKeyImagePreviewWrap', 'eq_answerKeyImagePreview', eqAnswerKeyImagePath);
+    } else {
+      eqImagePath = data.path;
+      eqSetImagePreview('eq_imagePreviewWrap', 'eq_imagePreview', eqImagePath);
+    }
+    statusEl.textContent = '';
+  } catch (err) {
+    statusEl.textContent = 'Upload failed: ' + err.message;
+  } finally {
+    input.value = '';
+  }
+}
+
+function eqTypeChanged() {
+  const t = parseInt(document.getElementById('eq_type').value);
+  const isChoice = t === 1 || t === 4; // MultipleChoice or SingleChoice
+  document.getElementById('eq_optionsSection').classList.toggle('d-none', !isChoice);
+}
+
+function eqRenderOptions(opts) {
+  const container = document.getElementById('eq_optionsList');
+  container.innerHTML = '';
+  opts.forEach((o, i) => {
+    const letter = String.fromCharCode(65 + i);
+    const row = document.createElement('div');
+    row.className = 'input-group mb-2';
+    row.innerHTML = `
+      <span class="input-group-text fw-bold">${letter}</span>
+      <input type="text" class="form-control eq-option" value="${o.replace(/"/g, '&quot;')}" placeholder="Option ${letter}">
+      <button type="button" class="btn btn-outline-danger" onclick="eqRemoveOption(this)"><i class="bx bx-x"></i></button>`;
+    container.appendChild(row);
+  });
+}
+
+function eqAddOption() {
+  const container = document.getElementById('eq_optionsList');
+  const count = container.querySelectorAll('.eq-option').length;
+  const letter = String.fromCharCode(65 + count);
+  const row = document.createElement('div');
+  row.className = 'input-group mb-2';
+  row.innerHTML = `
+    <span class="input-group-text fw-bold">${letter}</span>
+    <input type="text" class="form-control eq-option" placeholder="Option ${letter}">
+    <button type="button" class="btn btn-outline-danger" onclick="eqRemoveOption(this)"><i class="bx bx-x"></i></button>`;
+  container.appendChild(row);
+  eqRelabelOptions();
+}
+
+function eqRemoveOption(btn) {
+  btn.closest('.input-group').remove();
+  eqRelabelOptions();
+}
+
+function eqRelabelOptions() {
+  document.querySelectorAll('#eq_optionsList .input-group').forEach((row, i) => {
+    const letter = String.fromCharCode(65 + i);
+    row.querySelector('.input-group-text').textContent = letter;
+    row.querySelector('.eq-option').placeholder = `Option ${letter}`;
+  });
+}
+
+async function eqSave() {
+  if (eqCurrentIndex < 0) return;
+
+  const title = document.getElementById('eq_title').value.trim();
+  if (!title) {
+    const err = document.getElementById('eq_saveError');
+    err.textContent = 'Question text is required.';
+    err.classList.remove('d-none');
+    return;
+  }
+
+  const type       = parseInt(document.getElementById('eq_type').value);
+  const difficulty = document.getElementById('eq_difficulty').value;
+  const answerKey  = document.getElementById('eq_answerKey').value.trim();
+  const options    = Array.from(document.querySelectorAll('#eq_optionsList .eq-option'))
+                         .map(i => i.value.trim()).filter(Boolean);
+
+  // Preserve fields this form doesn't expose — an id/groupId/requireWork
+  // dropped here would silently un-group a subpoint or reset its toggle.
+  const original = QUESTIONS_DATA[eqCurrentIndex] ?? {};
+  const questionObj = {
+    id:                 original.id ?? genUUID(),
+    title,
+    type,
+    difficulty,
+    answerKey,
+    options,
+    imagePath:          eqImagePath,
+    answerKeyImagePath: eqAnswerKeyImagePath,
+    requireWork:        original.requireWork ?? false,
+    groupId:            original.groupId ?? null,
+    // A diagram hint is only useful until the real image is attached; a
+    // validation warning is only useful until the teacher has reviewed and
+    // fixed the question here — both are resolved by this save.
+    diagramHint:        eqImagePath ? null : (original.diagramHint ?? null),
+    validationWarning:  null
+  };
+
+  const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+  const fd = new FormData();
+  fd.append('index', eqCurrentIndex);
+  fd.append('questionJson', JSON.stringify(questionObj));
+  fd.append('__RequestVerificationToken', token);
+
+  const btn = document.querySelector('#editPanel .btn-primary');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving…';
+
+  try {
+    const res = await fetch('/Assignments/UpdateQuestion/@a.Id', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error(await res.text());
+    closeEditDrawer();
+    location.reload();
+  } catch (err) {
+    const errEl = document.getElementById('eq_saveError');
+    errEl.textContent = 'Save failed: ' + err.message;
+    errEl.classList.remove('d-none');
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bx bx-save me-1"></i>Save changes';
+  }
+}
+
+// ── open scratch form ─────────────────────────────────────────────────────
+// Opens the ContentLibrary/Create page inside the modal iframe,
+// pre-selecting the question type and passing the assignment id so
+// the controller can auto-attach on save.
+function openScratch(typeVal, typeLabel) {
+  closeAddPanel();
+  document.getElementById('scratchModalTitle').textContent = 'New ' + typeLabel + ' question';
+  document.getElementById('scratchFrame').src =
+    '/ContentLibrary/Create?assignmentId=@a.Id&defaultType=' + typeVal;
+  new bootstrap.Modal(document.getElementById('scratchModal')).show();
+}
+
+// ── listen for message from iframe after save ─────────────────────────────
+window.addEventListener('message', function(ev) {
+  if (ev.data === 'questionSaved') {
+    bootstrap.Modal.getInstance(document.getElementById('scratchModal'))?.hide();
+    location.reload();
+  }
+});
+
+// ── Import modal (PDF + Image) ────────────────────────────────────────────────────────
+
+let pdfFile = null;
+let pdfParsedQuestions = [];
+let pdfModalInstance = null;
+let importMode = 'pdf'; // 'pdf' | 'image'
+
+// Accepts mode: 'pdf' or 'image'
+function openImportModal(mode) {
+  importMode = mode;
+  closeAddPanel();
+  pdfModalInstance = new bootstrap.Modal(document.getElementById('pdfImportModal'));
+  pdfModalInstance.show();
+  document.getElementById('pdfImportModal').addEventListener('hidden.bs.modal', _stopPolling);
+  document.getElementById('pdfImportModal').addEventListener('shown.bs.modal', function onShown() {
+    this.removeEventListener('shown.bs.modal', onShown);
+    pdfReset();
+    _applyImportMode();
+  });
+}
+
+// Keep openPdfModal as alias for backwards compat
+function openPdfModal() { openImportModal('pdf'); }
+
+// Per-mode presentation config for the shared import/generate modal.
+const IMPORT_MODES = {
+  pdf: {
+    icon:        'bx bx-file-pdf text-danger me-2',
+    title:       'Upload questions from PDF',
+    desc:        'The AI will read your PDF exam / worksheet and create questions automatically.',
+    dropLabel:   'Drop a PDF here',
+    analyse:     'Analyse PDF',
+    chipIcon:    'bx bx-file-pdf text-danger fs-5',
+    accept:      '.pdf',
+    spinner:     'AI is extracting and categorising questions'
+  },
+  image: {
+    icon:        'bx bx-image-alt text-info me-2',
+    title:       'Upload questions from Image / Photo',
+    desc:        'Take a photo or scan of your exam sheet. The AI will recognise and extract all questions automatically.',
+    dropLabel:   'Drop an image here (JPG, PNG, WEBP, HEIC)',
+    analyse:     'Analyse Image',
+    chipIcon:    'bx bx-image text-info fs-5',
+    accept:      '.jpg,.jpeg,.png,.webp,.heic,.heif,.bmp,.gif',
+    spinner:     'AI is extracting and categorising questions'
+  },
+  generate: {
+    icon:        'bx bx-bulb text-warning me-2',
+    title:       'Generate questions with AI',
+    desc:        'Describe the topic and the AI will write brand-new questions for you to review.',
+    analyse:     'Generate',
+    spinner:     'AI is writing your questions'
+  }
+};
+
+function _applyImportMode() {
+  const cfg     = IMPORT_MODES[importMode] ?? IMPORT_MODES.pdf;
+  const isGen   = importMode === 'generate';
+
+  document.getElementById('importModalIcon').className   = cfg.icon;
+  document.getElementById('importModalTitleText').textContent = cfg.title;
+  document.getElementById('importModalDesc').textContent = cfg.desc;
+  document.getElementById('analyseLabel').textContent    = cfg.analyse;
+  document.getElementById('analysingLabel').textContent  = cfg.spinner;
+
+  // File-upload controls vs. generation form
+  document.getElementById('pdfDropZone').classList.toggle('d-none', isGen);
+  document.getElementById('genForm').classList.toggle('d-none', !isGen);
+
+  if (isGen) {
+    genValidate();
+  } else {
+    document.getElementById('dropZoneLabel').textContent = cfg.dropLabel;
+    document.getElementById('fileChipIcon').className    = cfg.chipIcon;
+    document.getElementById('pdfFileInput').accept       = cfg.accept;
+  }
+}
+
+// Enable the Generate button only when a topic has been entered.
+function genValidate() {
+  const topic = document.getElementById('genTopic').value.trim();
+  document.getElementById('pdfAnalyseBtn').disabled = topic.length === 0;
+}
+
+function pdfReset() {
+  pdfFile = null;
+  pdfParsedQuestions = [];
+  pdfShowStep(1);
+  const fi = document.getElementById('pdfFileInput');   if (fi) fi.value = '';
+  const fc = document.getElementById('pdfFileChip');    if (fc) fc.classList.add('d-none');
+  const fe = document.getElementById('pdfUploadError'); if (fe) fe.classList.add('d-none');
+  const ab = document.getElementById('pdfAnalyseBtn');  if (ab) ab.disabled = true;
+  const dz = document.getElementById('pdfDropZone');    if (dz) dz.classList.remove('border-primary', 'bg-light');
+  const iw = document.getElementById('imgPreviewWrap'); if (iw) iw.classList.add('d-none');
+}
+
+function pdfShowStep(n) {
+  const s1 = document.getElementById('pdfStep1');   if (s1) s1.classList.toggle('d-none', n !== 1);
+  const s2 = document.getElementById('pdfStep2');   if (s2) s2.classList.toggle('d-none', n !== 2);
+  const s3 = document.getElementById('pdfStep3');   if (s3) s3.classList.toggle('d-none', n !== 3);
+  const f1 = document.getElementById('pdfFooter1'); if (f1) f1.classList.toggle('d-none', n !== 1);
+  const f3 = document.getElementById('pdfFooter3'); if (f3) f3.classList.toggle('d-none', n !== 3);
+}
+
+function pdfDragOver(ev) {
+  ev.preventDefault();
+  document.getElementById('pdfDropZone').classList.add('border-primary', 'bg-light');
+}
+function pdfDragLeave(ev) {
+  document.getElementById('pdfDropZone').classList.remove('border-primary', 'bg-light');
+}
+function pdfDrop(ev) {
+  ev.preventDefault();
+  pdfDragLeave(ev);
+  const f = ev.dataTransfer?.files?.[0];
+  if (f) pdfSetFile(f);
+}
+function pdfFileSelected(input) {
+  if (input.files?.[0]) pdfSetFile(input.files[0]);
+}
+function pdfSetFile(f) {
+  const ext = f.name.split('.').pop().toLowerCase();
+  const imgExts = ['jpg','jpeg','png','webp','heic','heif','bmp','gif'];
+  if (importMode === 'pdf' && ext !== 'pdf') {
+    pdfShowError('Only PDF files are supported.');
+    return;
+  }
+  if (importMode === 'image' && !imgExts.includes(ext)) {
+    pdfShowError('Please choose an image file (JPG, PNG, WEBP, HEIC, etc.).');
+    return;
+  }
+  pdfFile = f;
+  document.getElementById('pdfFileName').textContent = f.name + ' (' + (f.size / 1024).toFixed(0) + ' KB)';
+  document.getElementById('pdfFileChip').classList.remove('d-none');
+  document.getElementById('pdfUploadError').classList.add('d-none');
+  document.getElementById('pdfAnalyseBtn').disabled = false;
+  // Show inline image preview when in image mode
+  const iw = document.getElementById('imgPreviewWrap');
+  const ip = document.getElementById('imgPreview');
+  if (importMode === 'image' && iw && ip) {
+    const reader = new FileReader();
+    reader.onload = e => { ip.src = e.target.result; iw.classList.remove('d-none'); };
+    reader.readAsDataURL(f);
+  } else if (iw) {
+    iw.classList.add('d-none');
+  }
+}
+function pdfClearFile() {
+  pdfFile = null;
+  document.getElementById('pdfFileInput').value = '';
+  document.getElementById('pdfFileChip').classList.add('d-none');
+  document.getElementById('pdfAnalyseBtn').disabled = true;
+}
+function pdfShowError(msg) {
+  const el = document.getElementById('pdfUploadError');
+  el.textContent = msg;
+  el.classList.remove('d-none');
+}
+
+let pollTimer = null;
+
+function _stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+function _setProgress(percent) {
+  const bar = document.getElementById('analysingProgressBar');
+  const pct = document.getElementById('analysingPercent');
+  if (bar) { bar.style.width = percent + '%'; bar.setAttribute('aria-valuenow', percent); }
+  if (pct) pct.textContent = percent + '%';
+}
+
+// Starts a background generation/import job on the server, then polls
+// GenerationProgress every 500ms — the percentage is a time-based estimate
+// tied to the real background call, so it only ever reaches 100% once that
+// call has actually finished (or failed).
+async function _pollJob(jobId) {
+  _stopPolling();
+  pollTimer = setInterval(async () => {
+    try {
+      const res  = await fetch('/Assignments/GenerationProgress/' + jobId);
+      const data = await res.json();
+
+      _setProgress(data.percent ?? 0);
+
+      if (data.status === 'running') return;
+
+      _stopPolling();
+
+      if (data.status === 'error') {
+        pdfShowStep(1);
+        pdfShowError(data.error || 'Something went wrong.');
+        return;
+      }
+
+      pdfParsedQuestions = data.questions ?? [];
+
+      // An empty review list ("0 questions found" + "Add all 0 questions") explains nothing,
+      // so go back to the first step with a message instead.
+      if (pdfParsedQuestions.length === 0) {
+        pdfShowStep(1);
+        pdfShowError('No questions were found. Try a different file, a smaller section of it, or adjust your request.');
+        return;
+      }
+
+      pdfBuildReviewList();
+      pdfShowStep(3);
+    } catch (err) {
+      _stopPolling();
+      pdfShowStep(1);
+      pdfShowError('Network error: ' + err.message);
+    }
+  }, 500);
+}
+
+async function pdfStartAnalysis() {
+  if (importMode === 'generate') { await genStartGeneration(); return; }
+  if (!pdfFile) return;
+  pdfShowStep(2);
+  _setProgress(0);
+
+  const fd = new FormData();
+  const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+  if (token) fd.append('__RequestVerificationToken', token);
+
+  let endpoint;
+  if (importMode === 'image') {
+    fd.append('image', pdfFile);
+    endpoint = '/Assignments/ImportFromImageStart/@a.Id';
+  } else {
+    fd.append('pdf', pdfFile);
+    endpoint = '/Assignments/ImportFromPdfStart/@a.Id';
+  }
+
+  try {
+    const res  = await fetch(endpoint, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) { pdfShowStep(1); pdfShowError(data.error); return; }
+    await _pollJob(data.jobId);
+  } catch (err) {
+    pdfShowStep(1);
+    pdfShowError('Network error: ' + err.message);
+  }
+}
+
+// Collects the generation form, starts the AI job, then hands the polled
+// results to the shared review pipeline (identical to import).
+async function genStartGeneration() {
+  const topic = document.getElementById('genTopic').value.trim();
+  if (!topic) { genValidate(); return; }
+  pdfShowStep(2);
+  _setProgress(0);
+
+  const types = Array.from(document.querySelectorAll('.gen-type:checked')).map(c => c.value);
+  if (types.length === 0) types.push('MultipleChoice', 'ShortAnswer');
+
+  const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value;
+  const fd = new FormData();
+  if (token) fd.append('__RequestVerificationToken', token);
+  fd.append('topic',      topic);
+  fd.append('count',      document.getElementById('genCount').value || '5');
+  fd.append('difficulty', document.getElementById('genDifficulty').value);
+  fd.append('gradeLevel', document.getElementById('genGrade').value);
+  fd.append('types',      types.join(', '));
+
+  try {
+    const res  = await fetch('/Assignments/GenerateQuestionsStart/@a.Id', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.error) { pdfShowStep(1); pdfShowError(data.error); return; }
+    await _pollJob(data.jobId);
+  } catch (err) {
+    pdfShowStep(1);
+    pdfShowError('Network error: ' + err.message);
+  }
+}
+
+function pdfEscapeHtml(s) {
+  return (s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function pdfBuildReviewList() {
+  const list = document.getElementById('pdfQuestionList');
+  list.innerHTML = '';
+  pdfParsedQuestions.forEach((q, i) => {
+    const badge = { MultipleChoice: 'primary', SingleChoice: 'success', ShortAnswer: 'info', OpenText: 'secondary' }[q.type] ?? 'dark';
+    const item = document.createElement('label');
+    item.className = 'list-group-item list-group-item-action d-flex gap-3 align-items-start py-2';
+    item.innerHTML = `
+      <input class="form-check-input mt-1 flex-shrink-0" type="checkbox" checked value="${i}">
+      <div class="flex-grow-1">
+        <div class="d-flex gap-2 align-items-center mb-1">
+          <span class="badge bg-${badge}">${q.type}</span>
+          <span class="badge bg-light text-dark">${q.difficulty ?? 'Medium'}</span>
+          ${q.number ? '<span class="text-muted small">Q' + q.number + '</span>' : ''}
+        </div>
+        <div class="small fw-semibold">${pdfEscapeHtml(q.title)}</div>
+        ${q.options?.length ? '<div class="text-muted" style="font-size:.78rem;">' + q.options.slice(0,4).map(pdfEscapeHtml).join(' &bull; ') + '</div>' : ''}
+        ${q.hasDiagram ? '<div class="alert alert-warning py-1 px-2 small mt-1 mb-0"><i class="bx bx-image me-1"></i>Likely has a diagram this import couldn\'t carry over' + (q.diagramHint ? ': ' + pdfEscapeHtml(q.diagramHint) : '') + ' — attach it after adding.</div>' : ''}
+        ${q.validationWarning ? '<div class="alert alert-danger py-1 px-2 small mt-1 mb-0"><i class="bx bx-error-circle me-1"></i>Incorrect question: ' + pdfEscapeHtml(q.validationWarning) + '</div>' : ''}
+      </div>`;
+    list.appendChild(item);
+  });
+  const n = pdfParsedQuestions.length;
+  document.getElementById('pdfCountLabel').textContent = n + ' question' + (n !== 1 ? 's' : '') + ' found';
+  document.getElementById('pdfAddBtn').textContent = 'Add all ' + n + ' questions';
+  renderMath(list);   // show any $…$ math in the review list rendered
+
+  // update button label on check change
+  list.addEventListener('change', () => {
+    const sel = list.querySelectorAll('input:checked').length;
+    document.getElementById('pdfAddBtn').textContent = 'Add selected (' + sel + ')';
+  });
+}
+
+function pdfBackToStep1() { pdfShowStep(1); }
+
+async function pdfAddSelected() {
+  const list    = document.getElementById('pdfQuestionList');
+  const checked = Array.from(list.querySelectorAll('input:checked')).map(cb => +cb.value);
+  const toAdd   = checked.map(i => pdfParsedQuestions[i]);
+  if (!toAdd.length) return;
+
+  document.getElementById('pdfAddBtn').disabled = true;
+  document.getElementById('pdfAddBtn').innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding…';
+
+  // Add questions one by one via the existing AddQuestion endpoint
+  const typeMap = { MultipleChoice: 1, SingleChoice: 4, ShortAnswer: 0, OpenText: 3 };
+  const token   = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+
+  for (const q of toAdd) {
+    // Controller expects a single "questionJson" field with a JSON string
+    const questionObj = {
+      id:                genUUID(),
+      title:             q.title,
+      type:              typeMap[q.type] ?? 0,
+      difficulty:        q.difficulty ?? 'Medium',
+      answerKey:         q.answerKey ?? '',
+      options:           q.options ?? [],
+      diagramHint:       q.hasDiagram ? (q.diagramHint ?? '') : null,
+      validationWarning: q.validationWarning ?? null
+    };
+    const fd = new FormData();
+    fd.append('questionJson', JSON.stringify(questionObj));
+    fd.append('__RequestVerificationToken', token);
+    await fetch('/Assignments/AddQuestion/@a.Id', { method: 'POST', body: fd });
+  }
+
+  pdfModalInstance?.hide();
+  location.reload();
+}
+
+// ── preview as student ────────────────────────────────────────────────────
+function previewAsStudent() {
+  window.open('/Assignments/Preview/@a.Id', '_blank');
+}
+
+// ── settings type → deadline required toggle ──────────────────────────────
+(function() {
+  const sel = document.getElementById('settingsTypeSelect');
+  const req = document.getElementById('settingsDeadlineReq');
+  const inp = document.getElementById('settingsDeadlineInput');
+  if (!sel) return;
+  function update() {
+    const hw = sel.value === '1';
+    req.classList.toggle('d-none', !hw);
+    inp.required = hw;
+  }
+  sel.addEventListener('change', update);
+  update();
+})();
+
+// ══ CONTENT LIBRARY MODAL ════════════════════════════════════════════════
+
+let libModalInstance = null;
+let libAllQuestions = [];
+let libSubjects = [];
+let libDebounceTimer = null;
+
+// Opens the modal and loads questions
+function openLibraryModal() {
+  closeAddPanel();
+  libModalInstance = new bootstrap.Modal(document.getElementById('libraryModal'));
+  libModalInstance.show();
+  document.getElementById('libraryModal').addEventListener('shown.bs.modal', function onShown() {
+    this.removeEventListener('shown.bs.modal', onShown);
+    libLoadQuestions();
+  });
+}
+
+// Load questions from API with current filters
+async function libLoadQuestions() {
+  const loading = document.getElementById('libLoading');
+  const empty   = document.getElementById('libEmpty');
+  const list    = document.getElementById('libQuestionList');
+  
+  loading.classList.remove('d-none');
+  empty.classList.add('d-none');
+  list.classList.add('d-none');
+
+  const params = new URLSearchParams();
+  const subject = document.getElementById('libSubject').value;
+  const grade = document.getElementById('libGrade').value;
+  const difficulty = document.getElementById('libDifficulty').value;
+  const search = document.getElementById('libSearch').value.trim();
+
+  if (subject) params.append('subject', subject);
+  if (grade) params.append('grade', grade);
+  if (difficulty) params.append('difficulty', difficulty);
+  if (search) params.append('search', search);
+
+  try {
+    const res = await fetch('/ContentLibrary/GetQuestions?' + params.toString());
+    const data = await res.json();
+    libAllQuestions = data;
+
+    // Extract unique subjects for filter dropdown
+    const uniqueSubjects = [...new Set(data.map(q => q.subject).filter(Boolean))].sort();
+    if (uniqueSubjects.length > 0 && libSubjects.length === 0) {
+      libSubjects = uniqueSubjects;
+      libPopulateSubjects();
+    }
+
+    loading.classList.add('d-none');
+    
+    if (data.length === 0) {
+      empty.classList.remove('d-none');
+      libUpdateCounter(0);
+    } else {
+      list.classList.remove('d-none');
+      libRenderQuestionList(data);
+      libUpdateCounter(data.length);
+    }
+  } catch (err) {
+    loading.classList.add('d-none');
+    empty.classList.remove('d-none');
+    alert('Failed to load questions: ' + err.message);
+  }
+}
+
+// Populate subjects dropdown
+function libPopulateSubjects() {
+  const sel = document.getElementById('libSubject');
+  const currentVal = sel.value;
+  sel.innerHTML = '<option value="">All Subjects</option>';
+  libSubjects.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    if (s === currentVal) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+// Debounced search
+function libDebounceLoad() {
+  clearTimeout(libDebounceTimer);
+  libDebounceTimer = setTimeout(() => libLoadQuestions(), 400);
+}
+
+// Render question list
+function libRenderQuestionList(questions) {
+  const list = document.getElementById('libQuestionList');
+  list.innerHTML = '';
+
+  questions.forEach(q => {
+    const typeMap = {
+      'ShortAnswer': { label: 'Text/Numeric', color: 'primary', code: 0 },
+      'MultipleChoice': { label: 'Multiple choice', color: 'primary', code: 1 },
+      'OpenText': { label: 'Open text', color: 'secondary', code: 3 },
+      'SingleChoice': { label: 'Single choice', color: 'success', code: 4 },
+      'Graphing': { label: 'Graphing', color: 'info', code: 5 },
+      'GeometryDrawing': { label: 'Geometry drawing', color: 'warning', code: 6 },
+      'NumberLine': { label: 'Number line', color: 'secondary', code: 7 },
+      'DotPlot': { label: 'Dot plot', color: 'danger', code: 8 },
+      'TableCheck': { label: 'Table check', color: 'primary', code: 9 },
+      'TableText': { label: 'Table text', color: 'secondary', code: 10 },
+      'VerticalOperation': { label: 'Vertical operation', color: 'info', code: 11 },
+      'Protractor': { label: 'Protractor', color: 'danger', code: 12 },
+      'FractionModel': { label: 'Rectangular fraction model', color: 'success', code: 13 }
+    };
+
+    const typeInfo = typeMap[q.type] || { label: q.type, color: 'dark', code: 0 };
+    const diffColor = { Easy: 'success', Medium: 'warning', Hard: 'danger' }[q.difficulty] || 'secondary';
+
+    const options = q.options ? JSON.parse(q.options) : [];
+    const optionsHtml = options.length > 0
+      ? '<div class="text-muted" style="font-size:.78rem;">' + options.slice(0, 4).map(pdfEscapeHtml).join(' • ') + '</div>'
+      : '';
+
+    const item = document.createElement('label');
+    item.className = 'list-group-item list-group-item-action d-flex gap-3 align-items-start py-3 lib-question-item';
+    item.innerHTML = `
+      <input class="form-check-input mt-1 flex-shrink-0 lib-q-checkbox" type="checkbox" value="${q.id}" onchange="libUpdateSelection()">
+      <div class="flex-grow-1">
+        <div class="d-flex gap-2 align-items-center mb-1 flex-wrap">
+          <span class="badge bg-${typeInfo.color}">${pdfEscapeHtml(typeInfo.label)}</span>
+          <span class="badge bg-${diffColor}">${pdfEscapeHtml(q.difficulty)}</span>
+          ${q.subject ? '<span class="badge bg-light text-dark">' + pdfEscapeHtml(q.subject) + '</span>' : ''}
+          ${q.gradeLevel ? '<span class="badge bg-light text-dark">Grade ' + pdfEscapeHtml(String(q.gradeLevel)) + '</span>' : ''}
+        </div>
+        <div class="fw-semibold mb-1">${pdfEscapeHtml(q.title)}</div>
+        ${optionsHtml}
+      </div>`;
+    list.appendChild(item);
+  });
+}
+
+// Update counter and badges
+function libUpdateCounter(total) {
+  document.getElementById('libCounter').textContent = total + ' question' + (total !== 1 ? 's' : '');
+}
+
+// Update selection state
+function libUpdateSelection() {
+  const checkboxes = document.querySelectorAll('.lib-q-checkbox');
+  const checked = Array.from(checkboxes).filter(cb => cb.checked);
+  const selectedCount = checked.length;
+  const totalCount = checkboxes.length;
+
+  const badge = document.getElementById('libSelectedBadge');
+  const addBtn = document.getElementById('libAddBtn');
+  const addCount = document.getElementById('libAddCount');
+  const footerCount = document.getElementById('libFooterCount');
+  const selectAll = document.getElementById('libSelectAll');
+
+  if (selectedCount > 0) {
+    badge.classList.remove('d-none');
+    badge.textContent = selectedCount + ' selected';
+    addBtn.disabled = false;
+    addCount.textContent = selectedCount;
+    footerCount.textContent = selectedCount + ' question' + (selectedCount !== 1 ? 's' : '') + ' selected';
+  } else {
+    badge.classList.add('d-none');
+    addBtn.disabled = true;
+    addCount.textContent = '0';
+    footerCount.textContent = 'Select questions to add';
+  }
+
+  // Update select all checkbox state
+  if (selectedCount === totalCount && totalCount > 0) {
+    selectAll.checked = true;
+    selectAll.indeterminate = false;
+  } else if (selectedCount > 0) {
+    selectAll.checked = false;
+    selectAll.indeterminate = true;
+  } else {
+    selectAll.checked = false;
+    selectAll.indeterminate = false;
+  }
+}
+
+// Toggle all checkboxes
+function libToggleAll() {
+  const selectAll = document.getElementById('libSelectAll');
+  const checkboxes = document.querySelectorAll('.lib-q-checkbox');
+  checkboxes.forEach(cb => cb.checked = selectAll.checked);
+  libUpdateSelection();
+}
+
+// Clear all filters
+function libClearFilters() {
+  document.getElementById('libSearch').value = '';
+  document.getElementById('libSubject').value = '';
+  document.getElementById('libGrade').value = '';
+  document.getElementById('libDifficulty').value = '';
+  libLoadQuestions();
+}
+
+// Add selected questions to assignment
+async function libAddSelected() {
+  const checkboxes = document.querySelectorAll('.lib-q-checkbox:checked');
+  const questionIds = Array.from(checkboxes).map(cb => cb.value);
+  
+  if (questionIds.length === 0) return;
+
+  const addBtn = document.getElementById('libAddBtn');
+  addBtn.disabled = true;
+  addBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding…';
+
+  const token = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
+  const fd = new FormData();
+  fd.append('questionIds', JSON.stringify(questionIds));
+  fd.append('__RequestVerificationToken', token);
+
+  try {
+    const res = await fetch('/Assignments/ImportFromLibrary/@a.Id', { method: 'POST', body: fd });
+    const data = await res.json();
+    
+    if (data.error) {
+      alert('Error: ' + data.error);
+      addBtn.disabled = false;
+      addBtn.innerHTML = '<i class="bx bx-plus me-1"></i>Add selected (<span id="libAddCount">' + questionIds.length + '</span>)';
+      return;
+    }
+
+    libModalInstance?.hide();
+    location.reload();
+  } catch (err) {
+    alert('Failed to add questions: ' + err.message);
+    addBtn.disabled = false;
+    addBtn.innerHTML = '<i class="bx bx-plus me-1"></i>Add selected (<span id="libAddCount">' + questionIds.length + '</span>)';
+  }
+}
+</script>
+}

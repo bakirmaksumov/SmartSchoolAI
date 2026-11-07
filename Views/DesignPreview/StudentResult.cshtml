@@ -1,0 +1,207 @@
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Design trial — Student result (Tabler)</title>
+
+    @* Real Tabler UI kit, served from wwwroot *@
+    <link rel="stylesheet" href="/tabler/tabler.min.css" />
+    @* Existing Boxicons kept as-is — demonstrates the "keep Boxicons" mitigation *@
+    <link rel="stylesheet" href="/sneat/vendor/fonts/boxicons.css" />
+</head>
+<body class="layout-fluid">
+<div class="page">
+
+    <!-- Trial banner -->
+    <div class="container-xl mt-3">
+        <div class="alert alert-info mb-0" role="alert">
+            <div class="d-flex">
+                <div><i class="bx bx-palette fs-2 me-2"></i></div>
+                <div>
+                    <h4 class="alert-title">Tabler design trial</h4>
+                    <div class="text-secondary">
+                        Same screen as <code>/Student/AssignmentResult</code>, reskinned in the Tabler UI kit.
+                        Icons still use your existing Boxicons — nothing was remapped.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Page header -->
+    <div class="page-header d-print-none mt-2">
+        <div class="container-xl">
+            <div class="row g-2 align-items-center">
+                <div class="col">
+                    <div class="page-pretitle">Result</div>
+                    <h2 class="page-title">Algebra II — Solving Linear Equations</h2>
+                </div>
+                <div class="col-auto ms-auto">
+                    <a href="#" class="btn btn-outline-secondary">
+                        <i class="bx bx-arrow-back me-1"></i> Back to Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="page-body">
+        <div class="container-xl">
+
+            <!-- Summary row -->
+            <div class="row row-cards mb-3">
+                <div class="col-md-4">
+                    <div class="card h-100">
+                        <div class="card-body text-center">
+                            <span class="avatar avatar-xl mb-3"
+                                  style="background: rgba(47,179,68,.12); color:#2fb344; font-size:1.5rem; font-weight:600;">
+                                85%
+                            </span>
+                            <h3 class="mb-1">Overall Score</h3>
+                            <span class="badge bg-green-lt">Correct</span>
+                            <div class="mt-2">
+                                <span class="badge bg-blue-lt">
+                                    <i class="bx bx-user-check me-1"></i>Reviewed by your teacher
+                                </span>
+                            </div>
+                            <div class="text-secondary small mt-2">Attempt 2</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-8">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <h3 class="card-title"><i class="bx bx-comment-detail me-2"></i>Feedback</h3>
+                            <span class="badge bg-blue-lt ms-auto">
+                                <i class="bx bx-user-check me-1"></i>Reviewed by your teacher
+                            </span>
+                        </div>
+                        <div class="card-body d-flex flex-column">
+                            <div>
+                                <p class="fw-bold mb-2" style="font-size:1.05rem;">
+                                    💪 Great job! You've got a solid grasp of this.
+                                </p>
+                                <p class="text-secondary">You answered 4 of 5 questions correctly.</p>
+                            </div>
+                            <div class="btn-list mt-auto">
+                                <a href="#" class="btn btn-outline-primary">
+                                    <i class="bx bx-bulb me-1"></i> Get a Hint
+                                </a>
+                                <a href="#" class="btn btn-outline-azure">
+                                    <i class="bx bx-book-reader me-1"></i> Explain Answer
+                                </a>
+                                <a href="#" class="btn btn-outline-warning">
+                                    <i class="bx bx-refresh me-1"></i> Try Again
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Question breakdown -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="bx bx-list-check me-2"></i>Question Breakdown</h3>
+                </div>
+                <div class="table-responsive">
+                    <table class="table card-table table-vcenter">
+                        <thead>
+                            <tr>
+                                <th class="w-1">#</th>
+                                <th>Question</th>
+                                <th>Your Answer</th>
+                                <th>Result</th>
+                                <th>Correct Answer</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>1</td>
+                                <td>Solve for x: 3x + 5 = 20</td>
+                                <td>x = 5</td>
+                                <td><span class="badge bg-green-lt">Correct</span></td>
+                                <td><i class="bx bx-check text-green"></i></td>
+                            </tr>
+                            <tr>
+                                <td>2</td>
+                                <td>Solve for y: y/3 − 2 = 4</td>
+                                <td>y = 6</td>
+                                <td>
+                                    <span class="badge bg-red-lt">Incorrect</span>
+                                    <div class="text-secondary small mt-1" style="max-width:240px;">
+                                        <i class="bx bx-user-voice me-1"></i>Watch the sign when you move −2 across.
+                                    </div>
+                                </td>
+                                <td class="text-green">y = 18</td>
+                            </tr>
+                            <tr>
+                                <td>3</td>
+                                <td>Which of these is a linear equation?</td>
+                                <td>2x + 1 = 7</td>
+                                <td><span class="badge bg-green-lt">Correct</span></td>
+                                <td><i class="bx bx-check text-green"></i></td>
+                            </tr>
+                            <tr>
+                                <td>4</td>
+                                <td>Solve: 2(x − 3) = 10</td>
+                                <td>x = 8</td>
+                                <td><span class="badge bg-green-lt">Correct</span></td>
+                                <td><i class="bx bx-check text-green"></i></td>
+                            </tr>
+                            <tr>
+                                <td>5</td>
+                                <td>Explain what a solution to an equation means.</td>
+                                <td>The value that makes it true</td>
+                                <td><span class="badge bg-green-lt">Correct</span></td>
+                                <td><i class="bx bx-check text-green"></i></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Handwritten solution -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title"><i class="bx bx-camera me-2"></i>Handwritten Solution</h3>
+                </div>
+                <div class="card-body">
+                    <div class="fw-semibold mb-3">Question 2: Solve for y: y/3 − 2 = 4</div>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="ratio ratio-4x3 rounded border bg-secondary-lt d-flex align-items-center justify-content-center text-secondary">
+                                <div class="text-center">
+                                    <i class="bx bx-image-alt" style="font-size:2rem;"></i>
+                                    <div class="small mt-1">student's photo</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <p class="text-secondary small mb-2">The first step is right, but the sign flips on line 2.</p>
+
+                            <div class="border rounded p-2 mb-2" style="border-left:3px solid #2fb344 !important;">
+                                <div class="small">✅ Step 1: y/3 − 2 = 4</div>
+                            </div>
+                            <div class="border rounded p-2 mb-2" style="border-left:3px solid #d63939 !important;">
+                                <div class="small">❌ Step 2: y/3 = 4 − 2</div>
+                                <div class="small text-secondary mt-1">💡 Move −2 to the other side as +2, not −2.</div>
+                            </div>
+                            <div class="border rounded p-2" style="border-left:3px solid #2fb344 !important;">
+                                <div class="small">Step 3: y = 3 × 6</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+</body>
+</html>

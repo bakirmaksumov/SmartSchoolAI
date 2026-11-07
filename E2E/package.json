@@ -1,0 +1,14 @@
+{
+  "name": "smartschoolai-e2e",
+  "private": true,
+  "scripts": {
+    "test": "node scripts/run-e2e.mjs",
+    "test:headed": "node scripts/run-e2e.mjs --headed",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}

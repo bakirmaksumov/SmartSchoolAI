@@ -1,0 +1,152 @@
+﻿@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<!-- Page header -->
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">SmartSchool AI /</span> Dashboard
+    </h4>
+  </div>
+</div>
+
+<!-- Stats cards row -->
+<div class="row mb-4">
+  <div class="col-sm-6 col-xl-3 mb-4">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex align-items-start justify-content-between">
+          <div class="avatar flex-shrink-0">
+            <span class="avatar-initial rounded bg-label-primary">
+              <i class="bx bx-group"></i>
+            </span>
+          </div>
+        </div>
+        <span class="fw-semibold d-block mb-1 mt-2">Total Students</span>
+        <h3 class="card-title mb-2">@ViewBag.TotalStudents</h3>
+        <small class="text-success fw-semibold"><i class="bx bx-up-arrow-alt"></i> Active</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-sm-6 col-xl-3 mb-4">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex align-items-start justify-content-between">
+          <div class="avatar flex-shrink-0">
+            <span class="avatar-initial rounded bg-label-success">
+              <i class="bx bx-task"></i>
+            </span>
+          </div>
+        </div>
+        <span class="fw-semibold d-block mb-1 mt-2">Active Assignments</span>
+        <h3 class="card-title mb-2">@ViewBag.ActiveAssignments</h3>
+        <small class="text-muted fw-semibold">This month</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-sm-6 col-xl-3 mb-4">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex align-items-start justify-content-between">
+          <div class="avatar flex-shrink-0">
+            <span class="avatar-initial rounded bg-label-warning">
+              <i class="bx bx-check-circle"></i>
+            </span>
+          </div>
+        </div>
+        <span class="fw-semibold d-block mb-1 mt-2">Submissions Today</span>
+        <h3 class="card-title mb-2">@ViewBag.SubmissionsToday</h3>
+        <small class="text-warning fw-semibold">Awaiting review</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-sm-6 col-xl-3 mb-4">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex align-items-start justify-content-between">
+          <div class="avatar flex-shrink-0">
+            <span class="avatar-initial rounded bg-label-info">
+              <i class="bx bx-bar-chart-alt-2"></i>
+            </span>
+          </div>
+        </div>
+        <span class="fw-semibold d-block mb-1 mt-2">Avg Score</span>
+        <h3 class="card-title mb-2">@ViewBag.AverageScore%</h3>
+        <small class="text-info fw-semibold">Class average</small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Recent assignments table -->
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h5 class="mb-0">Recent Assignments</h5>
+    <a href="/Assignments/Create" class="btn btn-primary btn-sm">
+      <i class="bx bx-plus me-1"></i> New Assignment
+    </a>
+  </div>
+  <div class="table-responsive text-nowrap">
+    <table class="table table-hover">
+      <thead class="table-light">
+        <tr>
+          <th>Title</th>
+          <th>Class</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Deadline</th>
+          <th>Submissions</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (ViewBag.RecentAssignments != null)
+        {
+          @foreach (var a in ViewBag.RecentAssignments)
+          {
+            <tr>
+              <td><strong>@a.Title</strong></td>
+              <td>@a.ClassName</td>
+              <td>
+                <span class="badge bg-label-@(a.Type == "homework" ? "primary" : "info")">
+                  @a.Type
+                </span>
+              </td>
+              <td>
+                <span class="badge bg-@(a.Status == "active" ? "success" : a.Status == "draft" ? "secondary" : "warning")">
+                  @a.Status
+                </span>
+              </td>
+              <td>@(a.Deadline?.ToString("dd MMM") ?? "—")</td>
+              <td>@a.SubmissionsCount / @a.TotalStudents</td>
+              <td>
+                <a href="/Assignments/Details/@a.Id" class="btn btn-sm btn-icon btn-outline-primary"
+                   data-bs-toggle="tooltip" title="View Details">
+                  <i class="bx bx-show"></i>
+                </a>
+              </td>
+            </tr>
+          }
+        }
+        else
+        {
+          <tr>
+            <td colspan="7" class="text-center py-4 text-muted">
+              <i class="bx bx-task" style="font-size:2rem;"></i>
+              <p class="mt-2 mb-0">No assignments yet. <a href="/Assignments/Create">Create your first one!</a></p>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</div>
+
+@section Scripts {
+  <script src="~/sneat/vendor/libs/apex-charts/apexcharts.js"></script>
+}
+

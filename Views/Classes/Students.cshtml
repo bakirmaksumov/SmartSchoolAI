@@ -1,0 +1,179 @@
+@model SmartSchoolAI.ViewModels.StudentRosterViewModel
+@{
+    ViewData["Title"] = "Students";
+    var rows     = Model.Rows;
+    var classes  = Model.Classes;
+    var selected = Model.SelectedClassId;
+    var search   = Model.Search;
+}
+
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">SmartSchool AI /</span> Students
+    </h4>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="card mb-4">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-5">
+        <label class="form-label small text-muted mb-1">Search</label>
+        <div class="input-group">
+          <span class="input-group-text"><i class="bx bx-search"></i></span>
+          <input type="text" class="form-control" name="search" value="@search"
+                 placeholder="Name or email…" />
+        </div>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small text-muted mb-1">Class</label>
+        <select class="form-select" name="classId">
+          <option value="">All classes</option>
+          @foreach (var c in classes)
+          {
+            if (selected == c.Id)
+            {
+              <option value="@c.Id" selected>@c.Name</option>
+            }
+            else
+            {
+              <option value="@c.Id">@c.Name</option>
+            }
+          }
+        </select>
+      </div>
+      <div class="col-md-3 d-flex gap-2">
+        <button type="submit" class="btn btn-primary">
+          <i class="bx bx-filter-alt me-1"></i> Filter
+        </button>
+        <a href="/Classes/Students" class="btn btn-outline-secondary">
+          <i class="bx bx-x"></i>
+        </a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h5 class="mb-0">@rows.Count student@(rows.Count == 1 ? "" : "s")</h5>
+    <small class="text-muted">Use the ⋯ menu to edit, reset a password or remove</small>
+  </div>
+  <div class="table-responsive table-has-dropdown">
+    <table class="table table-hover mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Name</th>
+          <th>Class</th>
+          <th>Joined</th>
+          <th>Participation</th>
+          <th>Average score</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @if (!rows.Any())
+        {
+          <tr>
+            <td colspan="6" class="text-center py-4 text-muted">
+              @if (!classes.Any())
+              {
+                <span>You have no active classes yet. <a href="/Classes/Create">Create a class</a> first.</span>
+              }
+              else
+              {
+                <span>No students match this filter. Share a class invite code to enrol students.</span>
+              }
+            </td>
+          </tr>
+        }
+        else
+        {
+          @foreach (var row in rows)
+          {
+            var scoreColor = row.Stats.AverageScore < 0 ? "secondary"
+                           : row.Stats.AverageScore >= 70 ? "success"
+                           : row.Stats.AverageScore >= 40 ? "warning" : "danger";
+            <tr>
+              <td>
+                <div class="d-flex align-items-center">
+                  <div class="avatar avatar-sm me-2">
+                    <span class="avatar-initial rounded-circle bg-label-primary">@row.FullName[0]</span>
+                  </div>
+                  <div>
+                    <strong class="d-block">@row.FullName</strong>
+                    <small class="text-muted">@row.Email</small>
+                  </div>
+                </div>
+              </td>
+              <td>
+                <a href="/Classes/Details/@row.ClassId?tab=students" class="text-body">@row.ClassName</a>
+              </td>
+              <td>@row.JoinedAt.ToString("dd MMM yyyy")</td>
+              <td>
+                @if (row.Stats.Assigned == 0)
+                {
+                  <span class="text-muted small">No work assigned</span>
+                }
+                else
+                {
+                  <span>@row.Stats.ParticipationRate%</span>
+                  <small class="text-muted d-block">@row.Stats.Submitted of @row.Stats.Assigned submitted</small>
+                }
+              </td>
+              <td>
+                @if (row.Stats.AverageScore < 0)
+                {
+                  <span class="text-muted">—</span>
+                }
+                else
+                {
+                  <span class="badge bg-label-@scoreColor">@row.Stats.AverageScore%</span>
+                }
+              </td>
+              <td class="text-end">
+                <div class="dropdown">
+                  <button class="btn btn-sm btn-icon btn-outline-secondary" type="button"
+                          data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bx bx-dots-horizontal-rounded"></i>
+                  </button>
+                  <ul class="dropdown-menu dropdown-menu-end">
+                    <li>
+                      <button type="button" class="dropdown-item"
+                              onclick="openEditStudent('@row.ClassId', '@row.StudentId', '@row.FullName', '@row.Email')">
+                        <i class="bx bx-edit me-1"></i> Edit student
+                      </button>
+                    </li>
+                    <li>
+                      <button type="button" class="dropdown-item"
+                              onclick="openResetPassword('@row.ClassId', '@row.StudentId', '@row.FullName')">
+                        <i class="bx bx-lock-open-alt me-1"></i> Reset password
+                      </button>
+                    </li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li>
+                      <form method="post" asp-controller="Classes" asp-action="RemoveStudent"
+                            onsubmit="return confirm('Remove @row.FullName from @row.ClassName? Their submitted work stays, but they lose access to the class.')">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="classId"   value="@row.ClassId" />
+                        <input type="hidden" name="studentId" value="@row.StudentId" />
+                        <input type="hidden" name="returnTo"  value="roster" />
+                        <button type="submit" class="dropdown-item text-danger">
+                          <i class="bx bx-user-minus me-1"></i> Remove from class
+                        </button>
+                      </form>
+                    </li>
+                  </ul>
+                </div>
+              </td>
+            </tr>
+          }
+        }
+      </tbody>
+    </table>
+  </div>
+</div>
+
+@await Html.PartialAsync("_StudentActionModals", "roster")

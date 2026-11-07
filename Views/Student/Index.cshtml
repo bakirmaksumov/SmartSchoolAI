@@ -1,0 +1,276 @@
+@model List<SmartSchoolAI.Models.Class>
+@{
+    ViewData["Title"] = "My Dashboard";
+    // assignmentId → latest submitted result
+    var submittedResults  = ViewBag.SubmittedResults as Dictionary<System.Guid, SmartSchoolAI.Models.StudentResult> ?? new();
+    var averageScore      = ViewBag.AverageScore as int? ?? 0;
+    var upcomingDeadlines = ViewBag.UpcomingDeadlines as List<SmartSchoolAI.Models.Assignment> ?? new();
+}
+
+<!-- EduSchool AI Hero Welcome Card -->
+<div class="wiut-hero-card mb-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div>
+      <h3 class="fw-bold text-white mb-1"><i class="bx bx-graduation me-2"></i>Welcome to EduSchool AI</h3>
+      <p class="text-white-50 mb-0">Next-Generation School Academic Workspace & Adaptive Tutoring</p>
+    </div>
+    <div>
+      <button class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#joinClassModal">
+        <i class="bx bx-plus me-1"></i> Join a Class
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- TOP STATS METRIC ROW -->
+<div class="row mb-4">
+  <!-- Enrolled Classes -->
+  <div class="col-sm-6 col-lg-3 mb-3 mb-lg-0">
+    <div class="card card-hover wiut-stat-card h-100">
+      <div class="card-body d-flex align-items-center justify-content-between">
+        <div>
+          <span class="text-muted d-block mb-1 fw-semibold">Enrolled Classes</span>
+          <h4 class="mb-0 fw-bold text-primary">@Model.Count</h4>
+        </div>
+        <div class="avatar avatar-md bg-label-primary p-2 rounded">
+          <i class="bx bx-group fs-3 text-primary"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overall Average Score (GPA) -->
+  <div class="col-sm-6 col-lg-3 mb-3 mb-lg-0">
+    <div class="card card-hover wiut-stat-card stat-crimson h-100">
+      <div class="card-body d-flex align-items-center justify-content-between">
+        <div>
+          <span class="text-muted d-block mb-1 fw-semibold">Average Grade</span>
+          <h4 class="mb-0 fw-bold text-danger">@averageScore%</h4>
+        </div>
+        <div class="avatar avatar-md bg-label-danger p-2 rounded">
+          <i class="bx bx-bar-chart-alt-2 fs-3 text-danger"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Completed Submissions -->
+  <div class="col-sm-6 col-lg-3 mb-3 mb-lg-0">
+    <div class="card card-hover wiut-stat-card stat-gold h-100">
+      <div class="card-body d-flex align-items-center justify-content-between">
+        <div>
+          <span class="text-muted d-block mb-1 fw-semibold">Tasks Completed</span>
+          <h4 class="mb-0 fw-bold" style="color:var(--wiut-gold);">@submittedResults.Count</h4>
+        </div>
+        <div class="avatar avatar-md p-2 rounded" style="background-color: var(--wiut-gold-light);">
+          <i class="bx bx-check-circle fs-3" style="color:var(--wiut-gold);"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- EduSchool Badges & Streak -->
+  <div class="col-sm-6 col-lg-3">
+    <div class="card card-hover wiut-stat-card h-100" style="border-left-color: #28a745;">
+      <div class="card-body d-flex align-items-center justify-content-between">
+        <div>
+          <span class="text-muted d-block mb-1 fw-semibold">EduSchool Badges</span>
+          <h4 class="mb-0 fw-bold text-success">
+            @(submittedResults.Count >= 5 ? "3" : submittedResults.Count >= 1 ? "2" : "1") 🏅
+          </h4>
+        </div>
+        <div class="avatar avatar-md bg-label-success p-2 rounded">
+          <i class="bx bx-award fs-3 text-success"></i>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MIDDLE SECTION: UPCOMING DEADLINES & AI TUTOR INSIGHTS -->
+<div class="row mb-4">
+  <!-- Left: To-Do Upcoming Deadlines -->
+  <div class="col-lg-7 mb-4 mb-lg-0">
+    <div class="card card-hover h-100">
+      <div class="card-header d-flex align-items-center justify-content-between py-3 bg-transparent">
+        <h5 class="card-title mb-0 fw-bold text-primary">
+          <i class="bx bx-time-five me-1 text-danger"></i> To-Do / Upcoming Deadlines
+        </h5>
+        <span class="badge bg-label-danger">@upcomingDeadlines.Count Pending</span>
+      </div>
+      <div class="card-body">
+        @if (!upcomingDeadlines.Any())
+        {
+          <div class="text-center py-4">
+            <i class="bx bx-check-double text-success" style="font-size:3rem;"></i>
+            <h6 class="fw-bold mt-2 text-success">All caught up!</h6>
+            <p class="text-muted small mb-0">No pending assignments due at the moment.</p>
+          </div>
+        }
+        else
+        {
+          <div class="list-group list-group-flush">
+            @foreach (var task in upcomingDeadlines)
+            {
+              <div class="list-group-item d-flex align-items-center justify-content-between px-0 py-3 border-bottom">
+                <div class="d-flex align-items-center me-3">
+                  <div class="avatar avatar-sm me-3 flex-shrink-0">
+                    <span class="avatar-initial rounded bg-label-primary">
+                      <i class="bx bx-task"></i>
+                    </span>
+                  </div>
+                  <div>
+                    <h6 class="mb-0 fw-semibold">@task.Title</h6>
+                    <small class="text-muted">@task.Class?.Name · @task.Type</small>
+                  </div>
+                </div>
+                <div class="text-end flex-shrink-0">
+                  @if (task.Deadline.HasValue)
+                  {
+                    var isOverdue = task.Deadline.Value < DateTime.UtcNow;
+                    <span class="badge bg-label-@(isOverdue ? "danger" : "warning") d-block mb-1">
+                      <i class="bx bx-calendar me-1"></i>@task.Deadline.Value.ToString("dd MMM HH:mm")
+                    </span>
+                  }
+                  <a asp-action="TakeAssignment" asp-route-assignmentId="@task.Id" class="btn btn-xs btn-primary">
+                    Start <i class="bx bx-right-arrow-alt ms-1"></i>
+                  </a>
+                </div>
+              </div>
+            }
+          </div>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: AI Mastery & Smart Insights -->
+  <div class="col-lg-5">
+    <div class="card card-hover h-100">
+      <div class="card-header d-flex align-items-center justify-content-between py-3 bg-transparent">
+        <h5 class="card-title mb-0 fw-bold text-primary">
+          <i class="bx bx-bot me-1 text-primary"></i> AI Learning Insights
+        </h5>
+        <span class="badge bg-label-primary">Live AI</span>
+      </div>
+      <div class="card-body">
+        <div class="bg-lighter rounded p-3 mb-3 border">
+          <div class="d-flex align-items-start gap-2">
+            <i class="bx bx-bulb text-warning fs-4 mt-1"></i>
+            <div>
+              <h6 class="fw-bold mb-1">Smart Focus Tip</h6>
+              <p class="text-muted small mb-0">
+                Based on your latest test results (@averageScore% avg), review step-by-step solutions with your <strong>AI Tutor</strong> before your next quiz.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <h6 class="fw-bold mb-2 small text-uppercase text-muted">Academic Progress Status</h6>
+        <div class="mb-3">
+          <div class="d-flex justify-content-between small fw-semibold mb-1">
+            <span>Overall Course Completion</span>
+            <span class="text-primary">@averageScore%</span>
+          </div>
+          <div class="progress" style="height: 8px;">
+            <div class="progress-bar bg-primary" role="progressbar" style="width: @averageScore%;" aria-valuenow="@averageScore" aria-valuemin="0" aria-valuemax="100"></div>
+          </div>
+        </div>
+
+        <div class="d-grid gap-2 mt-4">
+          <a asp-action="Profile" asp-controller="Profile" class="btn btn-outline-primary btn-sm">
+            <i class="bx bx-award me-1"></i> View All Achievements
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BOTTOM SECTION: ENROLLED COURSES SUMMARY -->
+<h5 class="fw-bold text-primary mb-3">
+  <i class="bx bx-book-open me-1 text-danger"></i> My Enrolled Classes
+</h5>
+
+@if (!Model.Any())
+{
+  <div class="card card-hover">
+    <div class="card-body text-center py-5">
+      <i class="bx bx-book-open text-primary" style="font-size:3.5rem;"></i>
+      <h5 class="mt-3 text-primary fw-bold">No classes enrolled yet</h5>
+      <p class="text-muted">Ask your instructor for an invite code to join your first class.</p>
+      <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#joinClassModal">
+        <i class="bx bx-plus me-1"></i> Join a Class
+      </button>
+    </div>
+  </div>
+}
+else
+{
+  <div class="row">
+    @foreach (var cls in Model)
+    {
+      var totalAssigned = cls.Assignments.Count;
+      var completedInClass = cls.Assignments.Count(a => submittedResults.ContainsKey(a.Id));
+      var progressPercent = totalAssigned > 0 ? (completedInClass * 100 / totalAssigned) : 0;
+
+      <div class="col-md-6 col-xl-4 mb-4">
+        <div class="card card-hover h-100">
+          <div class="card-body d-flex flex-column justify-content-between">
+            <div>
+              <div class="d-flex align-items-center justify-content-between mb-2">
+                <span class="badge bg-label-primary">Grade @cls.GradeLevel</span>
+                <span class="badge bg-label-info">@cls.Subject</span>
+              </div>
+              <h5 class="card-title fw-bold text-primary mb-1">@cls.Name</h5>
+              <p class="text-muted small mb-3">
+                <i class="bx bx-user me-1"></i>Instructor: @cls.Teacher.FullName
+              </p>
+            </div>
+
+            <div>
+              <div class="d-flex justify-content-between small fw-semibold mb-1">
+                <span>Class Completion</span>
+                <span class="text-primary">@completedInClass / @totalAssigned (@progressPercent%)</span>
+              </div>
+              <div class="progress mb-3" style="height: 6px;">
+                <div class="progress-bar bg-success" role="progressbar" style="width: @progressPercent%;" aria-valuenow="@progressPercent" aria-valuemin="0" aria-valuemax="100"></div>
+              </div>
+
+              <a asp-action="Assignments" asp-route-classId="@cls.Id" class="btn btn-outline-primary btn-sm w-100">
+                <i class="bx bx-folder-open me-1"></i> Open Class Assignments
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    }
+  </div>
+}
+
+<!-- Join Class Modal -->
+<div class="modal fade" id="joinClassModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" asp-action="JoinClass">
+        @Html.AntiForgeryToken()
+        <div class="modal-header">
+          <h5 class="modal-title">Join a Class</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <label class="form-label">Invite Code</label>
+          <input type="text" name="inviteCode" class="form-control text-uppercase"
+                 placeholder="e.g. AB3XY7" maxlength="6" required />
+          <div class="form-text">Enter the 6-character code from your teacher</div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">
+            <i class="bx bx-log-in me-1"></i> Join Class
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,113 @@
+@{
+    ViewData["Title"] = "Create Assignment";
+    var classes = ViewBag.Classes as IEnumerable<SmartSchoolAI.Models.Class> ?? Enumerable.Empty<SmartSchoolAI.Models.Class>();
+}
+
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">SmartSchool AI / <a href="/Assignments">Assignments</a> /</span> Create
+    </h4>
+  </div>
+</div>
+
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card">
+      <div class="card-header">
+        <h5 class="mb-0"><i class="bx bx-task me-2"></i>New Assignment</h5>
+      </div>
+      <div class="card-body">
+
+        @if (!string.IsNullOrEmpty(ViewBag.Error?.ToString()))
+        {
+          <div class="alert alert-danger">
+            <i class="bx bx-error-circle me-1"></i> @ViewBag.Error
+          </div>
+        }
+
+        <form method="post" asp-action="Create" asp-controller="Assignments">
+          @Html.AntiForgeryToken()
+
+          <div class="mb-3">
+            <label class="form-label">Title <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" name="title"
+                   placeholder="Assignment title" required autofocus />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">Description</label>
+            <textarea class="form-control" name="description" rows="3"
+                      placeholder="Instructions for students..."></textarea>
+          </div>
+
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Class <span class="text-danger">*</span></label>
+              <select class="form-select" name="classId" required id="classSelect">
+                <option value="">— Select a class —</option>
+                @foreach (var cls in classes)
+                {
+                  <option value="@cls.Id">@cls.Name</option>
+                }
+              </select>
+              @if (!classes.Any())
+              {
+                <div class="form-text text-warning">
+                  <i class="bx bx-info-circle me-1"></i>
+                  No classes yet. <a href="/Classes/Create">Create a class first.</a>
+                </div>
+              }
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Type</label>
+              <select class="form-select" name="type" id="typeSelect">
+                <option value="0">Classroom Practice</option>
+                <option value="1">Homework</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col-md-6 mb-3" id="deadlineGroup">
+              <label class="form-label">Deadline <span class="text-danger" id="deadlineRequired">*</span></label>
+              <input type="datetime-local" class="form-control" name="deadline" id="deadlineInput" />
+              <div class="form-text">Required for Homework assignments</div>
+            </div>
+            <div class="col-md-6 mb-3 d-flex align-items-end pb-1">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="allowLateSubmission" value="true" id="lateCheck" />
+                <label class="form-check-label" for="lateCheck">Allow late submissions</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="d-flex gap-2 mt-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="bx bx-save me-1"></i> Save as Draft
+            </button>
+            <a href="/Assignments" class="btn btn-outline-secondary">Cancel</a>
+          </div>
+        </form>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+@section Scripts {
+<script>
+  const typeSelect     = document.getElementById('typeSelect');
+  const deadlineInput  = document.getElementById('deadlineInput');
+  const deadlineReq    = document.getElementById('deadlineRequired');
+
+  function toggleDeadline() {
+    const isHomework = typeSelect.value === '1';
+    deadlineInput.required  = isHomework;
+    deadlineReq.style.display = isHomework ? 'inline' : 'none';
+  }
+
+  typeSelect.addEventListener('change', toggleDeadline);
+  toggleDeadline();
+</script>
+}

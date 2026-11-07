@@ -1,0 +1,351 @@
+@using SmartSchoolAI.Models.Dtos
+@model SmartSchoolAI.ViewModels.SubmissionDetailViewModel
+@{
+    var result    = Model.Result;
+    var questions = Model.Questions;
+    ViewData["Title"] = $"Submission — {result.Student.FullName}";
+    var scoreColor = result.Assignment.IsPass(result.Score) ? "success"
+                 : result.Score >= result.Assignment.PassThreshold / 2 ? "warning" : "danger";
+}
+
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">
+        SmartSchool AI /
+        <a href="/Assignments" class="text-muted">Assignments</a> /
+        <a href="/Assignments/Details/@result.AssignmentId" class="text-muted">@result.Assignment.Title</a> /
+      </span> @result.Student.FullName
+    </h4>
+  </div>
+  <div class="col-auto d-flex align-items-center">
+    <a href="/Assignments/Details/@result.AssignmentId" class="btn btn-outline-secondary btn-sm">
+      <i class="bx bx-arrow-back me-1"></i> Back to Assignment
+    </a>
+  </div>
+</div>
+
+<!-- Score summary row -->
+<div class="row mb-4">
+  <div class="col-md-3 mb-3">
+    <div class="card text-center h-100">
+      <div class="card-body py-4">
+        <div class="avatar avatar-xl mx-auto mb-3">
+          <span class="avatar-initial rounded-circle bg-label-@scoreColor" style="font-size:1.6rem;">
+            @result.Assignment.FormatGrade(result.Score)
+          </span>
+        </div>
+        <h6 class="mb-1">Overall Score</h6>
+        <span class="badge bg-@scoreColor">@result.OverallStatus</span>
+        <div class="mt-2">
+          @if (result.TeacherReviewedAt.HasValue)
+          {
+            <span class="badge bg-label-primary"><i class="bx bx-user-check me-1"></i>Teacher reviewed</span>
+          }
+          else
+          {
+            <span class="badge bg-label-secondary"><i class="bx bx-bot me-1"></i>AI graded</span>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 mb-3">
+    <div class="card text-center h-100">
+      <div class="card-body py-4">
+        <i class="bx bx-user text-primary mb-2" style="font-size:2rem;"></i>
+        <h6 class="mb-1">@result.Student.FullName</h6>
+        <small class="text-muted">@result.Student.Email</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 mb-3">
+    <div class="card text-center h-100">
+      <div class="card-body py-4">
+        <i class="bx bx-calendar text-info mb-2" style="font-size:2rem;"></i>
+        <h6 class="mb-1">Submitted</h6>
+        <small class="text-muted">@result.SubmittedAt.ToString("dd MMM yyyy HH:mm")</small>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3 mb-3">
+    <div class="card text-center h-100">
+      <div class="card-body py-4">
+        <i class="bx bx-revision text-warning mb-2" style="font-size:2rem;"></i>
+        <h6 class="mb-1">Attempt</h6>
+        <span class="text-muted">
+          @if (result.Assignment.AllowsUnlimitedAttempts)
+          {
+            <span>Practice</span>
+          }
+          else
+          {
+            <span>@result.AttemptNumber of @result.Assignment.MaxAttempts</span>
+          }
+        </span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- AI Summary -->
+@if (!string.IsNullOrEmpty(result.AiSummary))
+{
+  <div class="card mb-4">
+    <div class="card-body">
+      <h6 class="mb-2"><i class="bx bx-comment-detail me-1 text-primary"></i> AI Summary</h6>
+      <p class="mb-0">@result.AiSummary</p>
+    </div>
+  </div>
+}
+
+<!-- Per-question breakdown + teacher grading -->
+<form method="post" asp-action="GradeSubmission" id="gradeForm">
+  @Html.AntiForgeryToken()
+  <input type="hidden" name="resultId" value="@result.Id" />
+  <input type="hidden" name="assignmentId" value="@result.AssignmentId" />
+  <input type="hidden" name="gradesJson" id="gradesJson" />
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <h5 class="mb-0"><i class="bx bx-list-check me-2"></i>Question-by-Question Breakdown</h5>
+    <small class="text-muted">Adjust the AI's grade below, then save.</small>
+  </div>
+  <div class="card-body p-0">
+    @for (int i = 0; i < questions.Count; i++)
+    {
+      var q = questions[i];
+      var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == i);
+      var isCorrect = answer?.IsCorrect;
+      var borderClass = isCorrect == true ? "border-start border-success border-3" :
+                        isCorrect == false ? "border-start border-danger border-3" :
+                        "border-start border-secondary border-3";
+
+      <div class="p-3 @borderClass @(i > 0 ? "border-top" : "")">
+        <div class="d-flex align-items-start gap-3">
+          <div>
+            <span class="avatar avatar-sm">
+              <span class="avatar-initial rounded-circle bg-label-@(isCorrect == true ? "success" : isCorrect == false ? "danger" : "secondary")">
+                @(i + 1)
+              </span>
+            </span>
+          </div>
+          <div class="flex-grow-1">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <div>
+                <h6 class="mb-0 math-render">@q.Title</h6>
+                @if (!string.IsNullOrEmpty(q.ImagePath))
+                {
+                  <img src="@q.ImagePath" class="img-fluid rounded border mt-2 mb-1" style="max-height:220px;" alt="Diagram" />
+                }
+                <small class="text-muted">Type: @q.Type</small>
+              </div>
+              <div class="text-end">
+                <span class="badge bg-label-@(isCorrect == true ? "success" : isCorrect == false ? "danger" : "secondary")">
+                  @(isCorrect == true ? "Correct" : isCorrect == false ? "Incorrect" : "Not Evaluated")
+                </span>
+                @if (answer?.NeedsReview == true)
+                {
+                  <span class="badge bg-warning ms-1" data-bs-toggle="tooltip"
+                        title="The AI could not confirm this grade — please check it yourself">
+                    <i class="bx bx-error me-1"></i>Needs your review
+                  </span>
+                }
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-6">
+                <div class="bg-lighter rounded p-2 mb-2">
+                  <small class="text-muted d-block mb-1"><i class="bx bx-user me-1"></i>Student's Answer:</small>
+                  <span class="@(isCorrect == false ? "text-danger" : "")">
+                    @(string.IsNullOrEmpty(answer?.AnswerValue) ? "— No answer —" : answer.AnswerValue)
+                  </span>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="bg-lighter rounded p-2 mb-2">
+                  <small class="text-muted d-block mb-1"><i class="bx bx-check-circle me-1"></i>Correct Answer:</small>
+                  <span class="text-success fw-semibold">
+                    @(string.IsNullOrEmpty(q.AnswerKey) ? "— N/A —" : q.AnswerKey)
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            @{
+              var steps = result.StepResults.Where(s => s.QuestionIndex == i).OrderBy(s => s.StepNumber).ToList();
+            }
+            @if (answer?.NeedsReview == true && !string.IsNullOrWhiteSpace(answer.ReviewNote))
+            {
+              <div class="alert alert-warning py-2 px-3 mb-2 small">
+                <i class="bx bx-error-circle me-1"></i>@answer.ReviewNote
+              </div>
+            }
+
+            @if (!string.IsNullOrWhiteSpace(answer?.WorkText))
+            {
+              <div class="bg-lighter rounded p-2 mb-2">
+                <small class="text-muted d-block mb-1">
+                  <i class="bx bx-edit me-1"></i>Student's working:
+                </small>
+                <div class="math-render" style="white-space:pre-wrap; line-height:2;">@answer.WorkText</div>
+              </div>
+            }
+
+            @{
+              var answerPhotos = SmartSchoolAI.Services.SubmissionMedia.Paths(answer?.ImagePath);
+            }
+            @if (answerPhotos.Any())
+            {
+              <div class="row mt-2">
+                <div class="col-md-4 mb-2">
+                  <small class="text-muted d-block mb-1">
+                    <i class="bx bx-camera me-1"></i>Handwritten solution@(answerPhotos.Count > 1 ? $" ({answerPhotos.Count} pages)" : ""):
+                  </small>
+                  <div class="d-flex flex-column gap-2">
+                    @foreach (var photo in answerPhotos)
+                    {
+                      <img src="@photo" class="img-fluid rounded border" alt="Solution photo" />
+                    }
+                  </div>
+                </div>
+                <div class="col-md-8">
+                  <small class="text-muted d-block mb-1"><i class="bx bx-list-ol me-1"></i>Recognized steps:</small>
+                  @foreach (var s in steps)
+                  {
+                    var ok = s.Status == ResultStatus.Correct;
+                    <div class="border rounded p-2 mb-1" style="border-left:4px solid @(ok ? "#71dd37" : "#ff3e1d") !important;">
+                      <div class="small">@(ok ? "✅" : "❌") Step @s.StepNumber: @s.StepText</div>
+                      @if (!ok && !string.IsNullOrEmpty(s.Explanation))
+                      {
+                        <div class="small text-muted mt-1">💡 @s.Explanation</div>
+                      }
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (isCorrect == false && !string.IsNullOrEmpty(q.Explanation))
+            {
+              <div class="bg-label-info rounded p-2">
+                <small class="text-muted d-block mb-1"><i class="bx bx-bulb me-1"></i>Explanation:</small>
+                <span>@q.Explanation</span>
+              </div>
+            }
+
+            @{
+              var gradePoints = (answer?.PointsAwarded ?? (isCorrect == true ? 1m : 0m))
+                  .ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            <!-- Teacher grading controls -->
+            <div class="border-top mt-3 pt-3">
+              <div class="row g-2 align-items-end">
+                <div class="col-auto">
+                  <label class="form-label small text-muted d-block mb-1">Grade</label>
+                  <div class="btn-group" role="group">
+                    <input type="radio" class="btn-check grade-correct" name="gc_@i" id="gcCorrect_@i"
+                           value="true" data-idx="@i" @(isCorrect == true ? "checked" : "")>
+                    <label class="btn btn-sm btn-outline-success" for="gcCorrect_@i"><i class="bx bx-check"></i></label>
+                    <input type="radio" class="btn-check grade-correct" name="gc_@i" id="gcIncorrect_@i"
+                           value="false" data-idx="@i" @(isCorrect == false ? "checked" : "")>
+                    <label class="btn btn-sm btn-outline-danger" for="gcIncorrect_@i"><i class="bx bx-x"></i></label>
+                  </div>
+                </div>
+                <div class="col-auto">
+                  <label class="form-label small text-muted d-block mb-1">Points</label>
+                  <input type="number" step="0.5" min="0" class="form-control form-control-sm grade-points"
+                         data-idx="@i" style="width:90px;" value="@gradePoints">
+                </div>
+                <div class="col">
+                  <label class="form-label small text-muted d-block mb-1">Comment to student</label>
+                  <input type="text" class="form-control form-control-sm grade-comment"
+                         data-idx="@i" placeholder="Optional feedback…" value="@(answer?.TeacherComment ?? "")">
+                </div>
+                @if (answer?.TeacherOverridden == true)
+                {
+                  <div class="col-auto">
+                    <span class="badge bg-label-primary"><i class="bx bx-edit me-1"></i>Overridden</span>
+                  </div>
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    }
+
+    @if (!questions.Any())
+    {
+      <div class="p-4 text-center text-muted">No questions found in this assignment.</div>
+    }
+  </div>
+</div>
+
+@{
+  var bonusValue = result.BonusPoints.ToString(System.Globalization.CultureInfo.InvariantCulture);
+}
+<!-- Grading footer -->
+<div class="card mt-3 mb-4">
+  <div class="card-body d-flex flex-wrap align-items-end justify-content-between gap-3">
+    <div>
+      <label class="form-label small text-muted d-block mb-1">
+        Bonus points <span class="text-muted">(extra credit added to the total)</span>
+      </label>
+      <input type="number" step="0.5" min="0" name="bonusPoints" value="@bonusValue"
+             class="form-control form-control-sm" style="width:120px;">
+    </div>
+    <div class="d-flex gap-2">
+      <a href="/Assignments/Details/@result.AssignmentId" class="btn btn-outline-secondary">
+        <i class="bx bx-arrow-back me-1"></i> Back
+      </a>
+      <button type="submit" class="btn btn-primary">
+        <i class="bx bx-save me-1"></i> Save grades
+      </button>
+    </div>
+  </div>
+</div>
+</form>
+
+@section Scripts {
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+<script>
+  // Render LaTeX in question text, student answers and their working.
+  document.addEventListener('DOMContentLoaded', function () {
+    if (typeof renderMathInElement !== 'function') return;
+    document.querySelectorAll('.math-render').forEach(function (el) {
+      renderMathInElement(el, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '$',  right: '$',  display: false },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '\\[', right: '\\]', display: true }
+        ],
+        throwOnError: false
+      });
+    });
+  });
+
+  // Collect all per-question grade controls into the hidden gradesJson field
+  // right before the form posts, so the controller receives one tidy array.
+  document.getElementById('gradeForm').addEventListener('submit', function () {
+    const rows = {};
+    const rowFor = i => (rows[i] ??= { questionIndex: +i });
+
+    document.querySelectorAll('.grade-correct:checked').forEach(el => {
+      rowFor(el.dataset.idx).isCorrect = el.value === 'true';
+    });
+    document.querySelectorAll('.grade-points').forEach(el => {
+      rowFor(el.dataset.idx).points = parseFloat(el.value) || 0;
+    });
+    document.querySelectorAll('.grade-comment').forEach(el => {
+      rowFor(el.dataset.idx).comment = el.value.trim();
+    });
+
+    document.getElementById('gradesJson').value = JSON.stringify(Object.values(rows));
+  });
+</script>
+}

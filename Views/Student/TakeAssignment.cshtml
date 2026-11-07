@@ -1,0 +1,1128 @@
+@using SmartSchoolAI.Models.Dtos
+@using System.Text.Json
+@model List<QuestionDto>
+@{
+    ViewData["Title"] = "Take Assignment";
+    var assignment = ViewBag.Assignment as SmartSchoolAI.Models.Assignment;
+    var attemptNum = (int)ViewBag.AttemptNumber;
+    var isPreview  = ViewBag.IsPreview as bool? ?? false;
+    var instantFeedback = assignment?.ShowsInstantFeedback == true;
+
+    var voiceEnabled       = assignment?.Class?.VoiceEnabled == true;
+    var translationEnabled = assignment?.Class?.TranslationEnabled == true;
+    var enabledLanguages   = new List<KeyValuePair<string, string>>();
+    if (translationEnabled)
+    {
+        var codes = new HashSet<string>();
+        try
+        {
+            foreach (var code in JsonSerializer.Deserialize<List<string>>(
+                string.IsNullOrWhiteSpace(assignment!.Class.EnabledLanguages) ? "[]" : assignment.Class.EnabledLanguages) ?? new())
+                codes.Add(code);
+        }
+        catch (JsonException) { /* pre-migration rows — treat as none selected */ }
+
+        enabledLanguages = SmartSchoolAI.Controllers.ClassesController.SupportedLanguages
+            .Where(kv => codes.Contains(kv.Key))
+            .ToList();
+        translationEnabled = enabledLanguages.Count > 0;
+    }
+
+    // Map numeric type codes to friendly type categories
+    var mcTypes   = new HashSet<string> { "1", "MultipleChoice" };
+    var scTypes   = new HashSet<string> { "4", "SingleChoice" };
+    var textTypes = new HashSet<string> { "0", "2", "3", "ShortAnswer", "OpenText", "FillInTheBlank" };
+    // Everything else (math, graphing, etc.) falls through to text input
+
+    string GetTypeLabel(string t) => t switch {
+        "0"  => "Short Answer",
+        "1"  => "Multiple Choice",
+        "2"  => "Fill in the Blank",
+        "3"  => "Open Text",
+        "4"  => "Single Choice",
+        "5"  => "Graphing",
+        "6"  => "Geometry Drawing",
+        "7"  => "Number Line",
+        "8"  => "Dot Plot",
+        "9"  => "Table Check",
+        "10" => "Table Text",
+        "11" => "Vertical Operation",
+        "12" => "Protractor",
+        "13" => "Fraction Model",
+        _    => t
+    };
+
+    // A question referenced by another question's GroupId (e.g. "Q2" above
+    // subpoints "2a"/"2b") is a non-answerable group header — shown for
+    // context only. Labels/header-flags are derived here rather than stored,
+    // so they stay correct regardless of list order.
+    var idToIndex = new Dictionary<string, int>();
+    for (int i = 0; i < Model.Count; i++)
+        if (!string.IsNullOrEmpty(Model[i].Id)) idToIndex[Model[i].Id!] = i;
+
+    var isGroupHeader = new bool[Model.Count];
+    for (int i = 0; i < Model.Count; i++)
+        if (!string.IsNullOrEmpty(Model[i].GroupId) && idToIndex.TryGetValue(Model[i].GroupId!, out var pIdx))
+            isGroupHeader[pIdx] = true;
+
+    var displayLabel = new string[Model.Count];
+    var topLevelCounter = 0;
+    var letterCounter = new Dictionary<int, int>();
+    for (int i = 0; i < Model.Count; i++)
+    {
+        var gid = Model[i].GroupId;
+        if (string.IsNullOrEmpty(gid) || !idToIndex.TryGetValue(gid, out var parentIdx))
+        {
+            topLevelCounter++;
+            displayLabel[i] = topLevelCounter.ToString();
+        }
+        else
+        {
+            var n = letterCounter.TryGetValue(parentIdx, out var c) ? c : 0;
+            letterCounter[parentIdx] = n + 1;
+            displayLabel[i] = displayLabel[parentIdx] + (char)('a' + n);
+        }
+    }
+}
+
+@section Styles {
+  <link rel="stylesheet" href="~/css/take-assignment.css" asp-append-version="true" />
+  <link rel="stylesheet" href="~/css/handwriting.css" asp-append-version="true" />
+  <link rel="stylesheet" href="~/css/waiting-game.css" asp-append-version="true" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.css" />
+}
+
+<!-- WIUT Header with Focus Mode Button -->
+<div class="wiut-hero-card mb-4" id="takeAssignmentHeader">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div>
+      <h3 class="fw-bold text-white mb-1"><i class="bx bx-pencil me-2"></i>@assignment?.Title</h3>
+      <p class="text-white-50 mb-0">Attempt #@attemptNum · @Model.Count Questions</p>
+    </div>
+    <div class="d-flex gap-2">
+      <button type="button" class="btn btn-outline-light btn-sm" id="btnFocusMode" onclick="toggleFocusMode()">
+        <i class="bx bx-fullscreen me-1"></i> Focus Mode
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  function toggleFocusMode() {
+    var sidebar = document.getElementById('layout-menu');
+    var navbar = document.getElementById('layout-navbar');
+    var btn = document.getElementById('btnFocusMode');
+    
+    if (sidebar && sidebar.style.display !== 'none') {
+      sidebar.style.display = 'none';
+      if (navbar) navbar.style.display = 'none';
+      btn.innerHTML = '<i class="bx bx-exit-fullscreen me-1"></i> Exit Focus';
+    } else if (sidebar) {
+      sidebar.style.display = '';
+      if (navbar) navbar.style.display = '';
+      btn.innerHTML = '<i class="bx bx-fullscreen me-1"></i> Focus Mode';
+    }
+  }
+</script>
+
+<!-- ── TOP BAR ───────────────────────────────────────────────────────── -->
+<div class="d-flex align-items-center gap-3 mb-3 py-2 border-bottom flex-wrap">
+  @if (isPreview)
+  {
+    <a href="/Assignments/Edit/@assignment?.Id" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1">
+      <i class="bx bx-arrow-back"></i> Back to editor
+    </a>
+    <span class="badge bg-label-warning"><i class="bx bx-show me-1"></i>Preview</span>
+  }
+  else
+  {
+    <a asp-action="Index" asp-controller="Student" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1">
+      <i class="bx bx-arrow-back"></i> Back
+    </a>
+  }
+  <span class="fw-semibold text-truncate" style="max-width:280px;">@assignment?.Title</span>
+  @if (assignment?.Type == SmartSchoolAI.Models.AssignmentType.Homework)
+  {
+    <span class="badge bg-label-primary">Homework</span>
+  }
+  else
+  {
+    <span class="badge bg-label-info">Classroom Practice</span>
+  }
+  <div class="ms-auto">
+    <button type="button" class="btn btn-sm btn-outline-primary" onclick="openTutorial()">
+      <i class="bx bx-help-circle me-1"></i>Tutorial
+    </button>
+  </div>
+</div>
+
+<!-- Shown when this same assignment is detected open in another browser tab —
+     see the 'storage' event listener in take-assignment.js. Hidden by default. -->
+<div id="otherTabWarning" class="alert alert-warning py-2 px-3 mb-3 small d-none d-flex align-items-center justify-content-between gap-2" role="status">
+  <span><i class="bx bx-duplicate me-1"></i>This assignment is also open in another tab. Answering in both at once can overwrite each other's work.</span>
+  <button type="button" class="btn btn-sm btn-outline-warning flex-shrink-0" onclick="location.reload()">
+    Reload to sync
+  </button>
+</div>
+
+<!-- Attempt & deadline info -->
+@if (isPreview)
+{
+  <div class="alert alert-warning py-2 px-3 mb-3 small d-flex align-items-center gap-2">
+    <i class="bx bx-info-circle"></i>
+    <span>Preview mode — this is exactly what students see. Answering and submitting are disabled here.</span>
+  </div>
+}
+<p class="text-muted mb-3 small">
+  @if (assignment?.AllowsUnlimitedAttempts == true)
+  {
+    <span><i class="bx bx-refresh me-1"></i>Practice — keep trying until you get it</span>
+  }
+  else
+  {
+    <span>Attempt @attemptNum of @assignment?.MaxAttempts</span>
+  }
+  @if (assignment?.Deadline.HasValue == true)
+  {
+    <span class="ms-2">· Due: @assignment.Deadline.Value.ToString("dd MMM yyyy HH:mm")</span>
+  }
+</p>
+
+<!-- ── QUESTION NAV PILLS ────────────────────────────────────────────── -->
+<div class="card mb-4">
+  <div class="card-body py-2 px-3">
+    <div class="question-nav">
+      <button type="button" class="nav-btn prev-next-btn" id="prevBtn" disabled>Previous</button>
+      @for (int i = 0; i < Model.Count; i++)
+      {
+        <button type="button" class="nav-btn @(i == 0 ? "active" : "")" data-idx="@i">@displayLabel[i]</button>
+      }
+      <button type="button" class="nav-btn prev-next-btn" id="nextBtn">Next</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── FORM ──────────────────────────────────────────────────────────── -->
+<form method="post" asp-action="SubmitAssignment" id="assignmentForm"
+      data-anti-paste="@(assignment?.AntiCopyPaste == true ? "true" : "false")">
+  @Html.AntiForgeryToken()
+  <input type="hidden" name="assignmentId" value="@assignment?.Id" id="assignmentId" />
+
+  @* Hidden inputs for all questions — synced by JS *@
+  @for (int i = 0; i < Model.Count; i++)
+  {
+    <input type="hidden" name="q_@i" id="hidden_q_@i" value="" />
+    <input type="hidden" name="work_@i" id="hidden_work_@i" value="" />
+  }
+
+  <!-- ── QUESTION PANELS (one per question, only active is visible) ──── -->
+  @for (int i = 0; i < Model.Count; i++)
+  {
+    var q = Model[i];
+    var isMultiChoice  = mcTypes.Contains(q.Type);
+    var isSingleChoice = scTypes.Contains(q.Type);
+    var isChoiceType   = isMultiChoice || isSingleChoice;
+    var options = new List<string>();
+    if (isChoiceType && !string.IsNullOrEmpty(q.Options))
+    {
+      options = JsonSerializer.Deserialize<List<string>>(q.Options) ?? new();
+    }
+    var qTypeLabel = GetTypeLabel(q.Type);
+
+    <div class="question-panel @(i == 0 ? "active" : "")"
+         data-qindex="@i"
+         data-qtype="@(isMultiChoice ? "multi" : isSingleChoice ? "single" : "text")"
+         data-qtitle="@q.Title">
+
+      <!-- Question Card -->
+      <div class="question-card-main mb-4">
+
+        <!-- Question Header -->
+        <div class="question-header">
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <span class="fw-semibold">Question @displayLabel[i]</span>
+            @if (!isGroupHeader[i])
+            {
+              <span class="badge bg-label-secondary">@qTypeLabel</span>
+            }
+          </div>
+        </div>
+
+        <!-- Question Title / Body -->
+        <div class="p-4">
+          <!-- Question Text - Large and prominent -->
+          <div class="mb-4">
+            <div class="question-title math-render" id="qtext_@i" style="font-size: 1.125rem; font-weight: 500; color: #566a7f; line-height: 1.6;">
+              @q.Title
+            </div>
+            @if (!string.IsNullOrEmpty(q.ImagePath))
+            {
+              <img src="@q.ImagePath" class="img-fluid rounded border mt-3" style="max-height:360px;" alt="Diagram" />
+            }
+
+            @if ((voiceEnabled || translationEnabled) && !isGroupHeader[i])
+            {
+              <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+                @if (voiceEnabled)
+                {
+                  <button type="button" class="btn btn-sm btn-outline-secondary read-aloud-btn" data-target="qtext_@i">
+                    <i class="bx bx-volume-full me-1"></i> Read aloud
+                  </button>
+                }
+                @if (translationEnabled)
+                {
+                  <div class="dropdown">
+                    <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                      <i class="bx bx-globe me-1"></i> Translate
+                    </button>
+                    <ul class="dropdown-menu">
+                      @foreach (var lang in enabledLanguages)
+                      {
+                        <li>
+                          <button type="button" class="dropdown-item translate-btn"
+                                  data-source="qtext_@i" data-target="qtranslated_@i"
+                                  data-assignment="@assignment!.Id" data-lang="@lang.Key">@lang.Value</button>
+                        </li>
+                      }
+                      <li><hr class="dropdown-divider" /></li>
+                      <li><button type="button" class="dropdown-item translate-clear-btn" data-target="qtranslated_@i">Show original</button></li>
+                    </ul>
+                  </div>
+                }
+              </div>
+              <div class="translation-output d-none mt-2 p-3 rounded" id="qtranslated_@i" style="background:#f5f5f9; border-left: 3px solid #696cff;"></div>
+            }
+          </div>
+
+          <!-- Solution Area (if provided by teacher) -->
+          @if (!string.IsNullOrWhiteSpace(q.Explanation))
+          {
+            <div class="solution-area mb-4 p-3 rounded" style="background:#f5f5f9; border-left: 3px solid #696cff;">
+              <div class="solution-label text-primary fw-semibold mb-2" style="font-size: 0.875rem;">
+                <i class="bx bx-info-circle me-1"></i>Solution
+              </div>
+              <div class="math-render" style="font-size: 0.9375rem; color: #566a7f;">@q.Explanation</div>
+            </div>
+          }
+          else
+          {
+            <div class="solution-area mb-4 p-3 rounded" style="background:#f5f5f9;">
+              <div class="solution-label" style="font-size: 0.875rem; color: #a1acb8; font-weight: 600;">Solution</div>
+              <div class="solution-placeholder" style="font-size: 0.875rem; color: #a1acb8; font-style: italic;">No solution provided.</div>
+            </div>
+          }
+
+          @if (isGroupHeader[i])
+          {
+            <div class="alert alert-light border d-flex align-items-center gap-2 mb-0">
+              <i class="bx bx-info-circle text-primary"></i>
+              <span class="small text-muted">This question is answered in its parts below — @displayLabel[i]a, @displayLabel[i]b, etc.</span>
+            </div>
+          }
+          else
+          {
+            @if (isChoiceType && options.Any())
+            {
+              <!-- MCQ / Single Choice Options -->
+              <div class="options-list d-flex flex-column gap-3">
+                @for (int oi = 0; oi < options.Count; oi++)
+                {
+                  var letter = (char)('A' + oi);
+                  <div class="option-card"
+                       data-qkey="q_@i"
+                       data-value="@letter"
+                       data-optiontext="@options[oi]"
+                       data-multi="@(isMultiChoice ? "true" : "false")">
+                    <span class="option-letter">@letter.</span>
+                    <span class="option-text math-render">@options[oi]</span>
+                  </div>
+                }
+              </div>
+            }
+            else
+            {
+              // True once a dedicated interactive widget below actually renders —
+              // that widget already IS the student's answer input, so the generic
+              // math-field/toolbar further down must stay hidden for this question
+              // (still present in the DOM so hydrateAnswers()/submit/drafts keep
+              // working exactly as before — only its visibility changes).
+              bool hasVisualWidget = false;
+
+              // Geometry drawing: gridSize is a display setting (safe) — the
+              // teacher's "elements" are the answer key, so the student only
+              // ever gets a blank dot grid to draw their own shapes onto.
+              int? geoGridSize = null;
+              if (q.Type is "6" or "GeometryDrawing" && !string.IsNullOrWhiteSpace(q.VisualState))
+              {
+                try
+                {
+                  using var geoDoc = JsonDocument.Parse(q.VisualState);
+                  var root = geoDoc.RootElement;
+                  if (root.TryGetProperty("gridSize", out var gsEl) && gsEl.ValueKind == JsonValueKind.Number)
+                    geoGridSize = Math.Max(5, gsEl.GetInt32());
+                }
+                catch (JsonException) { /* malformed/legacy state — fall back to text-only entry */ }
+              }
+              @if (geoGridSize.HasValue)
+              {
+                hasVisualWidget = true;
+                <div class="answer-block geo-widget mb-3" data-qkey="q_@i" data-gridsize="@geoGridSize">
+                  <div class="d-flex flex-wrap gap-1 mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn active" data-mode="point">Point</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn" data-mode="segment">Segment</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn" data-mode="line">Line</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn" data-mode="ray">Ray</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary geo-mode-btn" data-mode="circle">Circle</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger geo-undo-btn ms-auto">Undo</button>
+                  </div>
+                  <svg class="geo-widget-svg" viewBox="0 0 480 480" preserveAspectRatio="xMidYMid meet"
+                       style="width:100%;max-width:480px;height:auto;background:#fff;border:1px solid #dee2e6;border-radius:8px;cursor:crosshair;"></svg>
+                  <div class="form-text">Pick a mode, then click on the grid. Segment/Line/Ray/Circle need two clicks.</div>
+                </div>
+              }
+
+              // Graphing: axis range is a display setting (safe) — the teacher's
+              // "elements" (points/lines/circles) are the answer key, so they
+              // never reach the student; the widget below starts with a blank plane.
+              double? gphXMin = null, gphXMax = null, gphYMin = null, gphYMax = null;
+              if (q.Type is "5" or "Graphing" && !string.IsNullOrWhiteSpace(q.VisualState))
+              {
+                try
+                {
+                  using var gDoc = JsonDocument.Parse(q.VisualState);
+                  var root = gDoc.RootElement;
+                  if (root.TryGetProperty("xMin", out var xMinEl)) gphXMin = xMinEl.GetDouble();
+                  if (root.TryGetProperty("xMax", out var xMaxEl)) gphXMax = xMaxEl.GetDouble();
+                  if (root.TryGetProperty("yMin", out var yMinEl)) gphYMin = yMinEl.GetDouble();
+                  if (root.TryGetProperty("yMax", out var yMaxEl)) gphYMax = yMaxEl.GetDouble();
+                }
+                catch (JsonException) { /* malformed/legacy state — fall back to text-only entry */ }
+              }
+              @if (gphXMin.HasValue && gphXMax.HasValue && gphYMin.HasValue && gphYMax.HasValue && gphXMax > gphXMin && gphYMax > gphYMin)
+              {
+                hasVisualWidget = true;
+                <div class="answer-block gph-widget mb-3"
+                     data-qkey="q_@i" data-xmin="@gphXMin" data-xmax="@gphXMax" data-ymin="@gphYMin" data-ymax="@gphYMax">
+                  <div class="d-flex flex-wrap gap-1 mb-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn active" data-mode="point">Point</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn" data-mode="segment">Segment</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn" data-mode="linear">Line</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary gph-mode-btn" data-mode="circle">Circle</button>
+                    <button type="button" class="btn btn-sm btn-outline-danger gph-undo-btn ms-auto">Undo</button>
+                  </div>
+                  <svg class="gph-widget-svg" viewBox="0 0 480 480" preserveAspectRatio="xMidYMid meet"
+                       style="width:100%;max-width:480px;height:auto;background:#fff;border:1px solid #dee2e6;border-radius:8px;cursor:crosshair;"></svg>
+                  <div class="form-text">Pick a mode, then click on the plane. Segment/Line/Circle need two clicks.</div>
+                </div>
+              }
+
+              // Number line only shows min/max/step here — never the teacher's
+              // marked point(s), which is the answer key drawn into VisualState.
+              double? nlMin = null, nlMax = null, nlStep = null;
+              if (q.Type is "7" or "NumberLine" && !string.IsNullOrWhiteSpace(q.VisualState))
+              {
+                try
+                {
+                  using var nlDoc = JsonDocument.Parse(q.VisualState);
+                  var root = nlDoc.RootElement;
+                  if (root.TryGetProperty("min", out var minEl))  nlMin  = minEl.GetDouble();
+                  if (root.TryGetProperty("max", out var maxEl))  nlMax  = maxEl.GetDouble();
+                  if (root.TryGetProperty("step", out var stepEl)) nlStep = stepEl.GetDouble();
+                }
+                catch (JsonException) { /* malformed/legacy state — fall back to text-only entry */ }
+              }
+              @if (nlMin.HasValue && nlMax.HasValue && nlMax > nlMin)
+              {
+                hasVisualWidget = true;
+                <div class="answer-block nl-widget mb-3"
+                     data-qkey="q_@i" data-min="@nlMin" data-max="@nlMax" data-step="@(nlStep ?? 1)">
+                  <svg class="nl-widget-svg" viewBox="0 0 480 90" preserveAspectRatio="xMidYMid meet"
+                       style="width:100%;max-width:480px;height:auto;background:#fff;border:1px solid #dee2e6;border-radius:8px;cursor:pointer;"></svg>
+                  <div class="form-text">Click on the line to place your answer.</div>
+                </div>
+              }
+
+              // Protractor: precision/direction are display settings (safe) — the
+              // teacher's "angle" is the answer, so it's never sent to the student.
+              double? protPrecision = null;
+              if (q.Type is "12" or "Protractor" && !string.IsNullOrWhiteSpace(q.VisualState))
+              {
+                try
+                {
+                  using var pDoc = JsonDocument.Parse(q.VisualState);
+                  var root = pDoc.RootElement;
+                  if (root.TryGetProperty("precision", out var precEl) && precEl.ValueKind == JsonValueKind.Number)
+                    protPrecision = precEl.GetDouble();
+                }
+                catch (JsonException) { /* malformed/legacy state — fall back to text-only entry */ }
+              }
+              @if (protPrecision.HasValue)
+              {
+                hasVisualWidget = true;
+                <div class="answer-block prot-widget mb-3"
+                     data-qkey="q_@i" data-precision="@protPrecision">
+                  <svg class="prot-widget-svg" preserveAspectRatio="xMidYMid meet"
+                       style="width:100%;max-width:480px;height:auto;background:#fff;border:1px solid #dee2e6;border-radius:8px;cursor:pointer;"></svg>
+                  <div class="form-text">Click inside the protractor to set the angle.</div>
+                </div>
+              }
+
+              // Table check/text: headers and "given" columns are shown to the
+              // student as the teacher typed them (they're the given data of the
+              // problem, e.g. "1..9" session numbers) — only cells in columns NOT
+              // marked "given" are the answer, so only those stay blank inputs;
+              // their values are never parsed into anything the view can render.
+              List<string> tblHeaders = new();
+              List<bool>   tblGiven   = new();
+              List<string?[]> tblGivenRows = new();
+              int tblRowCount = 0;
+              if (q.Type is "9" or "10" or "TableCheck" or "TableText" && !string.IsNullOrWhiteSpace(q.VisualState))
+              {
+                try
+                {
+                  using var tDoc = JsonDocument.Parse(q.VisualState);
+                  var root = tDoc.RootElement;
+                  if (root.TryGetProperty("headers", out var hEl) && hEl.ValueKind == JsonValueKind.Array)
+                    foreach (var h in hEl.EnumerateArray())
+                      tblHeaders.Add(h.ValueKind == JsonValueKind.String ? (h.GetString() ?? "") : "");
+
+                  if (root.TryGetProperty("given", out var gEl) && gEl.ValueKind == JsonValueKind.Array)
+                    foreach (var g in gEl.EnumerateArray())
+                      tblGiven.Add(g.ValueKind == JsonValueKind.True);
+                  while (tblGiven.Count < tblHeaders.Count) tblGiven.Add(false);
+
+                  if (root.TryGetProperty("rows", out var rEl) && rEl.ValueKind == JsonValueKind.Array)
+                  {
+                    tblRowCount = rEl.GetArrayLength();
+                    foreach (var rowEl in rEl.EnumerateArray())
+                    {
+                      var rowVals = new string?[tblHeaders.Count];
+                      if (rowEl.ValueKind == JsonValueKind.Array)
+                      {
+                        var ci = 0;
+                        foreach (var cellEl in rowEl.EnumerateArray())
+                        {
+                          // Only a "given" column's value ever gets copied out — an
+                          // answer column's value stays null no matter what's here.
+                          if (ci < tblHeaders.Count && tblGiven[ci])
+                            rowVals[ci] = cellEl.ValueKind == JsonValueKind.String ? cellEl.GetString() : null;
+                          ci++;
+                        }
+                      }
+                      tblGivenRows.Add(rowVals);
+                    }
+                  }
+                }
+                catch (JsonException) { /* malformed/legacy state — fall back to text-only entry */ }
+              }
+              @if (tblHeaders.Count > 0 && tblRowCount > 0)
+              {
+                hasVisualWidget = true;
+                <div class="answer-block tbl-widget mb-3" data-qkey="q_@i" data-cols="@tblHeaders.Count" style="overflow-x:auto;">
+                  <table class="table table-bordered mb-1" style="min-width:@(tblHeaders.Count * 110)px;">
+                    <thead>
+                      <tr>
+                        @foreach (var h in tblHeaders)
+                        {
+                          <th class="text-center small">@h</th>
+                        }
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (int ri = 0; ri < tblRowCount; ri++)
+                      {
+                        <tr>
+                          @for (int ci = 0; ci < tblHeaders.Count; ci++)
+                          {
+                            @if (tblGiven[ci])
+                            {
+                              <td class="p-1 text-center align-middle given-cell" data-row="@ri" data-col="@ci">
+                                <span class="math-render">@tblGivenRows[ri][ci]</span>
+                              </td>
+                            }
+                            else
+                            {
+                              <td class="p-1">
+                                <input type="text" class="form-control form-control-sm tbl-cell" data-row="@ri" data-col="@ci" />
+                              </td>
+                            }
+                          }
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                  <div class="form-text">Fill in the table.</div>
+                </div>
+              }
+
+              // Dot plot: ticks/colSize/label/itemType describe the axis (safe to
+              // show) — "grid" is the teacher's target distribution (the answer),
+              // so it's deliberately left out of what reaches the student.
+              List<double> dpTicks = new();
+              int dpColSize = 5;
+              int dpLabelStep = 1;
+              string dpLabel = "";
+              string dpItemType = "cross";
+              if (q.Type is "8" or "DotPlot" && !string.IsNullOrWhiteSpace(q.VisualState))
+              {
+                try
+                {
+                  using var dDoc = JsonDocument.Parse(q.VisualState);
+                  var root = dDoc.RootElement;
+                  if (root.TryGetProperty("ticks", out var ticksEl) && ticksEl.ValueKind == JsonValueKind.Array)
+                    foreach (var t in ticksEl.EnumerateArray())
+                      if (t.ValueKind == JsonValueKind.Number) dpTicks.Add(t.GetDouble());
+                  if (root.TryGetProperty("colSize", out var csEl) && csEl.ValueKind == JsonValueKind.Number)
+                    dpColSize = Math.Max(1, csEl.GetInt32());
+                  if (root.TryGetProperty("labelStep", out var lsEl) && lsEl.ValueKind == JsonValueKind.Number)
+                    dpLabelStep = Math.Max(1, lsEl.GetInt32());
+                  if (root.TryGetProperty("label", out var lblEl) && lblEl.ValueKind == JsonValueKind.String)
+                    dpLabel = lblEl.GetString() ?? "";
+                  if (root.TryGetProperty("itemType", out var itEl) && itEl.ValueKind == JsonValueKind.String)
+                    dpItemType = itEl.GetString() ?? "cross";
+                }
+                catch (JsonException) { /* malformed/legacy state — fall back to text-only entry */ }
+              }
+              @if (dpTicks.Count > 0)
+              {
+                hasVisualWidget = true;
+                <div class="answer-block dp-widget mb-3"
+                     data-qkey="q_@i"
+                     data-ticks="@string.Join(",", dpTicks)"
+                     data-colsize="@dpColSize"
+                     data-labelstep="@dpLabelStep"
+                     data-label="@dpLabel"
+                     data-itemtype="@dpItemType">
+                  <svg class="dp-widget-svg" preserveAspectRatio="xMidYMid meet"
+                       style="width:100%;max-width:480px;height:auto;background:#fff;border:1px solid #dee2e6;border-radius:8px;cursor:pointer;"></svg>
+                  <div class="form-text">Click a column to stack a mark; click the top mark again to remove it.</div>
+                </div>
+              }
+
+              // Vertical operation: the operator + operands are the given problem
+              // (not the answer), so it's safe to render exactly as configured.
+              string? vertOp = null;
+              List<string> vertOperands = new();
+              if (q.Type is "11" or "VerticalOperation" && !string.IsNullOrWhiteSpace(q.VisualState))
+              {
+                try
+                {
+                  using var vDoc = JsonDocument.Parse(q.VisualState);
+                  var root = vDoc.RootElement;
+                  if (root.TryGetProperty("op", out var opEl) && opEl.ValueKind == JsonValueKind.String)
+                    vertOp = opEl.GetString();
+                  if (root.TryGetProperty("operands", out var opsEl) && opsEl.ValueKind == JsonValueKind.Array)
+                    foreach (var o in opsEl.EnumerateArray())
+                      if (o.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(o.GetString()))
+                        vertOperands.Add(o.GetString()!);
+                }
+                catch (JsonException) { /* malformed/legacy state — fall back to text-only entry */ }
+              }
+              @if (!string.IsNullOrEmpty(vertOp) && vertOperands.Count >= 2)
+              {
+                var vertWidth = vertOperands.Max(o => o.Length) + 2;
+                <div class="answer-block mb-3">
+                  <div style="font-family:'Courier New',monospace;font-size:1.35rem;line-height:1.9;display:inline-block;text-align:right;">
+                    @for (int oi = 0; oi < vertOperands.Count; oi++)
+                    {
+                      <div style="display:flex;justify-content:flex-end;gap:.5em;">
+                        <span style="width:1.2em;text-align:left;">@(oi == vertOperands.Count - 1 ? vertOp : "")</span>
+                        <span>@vertOperands[oi].PadLeft(vertWidth)</span>
+                      </div>
+                    }
+                    <div style="border-top:2px solid #566a7f;width:@(vertWidth + 1.5)ch;margin-top:.15em;"></div>
+                  </div>
+                </div>
+              }
+
+              // Fraction model: the shaded grid is the given diagram (the reduced-
+              // fraction answer still lives only in the teacher's Answer Key).
+              int? fracRows = null, fracCols = null, fracShaded = null;
+              if (q.Type is "13" or "FractionModel" && !string.IsNullOrWhiteSpace(q.VisualState))
+              {
+                try
+                {
+                  using var fDoc = JsonDocument.Parse(q.VisualState);
+                  var root = fDoc.RootElement;
+                  if (root.TryGetProperty("rows", out var rEl)   && int.TryParse(rEl.GetString(), out var rv))   fracRows   = rv;
+                  if (root.TryGetProperty("cols", out var cEl)   && int.TryParse(cEl.GetString(), out var cv))   fracCols   = cv;
+                  if (root.TryGetProperty("shaded", out var sEl) && int.TryParse(sEl.GetString(), out var sv))   fracShaded = sv;
+                }
+                catch (JsonException) { /* malformed/legacy state — fall back to text-only entry */ }
+              }
+              @if (fracRows.HasValue && fracCols.HasValue && fracRows > 0 && fracCols > 0)
+              {
+                var fracTotal = fracRows.Value * fracCols.Value;
+                <div class="answer-block mb-3">
+                  <div style="display:inline-grid;gap:2px;grid-template-columns:repeat(@fracCols.Value,32px);">
+                    @for (int ci = 0; ci < fracTotal; ci++)
+                    {
+                      var filled = ci < (fracShaded ?? 0);
+                      <div style="width:32px;height:32px;border:1.5px solid #696cff;border-radius:3px;background:@(filled ? "rgba(105,108,255,0.35)" : "transparent");"></div>
+                    }
+                  </div>
+                </div>
+              }
+
+              <!-- Text / Open answer — a live math field, not a raw-LaTeX textarea:
+                   what the student sees while typing IS the rendered answer.
+                   When a widget above already captures the answer, this stays in
+                   the DOM (draft restore/submit still read it) but hidden from
+                   the student — otherwise they'd see a second, editable copy of
+                   the machine-generated answer string underneath the widget. -->
+              <div class="answer-block math-input @(hasVisualWidget ? "d-none" : "")">
+                @await Html.PartialAsync("_MathToolbar")
+
+                <math-field class="answer-textarea form-control"
+                            data-qkey="q_@i"
+                            data-placeholder="Type your answer here…"></math-field>
+              </div>
+            }
+
+            @if (instantFeedback)
+            {
+              <!-- Instant per-question feedback -->
+              <div class="mt-3 pt-3 border-top">
+                <button type="button" class="btn btn-sm btn-primary check-answer-btn"
+                        @(isPreview ? "disabled" : null) data-qindex="@i">
+                  <i class="bx bx-check-circle me-1"></i> Check answer
+                </button>
+                <div class="check-feedback alert d-none mt-2 mb-0 py-2 px-3" role="status"></div>
+
+                <!-- Shown after two wrong checks in a row on this question — a nudge
+                     toward the AI tutor, not a forced interruption. -->
+                <div class="check-tutor-nudge alert alert-info d-none mt-2 mb-0 py-2 px-3 d-flex align-items-center justify-content-between gap-2" role="status">
+                  <span><i class="bx bx-bulb me-1"></i>Stuck? The AI Tutor can walk you through it.</span>
+                  <button type="button" class="btn btn-sm btn-info flex-shrink-0" onclick="openTutorial()">
+                    Ask the Tutor
+                  </button>
+                </div>
+              </div>
+            }
+
+            <!-- ── Show your work: typed working and/or a photo of it ──────────── -->
+            <div class="mt-4 pt-3 border-top work-block">
+              <div class="form-check form-switch">
+                <input class="form-check-input work-toggle" type="checkbox" id="workToggle_@i"
+                       @(q.RequireWork ? "checked disabled" : null) data-required="@q.RequireWork.ToString().ToLowerInvariant()">
+                <label class="form-check-label fw-semibold" for="workToggle_@i">Show your work</label>
+                <div class="text-muted small">
+                  @if (q.RequireWork)
+                  {
+                    <span class="text-danger fw-semibold">Required</span> <span>— your teacher needs to see how you solved this.</span>
+                  }
+                  else
+                  {
+                    <span>Optional — let your teacher see how you solved it.</span>
+                  }
+                </div>
+              </div>
+
+              <div class="work-panel d-none mt-3">
+                <!-- Tabs -->
+                <ul class="nav nav-tabs mb-3">
+                  <li class="nav-item">
+                    <button type="button" class="nav-link active work-tab-btn" data-work-tab="type">
+                      <i class="bx bx-edit me-1"></i>Type solution
+                    </button>
+                  </li>
+                  <li class="nav-item">
+                    <button type="button" class="nav-link work-tab-btn" data-work-tab="upload">
+                      <i class="bx bx-camera me-1"></i>Upload solution
+                    </button>
+                  </li>
+                </ul>
+
+                <!-- Type solution: numbered steps, checked one-by-one like the photo path -->
+                <div class="work-pane math-input" data-work-pane="type">
+                  @await Html.PartialAsync("_MathToolbar")
+
+                  <div class="type-steps-list" data-qindex="@i"></div>
+                  <button type="button" class="btn btn-sm btn-outline-secondary type-step-add" data-qindex="@i">
+                    <i class="bx bx-plus me-1"></i> Add step
+                  </button>
+
+                  @* The joined step text is mirrored into the same hidden work_i field the
+                     final assignment submission already posts, so "show your work" keeps
+                     working even for a student who never presses "Check my work". *@
+                  <textarea class="work-textarea d-none" data-qkey="work_@i" rows="1"></textarea>
+
+                  @if (instantFeedback)
+                  {
+                    <div class="d-flex gap-2 mt-3">
+                      <button type="button" class="btn btn-success type-step-check"
+                              data-qindex="@i" @(isPreview ? "disabled" : null)>
+                        <i class="bx bx-check-circle me-1"></i> Check my work
+                      </button>
+                      <button type="button" class="btn btn-outline-secondary type-step-report"
+                              data-qindex="@i" @(isPreview ? "disabled" : null)>
+                        <i class="bx bx-flag me-1"></i> Report a problem
+                      </button>
+                    </div>
+                  }
+                  else
+                  {
+                    <div class="mt-3">
+                      <button type="button" class="btn btn-outline-secondary type-step-report"
+                              data-qindex="@i" @(isPreview ? "disabled" : null)>
+                        <i class="bx bx-flag me-1"></i> Report a problem
+                      </button>
+                    </div>
+                  }
+
+                  <div class="type-step-results mt-2" data-qindex="@i"></div>
+                </div>
+
+                <!-- Upload solution -->
+                <div class="work-pane d-none" data-work-pane="upload">
+                  <button type="button" class="btn btn-outline-primary"
+                          @(isPreview ? "disabled" : null)
+                          data-hw-open
+                          data-qindex="@i"
+                          data-qtitle="@q.Title">
+                    <i class="bx bx-camera me-1"></i> Take a photo or upload
+                  </button>
+                  <div class="text-muted small mt-2">
+                    @if (isChoiceType)
+                    {
+                      <span>Attach a photo of your working on paper. Your selected option stays your answer.</span>
+                    }
+                    else
+                    {
+                      <span>Take a photo or upload your handwritten solution. The AI will check it step by step.</span>
+                    }
+                  </div>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  }
+
+  <!-- ── BOTTOM ACTIONS ──────────────────────────────────────────────── -->
+  <div class="d-flex gap-2 mb-4">
+    @if (isPreview)
+    {
+      <a href="/Assignments/Edit/@assignment?.Id" class="btn btn-outline-secondary">
+        <i class="bx bx-arrow-back me-1"></i> Back to editor
+      </a>
+    }
+    else
+    {
+      <button type="button" class="btn btn-outline-secondary" id="bottomPrevBtn">
+        <i class="bx bx-left-arrow-alt me-1"></i> Previous
+      </button>
+      <button type="button" class="btn btn-primary" id="bottomNextBtn">
+        Next <i class="bx bx-right-arrow-alt ms-1"></i>
+      </button>
+      <button type="submit" class="btn btn-success ms-auto" id="submitBtn">
+        <i class="bx bx-send me-1"></i> Submit Assignment
+      </button>
+      <a asp-action="Index" asp-controller="Student" class="btn btn-outline-secondary">
+        <i class="bx bx-x me-1"></i> Cancel
+      </a>
+    }
+  </div>
+</form>
+
+@if (!isPreview)
+{
+  <!-- Submit confirmation -->
+  <div class="modal fade" id="submitConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title mb-0"><i class="bx bx-error-circle text-warning me-2"></i>Submit and finish?</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-2">
+            Once you submit, this attempt is <strong>finished</strong> and your answers are locked.
+            You can still come back anytime afterwards to review your result, see feedback, and get
+            help from the tutor.
+          </p>
+          <p class="text-danger mb-0" id="submitWarnText"></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+            <i class="bx bx-arrow-back me-1"></i> Keep working
+          </button>
+          <button type="button" class="btn btn-success" id="confirmSubmitBtn">
+            <i class="bx bx-send me-1"></i> Yes, submit
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+}
+
+@if (!isPreview)
+{
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       REPORT A PROBLEM – one shared modal, scoped to whichever question opened it
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <div class="modal fade" id="reportProblemModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title mb-0"><i class="bx bx-flag me-2"></i>Report a problem</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small mb-2">
+            Wrong answer key, a typo, a diagram that didn't load — tell your teacher what's off with this question.
+          </p>
+          <textarea id="reportProblemText" class="form-control" rows="4"
+                    placeholder="What's wrong with this question?"></textarea>
+          <div id="reportProblemStatus" class="small mt-2"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary" id="reportProblemSubmitBtn">
+            <i class="bx bx-send me-1"></i> Send
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     HANDWRITING PHOTO MODAL – OCR → review → evaluate (shared, per question)
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="hwModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title mb-0"><i class="bx bx-camera me-2"></i>Solve with photo</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small mb-3" id="hwQuestionTitle"></p>
+
+        <!-- Stage: upload -->
+        <div id="hwStage-upload">
+          <div class="hw-tabs">
+            <button type="button" class="hw-tab-btn active" data-hw-tab="file"><i class="bx bx-upload me-1"></i>Upload</button>
+            <button type="button" class="hw-tab-btn" data-hw-tab="webcam"><i class="bx bx-camera me-1"></i>Webcam</button>
+          </div>
+
+          <div id="hwPanel-file">
+            <div class="hw-drop-zone" id="hwDropZone">
+              <i class="bx bx-cloud-upload" style="font-size:32px;color:#696cff;"></i>
+              <div class="fw-medium mt-1">Drag &amp; drop or click to choose photos</div>
+              <div class="text-muted small">You can add several pages of one solution.</div>
+              <input type="file" id="hwFileInput" accept="image/*" multiple class="d-none" />
+            </div>
+            <div id="hwPreview" class="hw-previews d-none mt-2"></div>
+          </div>
+
+          <div id="hwPanel-webcam" class="d-none">
+            <div class="hw-webcam-stage">
+              <video id="hwVideo" class="d-none" playsinline muted></video>
+              <canvas id="hwCanvas" class="d-none"></canvas>
+              <span id="hwCamPlaceholder" class="text-muted small">Camera preview</span>
+            </div>
+            <div class="d-flex gap-2 mt-2">
+              <button type="button" id="hwCamStart" class="btn btn-sm btn-outline-primary"><i class="bx bx-camera me-1"></i>Start camera</button>
+              <button type="button" id="hwCamCapture" class="btn btn-sm btn-success d-none"><i class="bx bx-camera me-1"></i>Capture</button>
+            </div>
+          </div>
+
+          <button type="button" id="hwAnalyzeBtn" class="btn btn-primary w-100 mt-3" disabled>
+            <i class="bx bx-scan me-1"></i> Recognize my solution
+          </button>
+        </div>
+
+        <!-- Stage: crop — shown once per photo, right after it's picked/captured,
+             before it ever reaches OCR. Cropping out a desk, a neighbour's page,
+             or a phone's status bar means the AI reads only the actual working. -->
+        <div id="hwStage-crop" class="d-none">
+          <p class="text-muted small mb-2">
+            Drag the corners to keep just your working — page <span id="hwCropPageNum">1</span> of
+            <span id="hwCropPageTotal">1</span>.
+          </p>
+          <div class="hw-crop-stage">
+            <img id="hwCropImage" alt="Photo to crop" />
+          </div>
+          <div class="d-flex gap-2 mt-3">
+            <button type="button" id="hwCropUseFullBtn" class="btn btn-outline-secondary">
+              <i class="bx bx-image me-1"></i> Use full photo
+            </button>
+            <button type="button" id="hwCropConfirmBtn" class="btn btn-primary flex-grow-1">
+              <i class="bx bx-crop me-1"></i> Crop &amp; continue
+            </button>
+          </div>
+        </div>
+
+        <!-- Stage: loading -->
+        <div id="hwStage-loading" class="d-none hw-loading py-4">
+          <div class="d-flex justify-content-between align-items-baseline mb-1">
+            <span class="fw-semibold" id="hwProgressLabel">AI is working…</span>
+            <span class="text-muted small"><span id="hwProgressPct">0%</span> · <span id="hwProgressElapsed">0s</span></span>
+          </div>
+          <div class="progress" style="height:8px;">
+            <div class="progress-bar progress-bar-striped progress-bar-animated" id="hwProgressBar"
+                 role="progressbar" style="width:0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+          </div>
+          <div class="text-muted small mt-2">This usually takes 15–30 seconds. Please keep this window open.</div>
+
+          <!-- A round of tic-tac-toe to fill the wait (see waiting-game.js). -->
+          <div class="hw-wait-game mt-4 pt-3 border-top">
+            <p class="text-muted text-center small mb-2">Play a quick game while you wait</p>
+            <div class="wg-board" id="hwWaitBoard"></div>
+            <div class="wg-game-status" id="hwWaitStatus"></div>
+            <div class="text-center mt-2">
+              <button type="button" class="btn btn-sm btn-outline-secondary" id="hwWaitNewGame">
+                <i class="bx bx-refresh me-1"></i> New game
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stage: edit -->
+        <div id="hwStage-edit" class="d-none">
+          <div class="alert alert-info py-2 px-3 small">
+            <i class="bx bx-info-circle me-1"></i> Check the recognized steps and fix any mistakes before submitting.
+          </div>
+          <div id="hwStepsList"></div>
+          <button type="button" id="hwAddStepBtn" class="btn btn-sm btn-outline-secondary mb-3">
+            <i class="bx bx-plus me-1"></i> Add step
+          </button>
+          <button type="button" id="hwSubmitBtn" class="btn btn-success w-100">
+            <i class="bx bx-check-circle me-1"></i> Submit for checking
+          </button>
+        </div>
+
+        <!-- Stage: results -->
+        <div id="hwStage-results" class="d-none">
+          <div id="hwResults"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     TUTORIAL AI CHAT – Slide-in panel
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div id="tutorialOverlay" class="tutorial-overlay" onclick="closeTutorial()"></div>
+
+<div id="tutorialPanel" class="tutorial-panel">
+
+  <!-- Header -->
+  <div class="tutorial-header">
+    <div class="d-flex align-items-center gap-2">
+      <i class="bx bx-bot" style="font-size:22px;"></i>
+      <span class="tutor-title">AI Tutor</span>
+    </div>
+    <button type="button" class="close-btn" onclick="closeTutorial()">
+      <i class="bx bx-x"></i>
+    </button>
+  </div>
+
+  <!-- Mode tabs -->
+  <div class="tutorial-modes">
+    <button type="button" class="mode-btn active" data-mode="hint" onclick="setTutorialMode('hint')">
+      <i class="bx bx-bulb me-1"></i>Hint
+    </button>
+    <button type="button" class="mode-btn" data-mode="concept" onclick="setTutorialMode('concept')">
+      <i class="bx bx-book-reader me-1"></i>Explain
+    </button>
+    <button type="button" class="mode-btn" data-mode="solution" onclick="setTutorialMode('solution')">
+      <i class="bx bx-check-circle me-1"></i>Solution
+    </button>
+  </div>
+
+  <!-- Chat messages -->
+  <div id="tutorialMessages" class="tutorial-messages"></div>
+
+  <!-- Input -->
+  <div class="tutorial-input-wrap">
+    <input type="text" id="tutorialInput" placeholder="Ask a follow-up..." autocomplete="off" />
+    <button type="button" class="send-btn" id="tutorialSendBtn" onclick="sendTutorialMessage()">
+      <i class="bx bx-send"></i>
+    </button>
+  </div>
+
+</div>
+
+<!-- ── Waiting game: a round of tic-tac-toe while an answer is being checked ── -->
+<div class="modal fade" id="waitingGameModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header pb-2">
+        <h5 class="modal-title">
+          <i class="bx bx-game me-1"></i> While you wait…
+        </h5>
+      </div>
+      <div class="modal-body pt-2">
+        <p class="text-muted text-center small mb-3">
+          We're checking your answer. Play a quick game while it works.
+        </p>
+
+        <div class="wg-board"></div>
+        <div class="wg-game-status"></div>
+
+        <div class="text-center mt-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary wg-newgame-btn">
+            <i class="bx bx-refresh me-1"></i> New game
+          </button>
+        </div>
+      </div>
+      <div class="modal-footer d-flex justify-content-center py-3">
+        <div class="wg-checking d-flex align-items-center gap-2">
+          <span class="spinner-border spinner-border-sm"></span>
+          <span>Checking your answer…</span>
+        </div>
+        <div class="wg-ready d-none text-center">
+          <div class="text-success fw-semibold mb-2">
+            <i class="bx bx-check-circle me-1"></i> Your answer is ready!
+          </div>
+          <button type="button" class="btn btn-primary wg-reveal-btn">
+            See result
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+@section Scripts {
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+  @* Registers the <math-field> custom element every .math-input now uses — a
+     live, WYSIWYG math editor (click a toolbar button, type into the slot you
+     land in) instead of a plain textarea holding raw LaTeX source next to a
+     separate read-only preview. *@
+  <script src="https://cdn.jsdelivr.net/npm/mathlive/mathlive.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cropperjs@1.6.2/dist/cropper.min.js"></script>
+  @if (instantFeedback)
+  {
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  }
+  <script src="~/js/waiting-game.js" asp-append-version="true"></script>
+  <script src="~/js/grade-poll.js" asp-append-version="true"></script>
+  <script src="~/js/take-assignment.js" asp-append-version="true"></script>
+  <script src="~/js/number-line-widget.js" asp-append-version="true"></script>
+  <script src="~/js/dot-plot-widget.js" asp-append-version="true"></script>
+  <script src="~/js/protractor-widget.js" asp-append-version="true"></script>
+  <script src="~/js/table-widget.js" asp-append-version="true"></script>
+  <script src="~/js/graphing-widget.js" asp-append-version="true"></script>
+  <script src="~/js/geometry-widget.js" asp-append-version="true"></script>
+  <script src="~/js/accessibility-widget.js" asp-append-version="true"></script>
+  <script src="~/js/handwriting.js" asp-append-version="true"></script>
+  <script src="~/js/type-steps.js" asp-append-version="true"></script>
+  @if (isPreview)
+  {
+    <text>
+    <script>
+      // Preview is read-only — never let the form submit.
+      document.getElementById('assignmentForm')?.addEventListener('submit', e => e.preventDefault());
+    </script>
+    </text>
+  }
+}

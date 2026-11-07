@@ -1,0 +1,575 @@
+@model SmartSchoolAI.ViewModels.ClassDetailsViewModel
+@{
+    var cls = Model.Class;
+    ViewData["Title"] = cls.Name;
+    var tab   = Model.Tab;
+    var years = new[] { "2025-2026", "2026-2027", "2027-2028" };
+
+    string TabClass(string name) => tab == name ? "nav-link active" : "nav-link";
+    string PaneClass(string name) => tab == name ? "" : "d-none";
+
+    var currentUserId = Guid.Parse(User.Claims.First(c => c.Type == System.Security.Claims.ClaimTypes.NameIdentifier).Value);
+    var isClassOwner  = cls.TeacherId == currentUserId;
+
+    var enabledLanguages = new HashSet<string>();
+    try
+    {
+        foreach (var code in System.Text.Json.JsonSerializer.Deserialize<List<string>>(cls.EnabledLanguages) ?? new())
+            enabledLanguages.Add(code);
+    }
+    catch (System.Text.Json.JsonException) { /* pre-migration rows have "" — treat as no languages selected yet */ }
+}
+
+<!-- ── Class header ──────────────────────────────────────────────────────── -->
+<div class="row mb-3">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">SmartSchool AI / <a href="/Classes">My Classes</a> /</span> @cls.Name
+    </h4>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <span class="text-muted">@cls.Subject — Grade @cls.GradeLevel — @cls.AcademicYear</span>
+      @if (cls.IsArchived)
+      {
+        <span class="badge bg-secondary">Archived</span>
+      }
+      else
+      {
+        <span class="badge bg-success">Active</span>
+      }
+      <span class="badge bg-label-info" data-bs-toggle="tooltip" title="Share this code with your students">
+        <i class="bx bx-key me-1"></i>@cls.InviteCode
+      </span>
+      <span class="text-muted small">@cls.ClassStudents.Count / @cls.MaxStudents students</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Tabs ──────────────────────────────────────────────────────────────── -->
+<ul class="nav nav-tabs mb-4">
+  <li class="nav-item">
+    <a class="@TabClass("assignments")" href="/Classes/Details/@cls.Id?tab=assignments">
+      <i class="bx bx-task me-1"></i>Assignments <span class="badge bg-label-secondary ms-1">@cls.Assignments.Count</span>
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="@TabClass("results")" href="/Classes/Details/@cls.Id?tab=results">
+      <i class="bx bx-bar-chart-alt-2 me-1"></i>Results
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="@TabClass("students")" href="/Classes/Details/@cls.Id?tab=students">
+      <i class="bx bx-group me-1"></i>Students <span class="badge bg-label-secondary ms-1">@cls.ClassStudents.Count</span>
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="@TabClass("settings")" href="/Classes/Details/@cls.Id?tab=settings">
+      <i class="bx bx-cog me-1"></i>Settings
+    </a>
+  </li>
+</ul>
+
+<!-- ══ TAB: ASSIGNMENTS ═══════════════════════════════════════════════════ -->
+<div class="@PaneClass("assignments")">
+    <div class="card mb-4">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Assignments (@cls.Assignments.Count)</h5>
+        <a href="/Assignments/Create" class="btn btn-primary btn-sm">
+          <i class="bx bx-plus me-1"></i> New
+        </a>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Title</th>
+              <th>Type</th>
+              <th>Status</th>
+              <th>Deadline</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (!cls.Assignments.Any())
+            {
+              <tr>
+                <td colspan="5" class="text-center py-4 text-muted">
+                  No assignments yet.
+                  <a href="/Assignments/Create">Create one!</a>
+                </td>
+              </tr>
+            }
+            else
+            {
+              @foreach (var a in cls.Assignments.OrderByDescending(x => x.CreatedAt))
+              {
+                <tr>
+                  <td><strong>@a.Title</strong></td>
+                  <td>
+                    <span class="badge bg-label-@(a.Type == SmartSchoolAI.Models.AssignmentType.Homework ? "primary" : "info")">
+                      @a.Type
+                    </span>
+                  </td>
+                  <td>
+                    <span class="badge bg-@(a.Status == SmartSchoolAI.Models.AssignmentStatus.Active ? "success" :
+                                            a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft  ? "secondary" :
+                                            a.Status == SmartSchoolAI.Models.AssignmentStatus.Closed ? "warning" : "dark")">
+                      @a.Status
+                    </span>
+                  </td>
+                  <td>@(a.Deadline?.ToString("dd MMM") ?? "—")</td>
+                  <td>
+                    <a href="/Assignments/Details/@a.Id" class="btn btn-sm btn-icon btn-outline-primary">
+                      <i class="bx bx-show"></i>
+                    </a>
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+</div>
+
+<!-- ══ TAB: RESULTS ═══════════════════════════════════════════════════════ -->
+<div class="@PaneClass("results")">
+  <div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="mb-0"><i class="bx bx-bar-chart-alt-2 me-2"></i>Results by assignment</h5>
+      <a href="/Analytics?classId=@cls.Id" class="btn btn-sm btn-outline-primary">
+        <i class="bx bx-line-chart me-1"></i> Full analytics
+      </a>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>Assignment</th>
+            <th>Submitted</th>
+            <th>Average score</th>
+            <th>Needs review</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @{
+            var published = cls.Assignments
+                .Where(a => a.Status != SmartSchoolAI.Models.AssignmentStatus.Draft)
+                .OrderByDescending(a => a.CreatedAt)
+                .ToList();
+          }
+          @if (!published.Any())
+          {
+            <tr>
+              <td colspan="5" class="text-center py-4 text-muted">
+                No published assignments yet — results appear once you assign work.
+              </td>
+            </tr>
+          }
+          else
+          {
+            @foreach (var a in published)
+            {
+              var st = Model.AssignmentStatsFor(a.Id);
+              var color = st.AverageScore < 0 ? "secondary"
+                        : st.AverageScore >= 70 ? "success"
+                        : st.AverageScore >= 40 ? "warning" : "danger";
+              <tr>
+                <td><strong>@a.Title</strong></td>
+                <td>
+                  @st.Submitted / @st.Assigned
+                  @if (st.Assigned > 0)
+                  {
+                    <div class="progress mt-1" style="height:5px; width:110px;">
+                      <div class="progress-bar" role="progressbar"
+                           style="width:@(st.Assigned == 0 ? 0 : st.Submitted * 100 / st.Assigned)%;"></div>
+                    </div>
+                  }
+                </td>
+                <td>
+                  @if (st.AverageScore < 0)
+                  {
+                    <span class="text-muted">—</span>
+                  }
+                  else
+                  {
+                    <span class="badge bg-label-@color">@st.AverageScore%</span>
+                  }
+                </td>
+                <td>
+                  @if (st.NeedsReview > 0)
+                  {
+                    <span class="badge bg-warning">
+                      <i class="bx bx-error me-1"></i>@st.NeedsReview
+                    </span>
+                  }
+                  else
+                  {
+                    <span class="text-muted">—</span>
+                  }
+                </td>
+                <td class="text-end">
+                  <a href="/Assignments/Details/@a.Id" class="btn btn-sm btn-icon btn-outline-primary"
+                     data-bs-toggle="tooltip" title="Open assignment">
+                    <i class="bx bx-show"></i>
+                  </a>
+                </td>
+              </tr>
+            }
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ══ TAB: STUDENTS ══════════════════════════════════════════════════════ -->
+<div class="@PaneClass("students")">
+    <div class="card" id="students">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bx bx-group me-2"></i>Enrolled Students (@cls.ClassStudents.Count)</h5>
+        <small class="text-muted">Use the ⋯ menu to edit, reset a password or remove</small>
+      </div>
+      <div class="table-responsive table-has-dropdown">
+        <table class="table table-hover mb-0">
+          <thead class="table-light">
+            <tr>
+              <th>Name</th>
+              <th>Joined</th>
+              <th>Participation</th>
+              <th>Average score</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (!cls.ClassStudents.Any())
+            {
+              <tr>
+                <td colspan="5" class="text-center py-4 text-muted">
+                  No students enrolled yet. Share the invite code <strong>@cls.InviteCode</strong> with your students.
+                </td>
+              </tr>
+            }
+            else
+            {
+              @foreach (var cs in cls.ClassStudents.OrderBy(s => s.Student.FullName))
+              {
+                var stat = Model.StatsFor(cs.StudentId);
+                var scoreColor = stat.AverageScore < 0 ? "secondary"
+                               : stat.AverageScore >= 70 ? "success"
+                               : stat.AverageScore >= 40 ? "warning" : "danger";
+                <tr>
+                  <td>
+                    <div class="d-flex align-items-center">
+                      <div class="avatar avatar-sm me-2">
+                        <span class="avatar-initial rounded-circle bg-label-primary">
+                          @cs.Student.FullName[0]
+                        </span>
+                      </div>
+                      <div>
+                        <strong class="d-block">@cs.Student.FullName</strong>
+                        <small class="text-muted">@cs.Student.Email</small>
+                      </div>
+                    </div>
+                  </td>
+                  <td>@cs.JoinedAt.ToString("dd MMM yyyy")</td>
+                  <td>
+                    @if (stat.Assigned == 0)
+                    {
+                      <span class="text-muted small">No work assigned</span>
+                    }
+                    else
+                    {
+                      <span>@stat.ParticipationRate%</span>
+                      <small class="text-muted d-block">@stat.Submitted of @stat.Assigned submitted</small>
+                    }
+                  </td>
+                  <td>
+                    @if (stat.AverageScore < 0)
+                    {
+                      <span class="text-muted">—</span>
+                    }
+                    else
+                    {
+                      <span class="badge bg-label-@scoreColor">@stat.AverageScore%</span>
+                    }
+                  </td>
+                  <td class="text-end">
+                    <div class="dropdown">
+                      <button class="btn btn-sm btn-icon btn-outline-secondary" type="button"
+                              data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bx bx-dots-horizontal-rounded"></i>
+                      </button>
+                      <ul class="dropdown-menu dropdown-menu-end">
+                        <li>
+                          <button type="button" class="dropdown-item"
+                                  onclick="openEditStudent('@cls.Id', '@cs.StudentId', '@cs.Student.FullName', '@cs.Student.Email')">
+                            <i class="bx bx-edit me-1"></i> Edit student
+                          </button>
+                        </li>
+                        <li>
+                          <button type="button" class="dropdown-item"
+                                  onclick="openResetPassword('@cls.Id', '@cs.StudentId', '@cs.Student.FullName')">
+                            <i class="bx bx-lock-open-alt me-1"></i> Reset password
+                          </button>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                          <form method="post" asp-controller="Classes" asp-action="RemoveStudent"
+                                onsubmit="return confirm('Remove @cs.Student.FullName from this class? Their submitted work stays, but they lose access to the class.')">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="classId" value="@cls.Id" />
+                            <input type="hidden" name="studentId" value="@cs.StudentId" />
+                            <input type="hidden" name="returnTo" value="class" />
+                            <button type="submit" class="dropdown-item text-danger">
+                              <i class="bx bx-user-minus me-1"></i> Remove student
+                            </button>
+                          </form>
+                        </li>
+                      </ul>
+                    </div>
+                  </td>
+                </tr>
+              }
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+</div>
+
+<!-- ══ TAB: SETTINGS ══════════════════════════════════════════════════════ -->
+<div class="@PaneClass("settings")">
+  <div class="row justify-content-center">
+    <div class="col-lg-7">
+      <div class="card">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bx bx-cog me-2"></i>Class Settings</h5>
+        </div>
+        <div class="card-body">
+          <form method="post" asp-controller="Classes" asp-action="Edit" asp-route-id="@cls.Id">
+            @Html.AntiForgeryToken()
+
+            <div class="mb-3">
+              <label class="form-label fw-semibold">Class name <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" name="name" value="@cls.Name" required />
+            </div>
+
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label class="form-label fw-semibold">Subject <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" name="subject" value="@cls.Subject" required />
+              </div>
+              <div class="col-md-6 mb-3">
+                <label class="form-label fw-semibold">Grade level</label>
+                <select class="form-select" name="gradeLevel">
+                  @for (int i = 1; i <= 12; i++)
+                  {
+                    if (i == cls.GradeLevel)
+                    {
+                      <option value="@i" selected>Grade @i</option>
+                    }
+                    else
+                    {
+                      <option value="@i">Grade @i</option>
+                    }
+                  }
+                </select>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-6 mb-3">
+                <label class="form-label fw-semibold">Academic year</label>
+                <select class="form-select" name="academicYear">
+                  @foreach (var y in years)
+                  {
+                    if (y == cls.AcademicYear)
+                    {
+                      <option value="@y" selected>@y</option>
+                    }
+                    else
+                    {
+                      <option value="@y">@y</option>
+                    }
+                  }
+                  @if (!string.IsNullOrEmpty(cls.AcademicYear) && !years.Contains(cls.AcademicYear))
+                  {
+                    <option value="@cls.AcademicYear" selected>@cls.AcademicYear</option>
+                  }
+                </select>
+              </div>
+              <div class="col-md-6 mb-3">
+                <label class="form-label fw-semibold">Max students</label>
+                <input type="number" class="form-control" name="maxStudents"
+                       value="@cls.MaxStudents" min="1" max="500" />
+              </div>
+            </div>
+
+            <div class="alert alert-info py-2 small">
+              <i class="bx bx-key me-1"></i>
+              Invite code <strong>@cls.InviteCode</strong> stays the same — students already
+              enrolled are not affected by these changes.
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center">
+              <button type="submit" class="btn btn-primary">
+                <i class="bx bx-save me-1"></i> Save changes
+              </button>
+            </div>
+          </form>
+
+          <hr class="my-4" />
+
+          <h6 class="fw-semibold">Teachers</h6>
+          <div class="mb-3">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <div class="avatar avatar-sm">
+                <span class="avatar-initial rounded-circle bg-label-primary">@cls.Teacher.FullName.Substring(0, 1)</span>
+              </div>
+              <div>
+                <div class="fw-semibold">@cls.Teacher.FullName</div>
+                <div class="text-muted small">@cls.Teacher.Email</div>
+              </div>
+            </div>
+
+            @foreach (var coTeacher in cls.CoTeachers)
+            {
+              <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                <div class="d-flex align-items-center gap-2">
+                  <div class="avatar avatar-sm">
+                    <span class="avatar-initial rounded-circle bg-label-secondary">@coTeacher.Teacher.FullName.Substring(0, 1)</span>
+                  </div>
+                  <div>
+                    <div class="fw-semibold">@coTeacher.Teacher.FullName</div>
+                    <div class="text-muted small">@coTeacher.Teacher.Email</div>
+                  </div>
+                </div>
+                @if (isClassOwner)
+                {
+                  <form method="post" asp-controller="Classes" asp-action="RemoveCoTeacher" class="m-0"
+                        onsubmit="return confirm('Remove @coTeacher.Teacher.FullName as a co-teacher of this class?')">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="classId" value="@cls.Id" />
+                    <input type="hidden" name="teacherId" value="@coTeacher.TeacherId" />
+                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove co-teacher">
+                      <i class="bx bx-x"></i>
+                    </button>
+                  </form>
+                }
+              </div>
+            }
+          </div>
+
+          @if (isClassOwner)
+          {
+            <form method="post" asp-controller="Classes" asp-action="AddCoTeacher" class="d-flex gap-2 mb-4">
+              @Html.AntiForgeryToken()
+              <input type="hidden" name="classId" value="@cls.Id" />
+              <input type="email" name="email" class="form-control form-control-sm" style="max-width:280px"
+                     placeholder="teacher@school.edu" required />
+              <button type="submit" class="btn btn-sm btn-outline-primary">
+                <i class="bx bx-user-plus me-1"></i> Add co-teacher
+              </button>
+            </form>
+          }
+
+          <hr class="my-4" />
+
+          <h6 class="fw-semibold">Multilingual and accessibility support</h6>
+          <form method="post" asp-controller="Classes" asp-action="UpdateAccessibility" id="accessibilityForm" class="mb-4">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="classId" value="@cls.Id" />
+
+            <div class="form-check form-switch mb-1">
+              <input class="form-check-input" type="checkbox" role="switch"
+                     id="translationEnabled" name="translationEnabled" value="true"
+                     @(cls.TranslationEnabled ? "checked" : null) onchange="this.form.submit()" />
+              <label class="form-check-label fw-semibold" for="translationEnabled">Translation assistance</label>
+              <div class="text-muted small">Enable students to translate questions and feedback to a different language.</div>
+            </div>
+            @if (cls.TranslationEnabled)
+            {
+              <button type="button" class="btn btn-sm btn-outline-secondary mt-1 mb-3" data-bs-toggle="modal" data-bs-target="#manageLanguagesModal">
+                <i class="bx bx-globe me-1"></i> Manage languages
+              </button>
+            }
+
+            <div class="form-check form-switch mt-3">
+              <input class="form-check-input" type="checkbox" role="switch"
+                     id="voiceEnabled" name="voiceEnabled" value="true"
+                     @(cls.VoiceEnabled ? "checked" : null) onchange="this.form.submit()" />
+              <label class="form-check-label fw-semibold" for="voiceEnabled">Voice assistance</label>
+              <div class="text-muted small">Enable questions and feedback to be read aloud to students.</div>
+            </div>
+          </form>
+
+          <hr class="my-4" />
+
+          <h6 class="fw-semibold">@(cls.IsArchived ? "Restore this class" : "Archive this class")</h6>
+          <p class="text-muted small">
+            Archiving hides the class from your active list and from students.
+            Nothing is deleted — assignments and submitted work are kept.
+          </p>
+          @if (cls.IsArchived)
+          {
+            <form method="post" asp-controller="Classes" asp-action="Restore" asp-route-id="@cls.Id">
+              @Html.AntiForgeryToken()
+              <button type="submit" class="btn btn-outline-success">
+                <i class="bx bx-undo me-1"></i> Restore class
+              </button>
+            </form>
+          }
+          else
+          {
+            <form method="post" asp-controller="Classes" asp-action="Archive" asp-route-id="@cls.Id"
+                  onsubmit="return confirm('Archive this class? It will be hidden from your active list and from students, but nothing is deleted.')">
+              @Html.AntiForgeryToken()
+              <button type="submit" class="btn btn-outline-warning">
+                <i class="bx bx-archive me-1"></i> Archive class
+              </button>
+            </form>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+@await Html.PartialAsync("_StudentActionModals", "class")
+
+<!-- ══ MANAGE LANGUAGES MODAL ═══════════════════════════════════════════ -->
+<div class="modal fade" id="manageLanguagesModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form method="post" asp-controller="Classes" asp-action="UpdateLanguages">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="classId" value="@cls.Id" />
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bx bx-globe me-2"></i>Manage languages</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted small">Students can translate questions and feedback into any language checked here.</p>
+          <div class="row">
+            @foreach (var lang in SmartSchoolAI.Controllers.ClassesController.SupportedLanguages)
+            {
+              <div class="col-6 mb-2">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" name="languages" value="@lang.Key"
+                         id="lang_@lang.Key" @(enabledLanguages.Contains(lang.Key) ? "checked" : null) />
+                  <label class="form-check-label" for="lang_@lang.Key">@lang.Value</label>
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save languages</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

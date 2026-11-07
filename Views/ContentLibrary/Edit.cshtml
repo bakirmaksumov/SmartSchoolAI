@@ -1,0 +1,1951 @@
+@model SmartSchoolAI.Models.Question
+@{
+    ViewData["Title"] = "Edit Question";
+    var currentOptions  = (List<string>)(ViewBag.CurrentOptions  ?? new List<string>());
+    var letters         = new[] { "A","B","C","D","E","F" };
+}
+
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">
+        SmartSchool AI / <a href="/ContentLibrary">Library</a> /
+      </span> Edit Question
+    </h4>
+  </div>
+</div>
+
+@if (!string.IsNullOrEmpty(ViewBag.Error?.ToString()))
+{
+  <div class="alert alert-danger alert-dismissible mb-4">
+    <i class="bx bx-error-circle me-1"></i> @ViewBag.Error
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+}
+
+<form method="post" asp-action="Edit" asp-controller="ContentLibrary" asp-route-id="@Model.Id" id="questionForm">
+  @Html.AntiForgeryToken()
+  <!-- hidden mirror of the rich editor content -->
+  <input type="hidden" name="title" id="titleHidden" />
+
+  <div class="row">
+
+    <!-- ── LEFT: Question + Answer ── -->
+    <div class="col-lg-8">
+
+      <div class="card mb-4">
+        <div class="card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+          <h6 class="mb-0"><i class="bx bx-question-mark me-2 text-primary"></i>Question</h6>
+          <div class="d-flex gap-2 align-items-center">
+            <!-- Hidden real input posted with form -->
+            <input type="hidden" name="type" id="questionType" value="@((int)Model.Type)" />
+            <!-- Custom dropdown -->
+            <div class="dropdown" id="typeDropdown">
+              <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle d-flex align-items-center gap-1 px-3"
+                      id="typeDropBtn" data-bs-toggle="dropdown" aria-expanded="false" style="min-width:180px;">
+                <span id="typeDropIcon"></span>
+                <span id="typeDropLabel">Loading…</span>
+              </button>
+              <ul class="dropdown-menu shadow" style="min-width:220px;" aria-labelledby="typeDropBtn">
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="0"><i class="bx bx-text text-primary"></i> Text / Numeric</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="4"><i class="bx bx-check-circle text-success"></i> Single choice</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="1"><i class="bx bx-list-check text-primary"></i> Multiple choice</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="5"><i class="bx bx-line-chart text-info"></i> Graphing</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="6"><i class="bx bx-shape-triangle text-warning"></i> Geometry drawing</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="7"><i class="bx bx-right-arrow-alt text-secondary"></i> Number line</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="8"><i class="bx bx-scatter-chart text-danger"></i> Dot plot</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="9"><i class="bx bx-grid-alt text-primary"></i> Table check</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="10"><i class="bx bx-table text-secondary"></i> Table text</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="11"><i class="bx bx-math text-info"></i> Vertical operation</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="3"><i class="bx bx-calculator text-warning"></i> Math expression</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="12"><i class="bx bx-compass text-danger"></i> Protractor</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="13"><i class="bx bx-grid text-success"></i> Rectangular fraction model</button></li>
+                <li><button type="button" class="dropdown-item d-flex align-items-center gap-2 type-opt" data-val="2"><i class="bx bx-edit text-muted"></i> Open text</button></li>
+              </ul>
+            </div>
+            <select class="form-select form-select-sm" name="difficulty" style="width:auto;">
+              @foreach (var (val, emoji, lbl) in new[]
+              {
+                (SmartSchoolAI.Models.DifficultyLevel.Easy,   "🌶",     "Easy"),
+                (SmartSchoolAI.Models.DifficultyLevel.Medium, "🌶🌶",   "Medium"),
+                (SmartSchoolAI.Models.DifficultyLevel.Hard,   "🌶🌶🌶", "Hard")
+              })
+              {
+                if (Model.Difficulty == val)
+                {
+                  <option value="@((int)val)" selected>@emoji @lbl</option>
+                }
+                else
+                {
+                  <option value="@((int)val)">@emoji @lbl</option>
+                }
+              }
+            </select>
+          </div>
+        </div>
+        <div class="card-body pb-2">
+
+          <!-- ── TOOLBAR ── -->
+          <div class="qeditor-wrap mb-3">
+            <div class="qeditor-toolbar" id="editorToolbar">
+
+              <!-- Insert Equation -->
+              <button type="button" class="tb-btn" onclick="openEqModal()" title="Insert equation">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M4 7h16M4 12h10M4 17h7"/><text x="17" y="19" font-size="9" fill="currentColor" stroke="none">&#x2211;</text>
+                </svg>
+                Insert equation
+              </button>
+
+              <div class="tb-sep"></div>
+
+              <!-- Bold -->
+              <button type="button" class="tb-btn" id="btnBold" onclick="execCmd('bold')" title="Bold (Ctrl+B)">
+                <strong>B</strong>
+              </button>
+
+              <div class="tb-sep"></div>
+
+              <!-- Insert Table (dropdown) -->
+              <div class="dropdown">
+                <button type="button" class="tb-btn dropdown-toggle" id="tblDropBtn"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" title="Insert table">
+                  <i class="bx bx-table"></i>
+                </button>
+                <div class="dropdown-menu p-0 shadow-sm" style="min-width:0;" id="tblDropMenu">
+                  <div class="tbl-picker" id="tblPicker"></div>
+                  <div class="tbl-picker-label" id="tblPickerLabel">Insert table</div>
+                  <div class="px-2 pb-2">
+                    <button type="button" class="btn btn-sm btn-outline-danger w-100" onclick="deleteTable()">
+                      Delete table
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="tb-sep"></div>
+
+              <!-- Insert Diagram -->
+              <button type="button" class="tb-btn" onclick="openDiagramModal()" title="Insert diagram">
+                <i class="bx bx-shape-square"></i> Insert diagram
+              </button>
+
+              <div class="tb-sep"></div>
+
+              <!-- Insert Image -->
+              <button type="button" class="tb-btn" onclick="document.getElementById('imgUpload').click()" title="Insert image">
+                <i class="bx bx-image-add"></i> Insert image
+              </button>
+              <input type="file" id="imgUpload" accept="image/*" style="display:none" onchange="insertImage(this)" />
+
+              <div class="tb-sep"></div>
+
+              <!-- Undo / Redo -->
+              <button type="button" class="tb-btn" onclick="execCmd('undo')" title="Undo (Ctrl+Z)">
+                <i class="bx bx-undo"></i>
+              </button>
+              <button type="button" class="tb-btn" onclick="execCmd('redo')" title="Redo (Ctrl+Y)">
+                <i class="bx bx-redo"></i>
+              </button>
+
+            </div>
+
+            <!-- ── EDITOR BODY — pre-filled with existing title ── -->
+            <div id="questionEditor" class="qeditor-body" contenteditable="true"
+                 data-placeholder="Type your question here…"
+                 data-content="@System.Text.Json.JsonSerializer.Serialize(Model.Title)"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ═══ ANSWER TYPE PANELS ═══ -->
+
+      <!-- Single choice / Multiple choice options (types 4 & 1) -->
+      <div class="card mb-4 answer-panel" id="panelChoices"
+           style="display:@((Model.Type == SmartSchoolAI.Models.QuestionType.MultipleChoice || Model.Type == SmartSchoolAI.Models.QuestionType.SingleChoice) ? "block" : "none")">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h6 class="mb-0" id="choicesCardTitle"><i class="bx bx-list-check me-2 text-primary"></i>Answer Choices</h6>
+          <button type="button" class="btn btn-sm btn-outline-primary" onclick="addOption()">
+            <i class="bx bx-plus me-1"></i> Add Option
+          </button>
+        </div>
+        <div class="card-body">
+          <div id="optionsList">
+            @if (currentOptions.Any())
+            {
+              @for (int i = 0; i < currentOptions.Count && i < 6; i++)
+              {
+                <div class="input-group mb-2">
+                  <span class="input-group-text fw-bold">@letters[i]</span>
+                  <input type="text" class="form-control" name="options" value="@currentOptions[i]" />
+                  <button type="button" class="btn btn-outline-danger" onclick="removeOption(this)">
+                    <i class="bx bx-x"></i>
+                  </button>
+                </div>
+              }
+            }
+            else
+            {
+              <div class="input-group mb-2">
+                <span class="input-group-text fw-bold">A</span>
+                <input type="text" class="form-control" name="options" placeholder="Option A" />
+                <button type="button" class="btn btn-outline-danger" onclick="removeOption(this)"><i class="bx bx-x"></i></button>
+              </div>
+              <div class="input-group mb-2">
+                <span class="input-group-text fw-bold">B</span>
+                <input type="text" class="form-control" name="options" placeholder="Option B" />
+                <button type="button" class="btn btn-outline-danger" onclick="removeOption(this)"><i class="bx bx-x"></i></button>
+              </div>
+            }
+          </div>
+          <small class="text-muted">Min 2 options. Answer Key = A, B, C…</small>
+        </div>
+      </div>
+
+      <!-- Number line (type 7) -->
+      <div class="card mb-4 answer-panel" id="panelNumberLine"
+           style="display:@(Model.Type == SmartSchoolAI.Models.QuestionType.NumberLine ? "block" : "none")">
+        <div class="card-header"><h6 class="mb-0"><i class="bx bx-right-arrow-alt me-2 text-secondary"></i>Number Line</h6></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Start</label>
+              <input type="number" class="form-control" name="nlStart" placeholder="e.g. 0" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">End</label>
+              <input type="number" class="form-control" name="nlEnd" placeholder="e.g. 10" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Tick interval</label>
+              <input type="number" class="form-control" name="nlStep" placeholder="e.g. 1" min="0.01" step="0.01" />
+            </div>
+          </div>
+          <div class="mt-3">
+            <label class="form-label fw-semibold">Correct point(s)</label>
+            <input type="text" class="form-control" name="nlAnswer" placeholder="e.g. 3  or  2,5,8" />
+            <div class="form-text">Comma-separate multiple points.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table (types 9 & 10) -->
+      <div class="card mb-4 answer-panel" id="panelTable"
+           style="display:@((Model.Type == SmartSchoolAI.Models.QuestionType.TableCheck || Model.Type == SmartSchoolAI.Models.QuestionType.TableText) ? "block" : "none")">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h6 class="mb-0" id="tableCardTitle"><i class="bx bx-table me-2 text-secondary"></i>Table</h6>
+          <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addTableRow()"><i class="bx bx-plus"></i> Row</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addTableCol()"><i class="bx bx-plus"></i> Col</button>
+          </div>
+        </div>
+        <div class="card-body p-0" style="overflow-x:auto;">
+          <table class="table table-bordered mb-0" id="answerTable">
+            <thead><tr id="tableHeaderRow">
+              <th><input type="text" class="form-control form-control-sm border-0" placeholder="Header 1" name="tableHeaders" /></th>
+              <th><input type="text" class="form-control form-control-sm border-0" placeholder="Header 2" name="tableHeaders" /></th>
+            </tr></thead>
+            <tbody id="tableBody">
+              <tr>
+                <td><input type="text" class="form-control form-control-sm border-0" name="tableCell" /></td>
+                <td><input type="text" class="form-control form-control-sm border-0" name="tableCell" /></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer"><small class="text-muted">Fill correct values in the cells — these become the answer key.</small></div>
+      </div>
+
+      <!-- Vertical operation (type 11) -->
+      <div class="card mb-4 answer-panel" id="panelVertical"
+           style="display:@(Model.Type == SmartSchoolAI.Models.QuestionType.VerticalOperation ? "block" : "none")">
+        <div class="card-header"><h6 class="mb-0"><i class="bx bx-math me-2 text-info"></i>Vertical Operation</h6></div>
+        <div class="card-body">
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">Operation</label>
+              <select class="form-select" name="vertOp">
+                <option value="+">Addition (+)</option>
+                <option value="-">Subtraction (−)</option>
+                <option value="×">Multiplication (×)</option>
+                <option value="÷">Division (÷)</option>
+              </select>
+            </div>
+          </div>
+          <div class="d-flex flex-column align-items-start gap-2" id="vertOperandList">
+            <div class="input-group" style="max-width:220px;">
+              <span class="input-group-text bg-transparent border-end-0"> </span>
+              <input type="text" class="form-control text-end font-monospace" name="vertOperands" placeholder="e.g. 348" />
+            </div>
+            <div class="input-group" style="max-width:220px;">
+              <span class="input-group-text bg-transparent border-end-0" id="vertOpSign">+</span>
+              <input type="text" class="form-control text-end font-monospace" name="vertOperands" placeholder="e.g. 127" />
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm btn-outline-secondary mt-2" onclick="addVertOperand()"><i class="bx bx-plus me-1"></i>Add row</button>
+        </div>
+      </div>
+
+      <!-- Fraction model (type 13) -->
+      <div class="card mb-4 answer-panel" id="panelFraction"
+           style="display:@(Model.Type == SmartSchoolAI.Models.QuestionType.FractionModel ? "block" : "none")">
+        <div class="card-header"><h6 class="mb-0"><i class="bx bx-grid me-2 text-success"></i>Rectangular Fraction Model</h6></div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Rows</label>
+              <input type="number" class="form-control" name="fracRows" value="2" min="1" max="10" oninput="renderFractionPreview()" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Columns</label>
+              <input type="number" class="form-control" name="fracCols" value="4" min="1" max="20" oninput="renderFractionPreview()" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">Shaded cells</label>
+              <input type="number" class="form-control" name="fracShaded" value="3" min="0" oninput="renderFractionPreview()" />
+            </div>
+          </div>
+          <div class="mt-3" id="fracPreview"></div>
+        </div>
+      </div>
+
+      <!-- Open text hint (type 2) -->
+      <div class="card mb-4 answer-panel" id="panelOpenText"
+           style="display:@(Model.Type == SmartSchoolAI.Models.QuestionType.OpenText ? "block" : "none")">
+        <div class="card-header"><h6 class="mb-0"><i class="bx bx-edit me-2 text-muted"></i>Open Text</h6></div>
+        <div class="card-body">
+          <label class="form-label fw-semibold">Rubric / Grading notes <span class="text-muted fw-normal">(optional)</span></label>
+          <textarea class="form-control" name="rubric" rows="3" placeholder="Key points to award marks for…"></textarea>
+        </div>
+      </div>
+
+      <!-- Generic notice for visual types -->
+      @{ var isVisual = Model.Type == SmartSchoolAI.Models.QuestionType.Graphing ||
+                        Model.Type == SmartSchoolAI.Models.QuestionType.GeometryDrawing ||
+                        Model.Type == SmartSchoolAI.Models.QuestionType.DotPlot ||
+                        Model.Type == SmartSchoolAI.Models.QuestionType.Protractor; }
+      <div class="card mb-4 answer-panel border-dashed" id="panelVisual"
+           style="display:@(isVisual ? "block" : "none")">
+        <div class="card-body text-center py-4">
+          <i class="bx bx-image-alt display-6 text-muted mb-2 d-block"></i>
+          <p class="text-muted mb-0 small" id="panelVisualMsg">Students will interact with this type on-screen. Describe the expected answer in the <strong>Answer Key</strong> field below.</p>
+        </div>
+      </div>
+
+      <!-- Answer Key -->
+      <div class="card mb-4" id="answerKeyCard">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bx bx-check-circle me-2 text-success"></i>Answer Key</h6>
+        </div>
+        <div class="card-body">
+          <div class="mb-3" id="answerKeyInputWrap">
+            <label class="form-label fw-semibold">
+              Correct Answer <span class="text-danger">*</span>
+            </label>
+            <input type="text" class="form-control" name="answerKey"
+                   value="@Model.AnswerKey" required />
+          </div>
+          <div>
+            <label class="form-label fw-semibold">
+              Explanation <span class="text-muted fw-normal">(optional)</span>
+            </label>
+            <textarea class="form-control" name="explanation" rows="2">@Model.Explanation</textarea>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── RIGHT: Metadata ── -->
+    <div class="col-lg-4">
+
+      <div class="card mb-4">
+        <div class="card-header">
+          <h6 class="mb-0"><i class="bx bx-category me-2 text-primary"></i>Category</h6>
+        </div>
+        <div class="card-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Subject</label>
+            <input type="text" class="form-control" name="subject"
+                   value="@Model.Subject" list="subjectList" />
+            <datalist id="subjectList">
+              <option value="Mathematics"></option>
+              <option value="Physics"></option>
+              <option value="Chemistry"></option>
+              <option value="Biology"></option>
+              <option value="History"></option>
+              <option value="Geography"></option>
+              <option value="English"></option>
+            </datalist>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Grade Level</label>
+            <select class="form-select" name="gradeLevel">
+              <option value="">— Not specified —</option>
+              @for (int g = 1; g <= 12; g++)
+              {
+                if (Model.GradeLevel == g)
+                {
+                  <option value="@g" selected>Grade @g</option>
+                }
+                else
+                {
+                  <option value="@g">Grade @g</option>
+                }
+              }
+            </select>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="isPublic" id="isPublic" value="true"
+                   @(Model.IsPublic ? "checked" : "") />
+            <label class="form-check-label small" for="isPublic">
+              Make visible to other teachers
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="d-grid gap-2">
+        <button type="submit" class="btn btn-primary btn-lg">
+          <i class="bx bx-save me-1"></i> Save Changes
+        </button>
+        <a href="/ContentLibrary" class="btn btn-outline-secondary">Cancel</a>
+      </div>
+
+    </div>
+  </div>
+</form>
+
+<!-- ═══════════════════════════════════════════
+     INSERT EQUATION MODAL
+═══════════════════════════════════════════════ -->
+<div class="modal fade" id="eqModal" tabindex="-1" aria-labelledby="eqModalLabel">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-3">
+        <h6 class="modal-title fw-semibold" id="eqModalLabel">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="me-2">
+            <path d="M4 7h16M4 12h10M4 17h7"/>
+          </svg>Insert equation
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">LaTeX</label>
+          <input type="text" id="eqInput" class="form-control font-monospace"
+                 placeholder="e.g.  1.28 \times 10^3" oninput="updateEqPreview()" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-semibold small">Preview</label>
+          <div class="eq-preview" id="eqPreview"></div>
+        </div>
+        <ul class="nav nav-tabs nav-tabs-bordered mb-3">
+          <li class="nav-item">
+            <button class="nav-link active small px-3 py-2" data-bs-toggle="tab" data-bs-target="#eqTabMain">Symbols</button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link small px-3 py-2" data-bs-toggle="tab" data-bs-target="#eqTabFn">Functions</button>
+          </li>
+        </ul>
+        <div class="tab-content">
+          <div class="tab-pane fade show active" id="eqTabMain">
+            <div class="eq-keys" id="eqKeysMain"></div>
+          </div>
+          <div class="tab-pane fade" id="eqTabFn">
+            <div class="eq-keys" id="eqKeysFn"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="eqSaveBtn" onclick="insertEquation()">
+          <i class="bx bx-check me-1"></i> Save
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     INSERT DIAGRAM MODAL
+═══════════════════════════════════════════════ -->
+<div class="modal fade" id="diagramModal" tabindex="-1" aria-labelledby="diagramModalLabel">
+  <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-3">
+        <h6 class="modal-title fw-semibold" id="diagramModalLabel">
+          <i class="bx bx-line-chart me-2 text-primary"></i>Insert diagram
+        </h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+
+        <!-- Diagram type selector -->
+        <p class="text-primary fw-semibold small mb-2">Select diagram type</p>
+        <div class="d-flex flex-wrap gap-2 mb-4" id="dgTypeRow">
+          <button type="button" class="btn btn-sm btn-outline-primary dg-type-btn active" data-type="scatter">Scatter plot</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary dg-type-btn" data-type="bar">Bar plot</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary dg-type-btn" data-type="dot">Dot plot</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary dg-type-btn" data-type="pdf">Probability density function</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary dg-type-btn" data-type="box">Box plot</button>
+        </div>
+
+        <!-- ── SCATTER ── -->
+        <div class="dg-panel" id="dgPanel-scatter">
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label small">Number of samples</label>
+              <input type="number" class="form-control form-control-sm" id="sc-samples" value="60" min="5" max="500" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Number of outliers <span class="text-muted">(optional)</span></label>
+              <input type="number" class="form-control form-control-sm" id="sc-outliers" placeholder="" min="0" />
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small">Line of best fit</label>
+            <div class="d-flex align-items-center gap-2">
+              <span class="small text-nowrap">y =</span>
+              <input type="number" class="form-control form-control-sm" id="sc-slope" value="1" placeholder="slope" style="max-width:90px" />
+              <span class="small text-nowrap">x +</span>
+              <input type="number" class="form-control form-control-sm" id="sc-intercept" value="0" placeholder="intercept" style="max-width:90px" />
+              <span class="small text-nowrap ms-2">Correlation (r):</span>
+              <input type="number" class="form-control form-control-sm" id="sc-r" value="0.8" min="-1" max="1" step="0.1" style="max-width:90px" />
+            </div>
+          </div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis data range <span class="text-muted">(optional)</span></label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="sc-xmin" placeholder="min" />
+                <input type="number" class="form-control form-control-sm" id="sc-xmax" placeholder="max" />
+              </div>
+            </div>
+          </div>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sc-bestfit" />
+                <label class="form-check-label small" for="sc-bestfit">Show line of best fit</label>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="sc-labelout" checked />
+                <label class="form-check-label small" for="sc-labelout">Label outliers</label>
+              </div>
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure plane</p>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="sc-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="sc-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="sc-axmax" value="10" />
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="sc-ylabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis range <span class="text-muted">(optional)</span></label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="sc-aymin" placeholder="min" />
+                <input type="number" class="form-control form-control-sm" id="sc-aymax" placeholder="max" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── BAR ── -->
+        <div class="dg-panel d-none" id="dgPanel-bar">
+          <p class="text-primary fw-semibold small mb-2">Select data distribution</p>
+          <div class="d-flex flex-wrap gap-2 mb-4" id="barDistRow">
+            <button type="button" class="btn btn-sm btn-outline-primary dg-dist-btn active" data-dist="normal">Normal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="skewed">Skewed</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="bimodal">Bimodal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="uniform">Uniform</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="list">List of data points</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="exponential">Exponential</button>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label small">Number of samples</label>
+              <input type="number" class="form-control form-control-sm" id="bar-samples" value="60" min="5" max="500" />
+            </div>
+          </div>
+          <!-- Normal distribution fields -->
+          <div class="row g-3 mb-3" id="bar-normal-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="bar-mean" placeholder="" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="bar-std" placeholder="" />
+            </div>
+          </div>
+          <!-- Skewed distribution fields -->
+          <div class="row g-3 mb-3 d-none" id="bar-skewed-fields">
+            <div class="col-md-4">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="bar-skew-mean" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="bar-skew-std" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Skewness</label>
+              <input type="number" class="form-control form-control-sm" id="bar-skew-skewness" placeholder="" />
+            </div>
+          </div>
+          <!-- Bimodal distribution fields -->
+          <div class="d-none" id="bar-bimodal-fields">
+            <div class="row g-3 mb-2">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 1</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-mean1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 1</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-std1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 1</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-w1" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 2</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-mean2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 2</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-std2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 2</label>
+                <input type="number" class="form-control form-control-sm" id="bar-bim-w2" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+          </div>
+          <!-- Exponential distribution fields -->
+          <div class="row g-3 mb-3 d-none" id="bar-exp-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Lambda</label>
+              <input type="number" class="form-control form-control-sm" id="bar-lambda" placeholder="" min="0.01" step="0.01" />
+            </div>
+          </div>
+          <!-- List of data points fields -->
+          <div class="row g-3 mb-3 d-none" id="bar-list-fields">
+            <div class="col-12">
+              <label class="form-label small">Data points <span class="text-muted">(comma-separated)</span></label>
+              <input type="text" class="form-control form-control-sm" id="bar-list" placeholder="e.g. 1,2,3,4,5" />
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure bar plot</p>
+          <div class="row g-3 mb-3">
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="bar-continuous" checked />
+                <label class="form-check-label small" for="bar-continuous">Continuous data</label>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Bin size</label>
+              <input type="number" class="form-control form-control-sm" id="bar-binsize" placeholder="" min="1" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">First bin start <span class="text-muted">(optional)</span></label>
+              <input type="number" class="form-control form-control-sm" id="bar-binstart" placeholder="" />
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="bar-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="bar-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="bar-axmax" value="10" />
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="bar-ylabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis range <span class="text-muted">(optional)</span></label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="bar-aymin" placeholder="min" />
+                <input type="number" class="form-control form-control-sm" id="bar-aymax" placeholder="max" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── DOT ── -->
+        <div class="dg-panel d-none" id="dgPanel-dot">
+          <p class="text-primary fw-semibold small mb-2">Select data distribution</p>
+          <div class="d-flex flex-wrap gap-2 mb-4" id="dotDistRow">
+            <button type="button" class="btn btn-sm btn-outline-primary dg-dist-btn active" data-dist="normal">Normal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="skewed">Skewed</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="bimodal">Bimodal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="uniform">Uniform</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="list">List of data points</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="exponential">Exponential</button>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <!-- Samples row: hidden for list -->
+          <div class="row g-3 mb-3" id="dot-samples-row">
+            <div class="col-md-6">
+              <label class="form-label small">Number of samples</label>
+              <input type="number" class="form-control form-control-sm" id="dot-samples" value="60" min="5" max="500" />
+            </div>
+          </div>
+          <!-- Normal -->
+          <div class="row g-3 mb-3" id="dot-normal-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="dot-mean" placeholder="" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="dot-std" placeholder="" />
+            </div>
+          </div>
+          <!-- Skewed -->
+          <div class="row g-3 mb-3 d-none" id="dot-skewed-fields">
+            <div class="col-md-4">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="dot-skew-mean" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="dot-skew-std" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Skewness</label>
+              <input type="number" class="form-control form-control-sm" id="dot-skew-skewness" placeholder="" />
+            </div>
+          </div>
+          <!-- Bimodal -->
+          <div class="d-none" id="dot-bimodal-fields">
+            <div class="row g-3 mb-2">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 1</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-mean1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 1</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-std1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 1</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-w1" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 2</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-mean2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 2</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-std2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 2</label>
+                <input type="number" class="form-control form-control-sm" id="dot-bim-w2" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+          </div>
+          <!-- Exponential -->
+          <div class="row g-3 mb-3 d-none" id="dot-exp-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Lambda</label>
+              <input type="number" class="form-control form-control-sm" id="dot-lambda" placeholder="" min="0.01" step="0.01" />
+            </div>
+          </div>
+          <!-- List -->
+          <div class="row g-3 mb-3 d-none" id="dot-list-fields">
+            <div class="col-12">
+              <label class="form-label small">Data points <span class="text-muted">(comma-separated)</span></label>
+              <input type="text" class="form-control form-control-sm" id="dot-list" placeholder="e.g. 1,2,3,4,5" />
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure dot plot</p>
+          <div class="row g-3 mb-3">
+            <div class="col-md-6">
+              <label class="form-label small">Step size</label>
+              <input type="number" class="form-control form-control-sm" id="dot-step" placeholder="" min="0.01" step="0.01" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">First step start <span class="text-muted">(optional)</span></label>
+              <input type="number" class="form-control form-control-sm" id="dot-start" placeholder="" />
+            </div>
+          </div>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="dot-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="dot-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="dot-axmax" value="10" />
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="dot-ylabel" maxlength="30" />
+            </div>
+          </div>
+        </div>
+
+        <!-- ── PDF ── -->
+        <div class="dg-panel d-none" id="dgPanel-pdf">
+          <p class="text-primary fw-semibold small mb-2">Select data distribution</p>
+          <div class="d-flex flex-wrap gap-2 mb-4" id="pdfDistRow">
+            <button type="button" class="btn btn-sm btn-outline-primary dg-dist-btn active" data-dist="normal">Normal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="skewed">Skewed</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="bimodal">Bimodal</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="uniform">Uniform</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="list">List of data points</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary dg-dist-btn" data-dist="exponential">Exponential</button>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <!-- Normal -->
+          <div class="row g-3 mb-3" id="pdf-normal-fields">
+            <div class="col-md-6">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-mean" placeholder="" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-std" placeholder="" />
+            </div>
+          </div>
+          <!-- Skewed -->
+          <div class="row g-3 mb-3 d-none" id="pdf-skewed-fields">
+            <div class="col-md-4">
+              <label class="form-label small">Mean</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-skew-mean" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Standard deviation</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-skew-std" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Skewness</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-skew-skewness" placeholder="" />
+            </div>
+          </div>
+          <!-- Bimodal -->
+          <div class="d-none" id="pdf-bimodal-fields">
+            <div class="row g-3 mb-2">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 1</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-mean1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 1</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-std1" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 1</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-w1" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+            <div class="row g-3 mb-3">
+              <div class="col-md-4">
+                <label class="form-label small">Mean 2</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-mean2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Standard deviation 2</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-std2" placeholder="" />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">Weight 2</label>
+                <input type="number" class="form-control form-control-sm" id="pdf-bim-w2" placeholder="" min="0" max="1" step="0.1" />
+              </div>
+            </div>
+          </div>
+          <!-- Exponential -->
+          <div class="row g-3 mb-3 d-none" id="pdf-exp-fields">
+            <div class="col-12">
+              <label class="form-label small">Lambda</label>
+              <input type="number" class="form-control form-control-sm" id="pdf-lambda" placeholder="" min="0.01" step="0.01" />
+            </div>
+          </div>
+          <!-- List -->
+          <div class="row g-3 mb-3 d-none" id="pdf-list-fields">
+            <div class="col-12">
+              <label class="form-label small">Data points <span class="text-muted">(comma-separated)</span></label>
+              <input type="text" class="form-control form-control-sm" id="pdf-list" placeholder="e.g. 1,2,3,4,5" />
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure plane</p>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="pdf-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="pdf-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="pdf-axmax" value="10" />
+              </div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="pdf-ylabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">Y-axis range <span class="text-muted">(optional)</span></label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="pdf-aymin" placeholder="min" />
+                <input type="number" class="form-control form-control-sm" id="pdf-aymax" placeholder="max" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── BOX ── -->
+        <div class="dg-panel d-none" id="dgPanel-box">
+          <p class="text-primary fw-semibold small mb-2">Configure data distribution</p>
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label class="form-label small">Min</label>
+              <input type="number" class="form-control form-control-sm" id="box-min" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Q1</label>
+              <input type="number" class="form-control form-control-sm" id="box-q1" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Median</label>
+              <input type="number" class="form-control form-control-sm" id="box-median" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Average <span class="text-muted">(optional)</span></label>
+              <input type="number" class="form-control form-control-sm" id="box-avg" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Q3</label>
+              <input type="number" class="form-control form-control-sm" id="box-q3" placeholder="" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Max</label>
+              <input type="number" class="form-control form-control-sm" id="box-max" placeholder="" />
+            </div>
+          </div>
+          <p class="text-primary fw-semibold small mb-2">Configure plane</p>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small">X-axis label <span class="text-muted">(optional)</span></label>
+              <input type="text" class="form-control form-control-sm" id="box-xlabel" maxlength="30" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small">X-axis range</label>
+              <div class="d-flex gap-2">
+                <input type="number" class="form-control form-control-sm" id="box-axmin" value="0" />
+                <input type="number" class="form-control form-control-sm" id="box-axmax" value="10" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hidden canvas used for chart rendering -->
+        <canvas id="dgCanvas" style="display:none;"></canvas>
+
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="generateDiagram()">
+          <i class="bx bx-check me-1"></i> Generate
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+@section Scripts {
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+<script>
+// ════════════════════════════════════════════
+//  EDITOR SETUP
+// ════════════════════════════════════════════
+const editor = document.getElementById('questionEditor');
+
+// Mirror content to hidden input on form submit
+document.getElementById('questionForm').addEventListener('submit', () => {
+  document.getElementById('titleHidden').value = extractEditorTitle();
+});
+
+// Use plain text for simple questions; keep HTML only when the title contains
+// rich content (equations, tables, images). Prevents pasted inline styling
+// (font/color/span) from leaking into the saved question title.
+function extractEditorTitle() {
+  const hasRich = editor.querySelector('.eq-chip, table, img');
+  return hasRich ? editor.innerHTML.trim() : editor.textContent.trim();
+}
+
+// Load saved HTML into the editor
+(function loadEditorContent() {
+  const raw = editor.dataset.content;
+  if (raw) {
+    try { editor.innerHTML = JSON.parse(raw); } catch { editor.innerHTML = raw; }
+  }
+})();
+
+// Paste as plain text — strips source formatting (font/color/span) so the
+// question title stays clean. Toolbar features insert their own markup and
+// are unaffected.
+editor.addEventListener('paste', e => {
+  e.preventDefault();
+  const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+  document.execCommand('insertText', false, text);
+});
+
+// Keyboard shortcuts + chip deletion
+editor.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'b') { e.preventDefault(); execCmd('bold'); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); execCmd('undo'); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); execCmd('redo'); return; }
+
+  // Delete equation chip with Backspace or Delete key
+  if (e.key === 'Backspace' || e.key === 'Delete') {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed) return;
+
+    let chip = null;
+    if (e.key === 'Backspace') {
+      const node = range.startContainer, offset = range.startOffset;
+      if (node.nodeType === Node.TEXT_NODE && offset === 0) {
+        const prev = node.previousSibling;
+        if (prev && prev.classList && prev.classList.contains('eq-chip')) chip = prev;
+      } else if (node.nodeType === Node.ELEMENT_NODE && offset > 0) {
+        const prev = node.childNodes[offset - 1];
+        if (prev && prev.classList && prev.classList.contains('eq-chip')) chip = prev;
+      }
+    } else {
+      const node = range.startContainer, offset = range.startOffset;
+      if (node.nodeType === Node.TEXT_NODE && offset === node.length) {
+        const next = node.nextSibling;
+        if (next && next.classList && next.classList.contains('eq-chip')) chip = next;
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const next = node.childNodes[offset];
+        if (next && next.classList && next.classList.contains('eq-chip')) chip = next;
+      }
+    }
+
+    if (chip) { e.preventDefault(); chip.remove(); }
+  }
+});
+
+function execCmd(cmd) { editor.focus(); document.execCommand(cmd, false, null); }
+
+// ════════════════════════════════════════════
+//  TABLE PICKER
+// ════════════════════════════════════════════
+const ROWS = 8, COLS = 8;
+const picker = document.getElementById('tblPicker');
+const label  = document.getElementById('tblPickerLabel');
+let cells = [];
+for (let r = 0; r < ROWS; r++) {
+  for (let c = 0; c < COLS; c++) {
+    const el = document.createElement('div');
+    el.className = 'tbl-picker-cell';
+    el.dataset.r = r; el.dataset.c = c;
+    el.addEventListener('mouseenter', () => highlightGrid(r, c));
+    el.addEventListener('click', () => { insertTable(r+1, c+1); closeTblDrop(); });
+    picker.appendChild(el);
+    cells.push(el);
+  }
+}
+
+function highlightGrid(maxR, maxC) {
+  cells.forEach(el => {
+    el.classList.toggle('hi', +el.dataset.r <= maxR && +el.dataset.c <= maxC);
+  });
+  label.textContent = `${maxR+1} x ${maxC+1}`;
+}
+
+function closeTblDrop() {
+  const dropdown = bootstrap.Dropdown.getInstance(document.getElementById('tblDropBtn'));
+  if (dropdown) dropdown.hide();
+}
+
+function insertTable(rows, cols) {
+  editor.focus();
+  let html = '<table><tbody>';
+  for (let r = 0; r < rows; r++) {
+    html += '<tr>';
+    for (let c = 0; c < cols; c++) html += '<td>&nbsp;</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table><p><br></p>';
+  document.execCommand('insertHTML', false, html);
+}
+
+function deleteTable() {
+  closeTblDrop();
+  editor.focus();
+  const sel = window.getSelection();
+  if (sel.rangeCount) {
+    let node = sel.getRangeAt(0).commonAncestorContainer;
+    while (node && node !== editor) {
+      if (node.nodeName === 'TABLE') { node.remove(); return; }
+      node = node.parentNode;
+    }
+  }
+}
+
+// ════════════════════════════════════════════
+//  IMAGE INSERT
+// ════════════════════════════════════════════
+function insertImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    editor.focus();
+    document.execCommand('insertHTML', false,
+      `<img src="${e.target.result}" style="max-width:100%;border-radius:6px;" alt="image" />`);
+  };
+  reader.readAsDataURL(file);
+  input.value = '';
+}
+
+// ════════════════════════════════════════════
+//  DIAGRAM MODAL
+// ════════════════════════════════════════════
+let _activeDgType = 'scatter';
+let _dgChart      = null;
+
+function openDiagramModal() {
+  _activeDgType = 'scatter';
+  document.querySelectorAll('.dg-type-btn').forEach(b => {
+    b.classList.toggle('btn-outline-primary',   b.dataset.type === 'scatter');
+    b.classList.toggle('btn-outline-secondary', b.dataset.type !== 'scatter');
+    b.classList.toggle('active', b.dataset.type === 'scatter');
+  });
+  document.querySelectorAll('.dg-panel').forEach(p => p.classList.add('d-none'));
+  document.getElementById('dgPanel-scatter').classList.remove('d-none');
+  new bootstrap.Modal(document.getElementById('diagramModal')).show();
+}
+
+// Diagram type tab switching
+document.querySelectorAll('.dg-type-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    _activeDgType = btn.dataset.type;
+    document.querySelectorAll('.dg-type-btn').forEach(b => {
+      b.classList.toggle('btn-outline-primary',   b === btn);
+      b.classList.toggle('btn-outline-secondary', b !== btn);
+      b.classList.toggle('active', b === btn);
+    });
+    document.querySelectorAll('.dg-panel').forEach(p => p.classList.add('d-none'));
+    document.getElementById('dgPanel-' + _activeDgType).classList.remove('d-none');
+  });
+});
+
+// Distribution sub-tab switching (bar / dot / pdf)
+document.querySelectorAll('#dgPanel-bar .dg-dist-btn, #dgPanel-dot .dg-dist-btn, #dgPanel-pdf .dg-dist-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const row = btn.closest('.d-flex');
+    row.querySelectorAll('.dg-dist-btn').forEach(b => {
+      b.classList.toggle('btn-outline-primary',   b === btn);
+      b.classList.toggle('btn-outline-secondary', b !== btn);
+      b.classList.toggle('active', b === btn);
+    });
+    if (_activeDgType === 'bar') {
+      const dist = btn.dataset.dist;
+      document.getElementById('bar-samples').closest('.row').classList.toggle('d-none', dist === 'list');
+      document.getElementById('bar-normal-fields').classList.toggle('d-none',  dist !== 'normal');
+      document.getElementById('bar-skewed-fields').classList.toggle('d-none',  dist !== 'skewed');
+      document.getElementById('bar-bimodal-fields').classList.toggle('d-none', dist !== 'bimodal');
+      document.getElementById('bar-exp-fields').classList.toggle('d-none',     dist !== 'exponential');
+      document.getElementById('bar-list-fields').classList.toggle('d-none',    dist !== 'list');
+    }
+    if (_activeDgType === 'dot') {
+      const dist = btn.dataset.dist;
+      document.getElementById('dot-samples-row').classList.toggle('d-none',    dist === 'list');
+      document.getElementById('dot-normal-fields').classList.toggle('d-none',  dist !== 'normal');
+      document.getElementById('dot-skewed-fields').classList.toggle('d-none',  dist !== 'skewed');
+      document.getElementById('dot-bimodal-fields').classList.toggle('d-none', dist !== 'bimodal');
+      document.getElementById('dot-exp-fields').classList.toggle('d-none',     dist !== 'exponential');
+      document.getElementById('dot-list-fields').classList.toggle('d-none',    dist !== 'list');
+    }
+    if (_activeDgType === 'pdf') {
+      const dist = btn.dataset.dist;
+      document.getElementById('pdf-normal-fields').classList.toggle('d-none',  dist !== 'normal');
+      document.getElementById('pdf-skewed-fields').classList.toggle('d-none',  dist !== 'skewed');
+      document.getElementById('pdf-bimodal-fields').classList.toggle('d-none', dist !== 'bimodal');
+      document.getElementById('pdf-exp-fields').classList.toggle('d-none',     dist !== 'exponential');
+      document.getElementById('pdf-list-fields').classList.toggle('d-none',    dist !== 'list');
+    }
+  });
+});
+
+// ── Stats helpers ──────────────────────────
+function rng() { return Math.random(); }
+function randNorm(mean, std) {
+  const u = 1 - rng(), v = rng();
+  return mean + std * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)); }
+
+function genSamples(dist, n, mean, std) {
+  mean = mean || 5; std = std || 1.5;
+  switch (dist) {
+    case 'normal':      return Array.from({length:n}, () => randNorm(mean, std));
+    case 'skewed':      return Array.from({length:n}, () => Math.abs(randNorm(0, std)) + mean - std);
+    case 'bimodal':     return Array.from({length:n}, (_, i) =>
+                          i < n/2 ? randNorm(mean - 2, std * 0.7) : randNorm(mean + 2, std * 0.7));
+    case 'uniform':     return Array.from({length:n}, () => mean - std + rng() * std * 2);
+    case 'exponential': return Array.from({length:n}, () => mean - std * Math.log(1 - rng()));
+    default:            return Array.from({length:n}, () => randNorm(mean, std));
+  }
+}
+
+function toBins(data, binSize, binStart, axMin, axMax) {
+  if (!binSize || binSize <= 0) {
+    const range = Math.max(...data) - Math.min(...data);
+    binSize = range / Math.ceil(Math.log2(data.length) + 1);
+  }
+  const start = binStart !== '' && !isNaN(binStart) ? +binStart : Math.floor(Math.min(...data) / binSize) * binSize;
+  const end   = axMax !== '' && !isNaN(axMax) ? +axMax : Math.ceil(Math.max(...data) / binSize) * binSize;
+  const bins  = {};
+  for (let b = start; b < end; b += binSize) bins[b.toFixed(4)] = 0;
+  data.forEach(v => {
+    const key = (Math.floor((v - start) / binSize) * binSize + start).toFixed(4);
+    if (bins[key] !== undefined) bins[key]++;
+  });
+  return { labels: Object.keys(bins).map(k => +k), counts: Object.values(bins) };
+}
+
+function normalPdf(x, mean, std) {
+  return (1 / (std * Math.sqrt(2 * Math.PI))) * Math.exp(-0.5 * ((x - mean) / std) ** 2);
+}
+
+// ── Chart factory ──────────────────────────
+function generateDiagram() {
+  const canvas = document.getElementById('dgCanvas');
+  canvas.width  = 600;
+  canvas.height = 350;
+  canvas.style.display = 'block';
+
+  if (_dgChart) { _dgChart.destroy(); _dgChart = null; }
+
+  const isDark     = document.documentElement.classList.contains('dark-style');
+  const gridColor  = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+  const textColor  = isDark ? '#cfd3ec' : '#566a7f';
+  const axisColor  = isDark ? '#434968' : '#d9dee3';
+  const BLUE       = 'rgba(105,108,255,0.85)';
+  const BLUE_LIGHT = 'rgba(105,108,255,0.15)';
+
+  const baseScales = (xLabel, yLabel, axMin, axMax, ayMin, ayMax) => ({
+    x: {
+      title: { display: !!xLabel, text: xLabel, color: textColor },
+      grid:  { color: gridColor },
+      ticks: { color: textColor },
+      min: axMin !== '' && !isNaN(axMin) ? +axMin : undefined,
+      max: axMax !== '' && !isNaN(axMax) ? +axMax : undefined,
+    },
+    y: {
+      title: { display: !!yLabel, text: yLabel, color: textColor },
+      grid:  { color: gridColor },
+      ticks: { color: textColor },
+      min: ayMin !== '' && !isNaN(ayMin) ? +ayMin : undefined,
+      max: ayMax !== '' && !isNaN(ayMax) ? +ayMax : undefined,
+    }
+  });
+
+  let cfg = null;
+
+  // ── SCATTER ──────────────────────────────
+  if (_activeDgType === 'scatter') {
+    const n         = +document.getElementById('sc-samples').value || 60;
+    const nOut      = +document.getElementById('sc-outliers').value || 0;
+    const slope     = +document.getElementById('sc-slope').value || 1;
+    const intercept = +document.getElementById('sc-intercept').value || 0;
+    const r         = clamp(+document.getElementById('sc-r').value || 0.8, -1, 1);
+    const showFit   = document.getElementById('sc-bestfit').checked;
+    const axMin     = document.getElementById('sc-axmin').value;
+    const axMax     = document.getElementById('sc-axmax').value || 10;
+    const ayMin     = document.getElementById('sc-aymin').value;
+    const ayMax     = document.getElementById('sc-aymax').value;
+    const xLabel    = document.getElementById('sc-xlabel').value;
+    const yLabel    = document.getElementById('sc-ylabel').value;
+
+    const xMin = axMin !== '' ? +axMin : 0;
+    const xMax = axMax !== '' ? +axMax : 10;
+    const points = Array.from({length: n}, () => {
+      const x     = xMin + rng() * (xMax - xMin);
+      const noise = randNorm(0, Math.sqrt(1 - r*r)) * (xMax - xMin) * 0.15;
+      const y     = slope * x + intercept + r * (x - (xMin+xMax)/2) * 0.8 + noise;
+      return {x: +x.toFixed(2), y: +y.toFixed(2)};
+    });
+    const yVals    = points.map(p => p.y);
+    const ySpread  = Math.max(...yVals) - Math.min(...yVals);
+    const outliers = Array.from({length: nOut}, () => ({
+      x: +(xMin + rng() * (xMax - xMin)).toFixed(2),
+      y: +(Math.min(...yVals) + rng() * ySpread * 1.8 - ySpread * 0.2).toFixed(2),
+    }));
+
+    const datasets = [{
+      label: 'Data',
+      data: points,
+      backgroundColor: BLUE,
+      pointRadius: 4,
+      type: 'scatter'
+    }];
+    if (outliers.length) {
+      datasets.push({
+        label: 'Outliers',
+        data: outliers,
+        backgroundColor: 'rgba(255,62,29,0.85)',
+        pointRadius: 5,
+        type: 'scatter'
+      });
+    }
+    if (showFit) {
+      datasets.push({
+        label: `y = ${slope}x + ${intercept}`,
+        data: [{x: xMin, y: slope*xMin+intercept}, {x: xMax, y: slope*xMax+intercept}],
+        type: 'line',
+        borderColor: 'rgba(255,171,0,0.9)',
+        borderWidth: 2,
+        pointRadius: 0,
+        fill: false,
+      });
+    }
+    cfg = { type: 'scatter', data: { datasets },
+      options: { responsive: false, animation: false,
+        plugins: { legend: { labels: { color: textColor } } },
+        scales: baseScales(xLabel, yLabel, axMin, axMax, ayMin, ayMax) } };
+  }
+
+  // ── BAR ───────────────────────────────────
+  if (_activeDgType === 'bar') {
+    const activeDist = document.querySelector('#dgPanel-bar .dg-dist-btn.active');
+    const dist    = activeDist ? activeDist.dataset.dist : 'normal';
+    const n       = +document.getElementById('bar-samples').value || 60;
+    const mean    = dist === 'skewed' ? (+document.getElementById('bar-skew-mean').value || 5)
+                  : dist === 'normal' ? (+document.getElementById('bar-mean').value || 5)
+                  : 5;
+    const std     = dist === 'skewed' ? (+document.getElementById('bar-skew-std').value || 1.5)
+                  : dist === 'normal' ? (+document.getElementById('bar-std').value || 1.5)
+                  : 1.5;
+    const lambda  = +document.getElementById('bar-lambda').value || 1;
+    const binSize = +document.getElementById('bar-binsize').value;
+    const binStart= document.getElementById('bar-binstart').value;
+    const axMin   = document.getElementById('bar-axmin').value;
+    const axMax   = document.getElementById('bar-axmax').value || 10;
+    const ayMin   = document.getElementById('bar-aymin').value;
+    const ayMax   = document.getElementById('bar-aymax').value;
+    const xLabel  = document.getElementById('bar-xlabel').value;
+    const yLabel  = document.getElementById('bar-ylabel').value;
+
+    let data;
+    if (dist === 'list') {
+      const raw = document.getElementById('bar-list').value;
+      data = raw.split(',').map(v => +v.trim()).filter(v => !isNaN(v));
+      if (!data.length) data = genSamples('normal', n, 5, 1.5);
+    } else if (dist === 'bimodal') {
+      const m1 = +document.getElementById('bar-bim-mean1').value || 3;
+      const s1 = +document.getElementById('bar-bim-std1').value  || 0.8;
+      const w1 = +document.getElementById('bar-bim-w1').value    || 0.5;
+      const m2 = +document.getElementById('bar-bim-mean2').value || 7;
+      const s2 = +document.getElementById('bar-bim-std2').value  || 0.8;
+      const n1 = Math.round(n * w1); const n2 = n - n1;
+      data = [...Array.from({length:n1}, () => randNorm(m1, s1)),
+              ...Array.from({length:n2}, () => randNorm(m2, s2))];
+    } else if (dist === 'exponential') {
+      data = Array.from({length:n}, () => -Math.log(1 - rng()) / lambda);
+    } else if (dist === 'skewed') {
+      const skew = +document.getElementById('bar-skew-skewness').value || 1;
+      data = Array.from({length:n}, () => {
+        const v = randNorm(mean, std);
+        return mean + Math.sign(skew) * Math.abs(v - mean) * (1 + Math.abs(skew) * 0.3);
+      });
+    } else {
+      data = genSamples(dist, n, mean, std);
+    }
+
+    const { labels, counts } = toBins(data, binSize, binStart, axMin, axMax);
+    cfg = {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Frequency', data: counts,
+        backgroundColor: BLUE_LIGHT, borderColor: BLUE, borderWidth: 1.5 }] },
+      options: { responsive: false, animation: false,
+        plugins: { legend: { labels: { color: textColor } } },
+        scales: baseScales(xLabel, yLabel, axMin, axMax, ayMin, ayMax) }
+    };
+  }
+
+  // ── DOT ───────────────────────────────────
+  if (_activeDgType === 'dot') {
+    const activeDist = document.querySelector('#dgPanel-dot .dg-dist-btn.active');
+    const dist   = activeDist ? activeDist.dataset.dist : 'normal';
+    const n      = +document.getElementById('dot-samples').value || 60;
+    const mean   = dist === 'skewed' ? (+document.getElementById('dot-skew-mean').value || 5)
+                 : dist === 'normal' ? (+document.getElementById('dot-mean').value || 5)
+                 : 5;
+    const std    = dist === 'skewed' ? (+document.getElementById('dot-skew-std').value || 1.5)
+                 : dist === 'normal' ? (+document.getElementById('dot-std').value || 1.5)
+                 : 1.5;
+    const lambda = +document.getElementById('dot-lambda').value || 1;
+    let step     = +document.getElementById('dot-step').value;
+    const axMin  = document.getElementById('dot-axmin').value;
+    const axMax  = document.getElementById('dot-axmax').value || 10;
+    const xLabel = document.getElementById('dot-xlabel').value;
+    const yLabel = document.getElementById('dot-ylabel').value;
+
+    let raw;
+    if (dist === 'list') {
+      const rawStr = document.getElementById('dot-list').value;
+      raw = rawStr.split(',').map(v => +v.trim()).filter(v => !isNaN(v));
+      if (!raw.length) raw = genSamples('normal', n, 5, 1.5);
+    } else if (dist === 'bimodal') {
+      const m1 = +document.getElementById('dot-bim-mean1').value || 3;
+      const s1 = +document.getElementById('dot-bim-std1').value  || 0.8;
+      const w1 = +document.getElementById('dot-bim-w1').value    || 0.5;
+      const m2 = +document.getElementById('dot-bim-mean2').value || 7;
+      const s2 = +document.getElementById('dot-bim-std2').value  || 0.8;
+      const n1 = Math.round(n * w1); const n2 = n - n1;
+      raw = [...Array.from({length:n1}, () => randNorm(m1, s1)),
+             ...Array.from({length:n2}, () => randNorm(m2, s2))];
+    } else if (dist === 'exponential') {
+      raw = Array.from({length:n}, () => -Math.log(1 - rng()) / lambda);
+    } else if (dist === 'skewed') {
+      const skew = +document.getElementById('dot-skew-skewness').value || 1;
+      raw = Array.from({length:n}, () => {
+        const v = randNorm(mean, std);
+        return mean + Math.sign(skew) * Math.abs(v - mean) * (1 + Math.abs(skew) * 0.3);
+      });
+    } else {
+      raw = genSamples(dist, n, mean, std);
+    }
+
+    if (!step || step <= 0) {
+      const range = Math.max(...raw) - Math.min(...raw);
+      step = +(range / 20).toFixed(2) || 0.5;
+    }
+    const buckets = {};
+    raw.forEach(v => {
+      const k = (Math.round(v / step) * step).toFixed(4);
+      buckets[k] = (buckets[k] || 0) + 1;
+    });
+    const dotData = [];
+    Object.entries(buckets).forEach(([k, count]) => {
+      for (let i = 1; i <= count; i++) dotData.push({x: +k, y: i});
+    });
+    cfg = {
+      type: 'scatter',
+      data: { datasets: [{ label: 'Dot plot', data: dotData,
+        backgroundColor: BLUE, pointRadius: 5, pointStyle: 'circle' }] },
+      options: { responsive: false, animation: false,
+        plugins: { legend: { labels: { color: textColor } } },
+        scales: baseScales(xLabel, yLabel, axMin, axMax, '', '') }
+    };
+  }
+
+  // ── PDF ───────────────────────────────────
+  if (_activeDgType === 'pdf') {
+    const activePdfDist = document.querySelector('#dgPanel-pdf .dg-dist-btn.active');
+    const dist  = activePdfDist ? activePdfDist.dataset.dist : 'normal';
+    const axMin = +document.getElementById('pdf-axmin').value || 0;
+    const axMax = +document.getElementById('pdf-axmax').value || 10;
+    const ayMin = document.getElementById('pdf-aymin').value;
+    const ayMax = document.getElementById('pdf-aymax').value;
+    const xLabel= document.getElementById('pdf-xlabel').value;
+    const yLabel= document.getElementById('pdf-ylabel').value;
+    const steps = 200;
+    const xs = Array.from({length: steps+1}, (_, i) => axMin + i*(axMax-axMin)/steps);
+    let ys;
+    if (dist === 'bimodal') {
+      const m1 = +document.getElementById('pdf-bim-mean1').value || 3;
+      const s1 = +document.getElementById('pdf-bim-std1').value  || 0.8;
+      const w1 = +document.getElementById('pdf-bim-w1').value    || 0.5;
+      const m2 = +document.getElementById('pdf-bim-mean2').value || 7;
+      const s2 = +document.getElementById('pdf-bim-std2').value  || 0.8;
+      const w2 = 1 - w1;
+      ys = xs.map(x => w1 * normalPdf(x, m1, s1) + w2 * normalPdf(x, m2, s2));
+    } else if (dist === 'exponential') {
+      const lambda = +document.getElementById('pdf-lambda').value || 1;
+      ys = xs.map(x => x >= 0 ? lambda * Math.exp(-lambda * x) : 0);
+    } else if (dist === 'list') {
+      const rawStr = document.getElementById('pdf-list').value;
+      const pts = rawStr.split(',').map(v => +v.trim()).filter(v => !isNaN(v));
+      const m = pts.length ? pts.reduce((a,b)=>a+b,0)/pts.length : 5;
+      const s = pts.length > 1 ? Math.sqrt(pts.reduce((a,b)=>a+(b-m)**2,0)/(pts.length-1)) : 1.5;
+      ys = xs.map(x => normalPdf(x, m, s));
+    } else if (dist === 'skewed') {
+      const mean = +document.getElementById('pdf-skew-mean').value || 5;
+      const std  = +document.getElementById('pdf-skew-std').value  || 1.5;
+      const skew = +document.getElementById('pdf-skew-skewness').value || 1;
+      ys = xs.map(x => {
+        const z = (x - mean) / std;
+        return (2 / std) * normalPdf(z, 0, 1) * (skew > 0 ? (z > 0 ? 1 : 0.2) : (z < 0 ? 1 : 0.2));
+      });
+    } else if (dist === 'uniform') {
+      ys = xs.map(x => (x >= axMin && x <= axMax) ? 1 / (axMax - axMin) : 0);
+    } else {
+      const mean = +document.getElementById('pdf-mean').value || 5;
+      const std  = +document.getElementById('pdf-std').value  || 1.5;
+      ys = xs.map(x => normalPdf(x, mean, std));
+    }
+    cfg = {
+      type: 'line',
+      data: { labels: xs.map(x => x.toFixed(2)),
+        datasets: [{ label: 'PDF', data: ys, borderColor: BLUE,
+          backgroundColor: BLUE_LIGHT, fill: true, pointRadius: 0, tension: 0.4 }] },
+      options: { responsive: false, animation: false,
+        plugins: { legend: { labels: { color: textColor } } },
+        scales: baseScales(xLabel, yLabel, axMin, axMax, ayMin, ayMax) }
+    };
+  }
+
+  // ── BOX (manual canvas draw) ───────────────
+  if (_activeDgType === 'box') {
+    const minV  = +document.getElementById('box-min').value;
+    const q1    = +document.getElementById('box-q1').value;
+    const med   = +document.getElementById('box-median').value;
+    const avg   = document.getElementById('box-avg').value;
+    const q3    = +document.getElementById('box-q3').value;
+    const maxV  = +document.getElementById('box-max').value;
+    const axMin = +document.getElementById('box-axmin').value;
+    const axMax = +document.getElementById('box-axmax').value;
+    const xLabel= document.getElementById('box-xlabel').value;
+
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const PAD_L = 60, PAD_R = 30, PAD_T = 30, PAD_B = 50;
+    const plotW = W - PAD_L - PAD_R;
+    const plotH = H - PAD_T - PAD_B;
+    const cy    = PAD_T + plotH / 2;
+    const boxH  = plotH * 0.4;
+    const scale = v => PAD_L + ((v - axMin) / (axMax - axMin)) * plotW;
+
+    // Grid + ticks
+    ctx.strokeStyle = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 5; i++) {
+      const x = PAD_L + (plotW / 5) * i;
+      ctx.beginPath(); ctx.moveTo(x, PAD_T); ctx.lineTo(x, PAD_T + plotH); ctx.stroke();
+      ctx.fillStyle = textColor;
+      ctx.font = '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText((axMin + (axMax - axMin) / 5 * i).toFixed(1), x, PAD_T + plotH + 18);
+    }
+    ctx.strokeStyle = axisColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(PAD_L, PAD_T + plotH); ctx.lineTo(W - PAD_R, PAD_T + plotH); ctx.stroke();
+
+    // Whiskers
+    const draw = (x1,y1,x2,y2) => { ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); };
+    ctx.strokeStyle = BLUE.replace('0.85','1');
+    ctx.lineWidth = 2;
+    draw(scale(minV), cy, scale(q1),  cy);
+    draw(scale(q3),   cy, scale(maxV),cy);
+    draw(scale(minV), cy-boxH*0.3, scale(minV), cy+boxH*0.3);
+    draw(scale(maxV), cy-boxH*0.3, scale(maxV), cy+boxH*0.3);
+
+    // Box fill + stroke
+    ctx.fillStyle = BLUE_LIGHT;
+    ctx.strokeStyle = BLUE.replace('0.85','1');
+    ctx.lineWidth = 2;
+    ctx.fillRect(scale(q1), cy - boxH/2, scale(q3) - scale(q1), boxH);
+    ctx.strokeRect(scale(q1), cy - boxH/2, scale(q3) - scale(q1), boxH);
+
+    // Median line
+    ctx.strokeStyle = 'rgba(255,171,0,0.95)';
+    ctx.lineWidth = 3;
+    draw(scale(med), cy - boxH/2, scale(med), cy + boxH/2);
+
+    // Average diamond
+    if (avg !== '' && !isNaN(+avg)) {
+      const ax = scale(+avg);
+      ctx.fillStyle = 'rgba(255,62,29,0.9)';
+      ctx.beginPath();
+      ctx.moveTo(ax, cy - boxH*0.3); ctx.lineTo(ax+7, cy);
+      ctx.lineTo(ax, cy + boxH*0.3); ctx.lineTo(ax-7, cy);
+      ctx.closePath(); ctx.fill();
+    }
+
+    // X-axis label
+    if (xLabel) {
+      ctx.fillStyle = textColor;
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(xLabel, W/2, H - 8);
+    }
+
+    const dataUrl = canvas.toDataURL('image/png');
+    canvas.style.display = 'none';
+    editor.focus();
+    document.execCommand('insertHTML', false,
+      `<img src="${dataUrl}" contenteditable="false"
+        style="max-width:100%;border-radius:6px;display:block;margin:8px 0;"
+        alt="Box plot" /><p><br></p>`);
+    bootstrap.Modal.getInstance(document.getElementById('diagramModal')).hide();
+    return;
+  }
+
+  if (!cfg) return;
+
+  _dgChart = new Chart(document.getElementById('dgCanvas'), cfg);
+  requestAnimationFrame(() => {
+    const dataUrl = document.getElementById('dgCanvas').toDataURL('image/png');
+    if (_dgChart) { _dgChart.destroy(); _dgChart = null; }
+    canvas.style.display = 'none';
+    editor.focus();
+    const typeLabels = { scatter:'Scatter plot', bar:'Bar plot', dot:'Dot plot', pdf:'Probability density function' };
+    document.execCommand('insertHTML', false,
+      `<img src="${dataUrl}" contenteditable="false"
+        style="max-width:100%;border-radius:6px;display:block;margin:8px 0;"
+        alt="${typeLabels[_activeDgType]}" /><p><br></p>`);
+    bootstrap.Modal.getInstance(document.getElementById('diagramModal')).hide();
+  });
+}
+
+// ════════════════════════════════════════════
+//  EQUATION MODAL
+// ════════════════════════════════════════════
+const EQ_SYMBOLS = [
+  { label: 'x\u00B2',     latex: 'x^{2}' },
+  { label: '\u221Ax',     latex: '\\sqrt{x}' },
+  { label: 'x/y',         latex: '\\frac{x}{y}' },
+  { label: 'd/dx',        latex: '\\frac{d}{dx}' },
+  { label: '\u2211',      latex: '\\sum' },
+  { label: '\u00B1',      latex: '\\pm' },
+  { label: '\u2260',      latex: '\\neq' },
+  { label: '\u2265',      latex: '\\geq' },
+  { label: '\u2271',      latex: '\\ngeq' },
+  { label: '\u03C0',      latex: '\\pi' },
+  { label: '\u2220',      latex: '\\angle' },
+  { label: 'x\u00B3',    latex: 'x^{3}' },
+  { label: '\u221Bx',     latex: '\\sqrt[3]{x}' },
+  { label: '|x|',         latex: '|x|' },
+  { label: '\u2202/\u2202y', latex: '\\frac{\\partial}{\\partial y}' },
+  { label: '\u03A0',      latex: '\\prod' },
+  { label: '\u00B7',      latex: '\\cdot' },
+  { label: '=',           latex: '=' },
+  { label: '\u2264',      latex: '\\leq' },
+  { label: '\u2270',      latex: '\\nleq' },
+  { label: '\u03B8',      latex: '\\theta' },
+  { label: 'x\u207F',    latex: 'x^{n}' },
+  { label: '\u207Bx',    latex: '\\sqrt[n]{x}' },
+  { label: '\u222B',      latex: '\\int' },
+  { label: '\u222C',      latex: '\\iint' },
+  { label: 'x\u0305',    latex: '\\bar{x}' },
+  { label: '\u00D7',      latex: '\\times' },
+  { label: '\u2248',      latex: '\\approx' },
+  { label: '\u0394',      latex: '\\Delta' },
+  { label: '\u226F',      latex: '\\ngtr' },
+  { label: '\u03B1',      latex: '\\alpha' },
+  { label: 'z\u20D7',    latex: '\\vec{z}' },
+  { label: 'x_y',        latex: 'x_{y}' },
+  { label: 'log\u2090',  latex: '\\log_{a}' },
+  { label: '\u230A',      latex: '\\lfloor' },
+  { label: 'lim',         latex: '\\lim' },
+  { label: 'C(n,r)',      latex: '\\binom{n}{r}' },
+  { label: '\u00F7',      latex: '\\div' },
+  { label: '~',           latex: '\\sim' },
+  { label: '\u221E',      latex: '\\infty' },
+  { label: '\u226E',      latex: '\\nless' },
+  { label: '\u03B2',      latex: '\\beta' },
+  { label: '\u2272',      latex: '\\lesssim' },
+];
+const EQ_FUNCTIONS = [
+  { label: 'sin',         latex: '\\sin(' },
+  { label: 'cos',         latex: '\\cos(' },
+  { label: 'tan',         latex: '\\tan(' },
+  { label: 'sin\u207B\u00B9', latex: '\\sin^{-1}(' },
+  { label: 'cos\u207B\u00B9', latex: '\\cos^{-1}(' },
+  { label: 'tan\u207B\u00B9', latex: '\\tan^{-1}(' },
+  { label: 'ln',          latex: '\\ln(' },
+  { label: 'log',         latex: '\\log(' },
+  { label: 'log\u2082',  latex: '\\log_{2}(' },
+  { label: 'exp',         latex: '\\exp(' },
+  { label: 'e\u02E3',    latex: 'e^{x}' },
+  { label: '10\u02E3',   latex: '10^{x}' },
+  { label: 'n!',          latex: 'n!' },
+  { label: '%',           latex: '\\%' },
+  { label: 'f(x)',        latex: 'f(x)' },
+  { label: 'g(x)',        latex: 'g(x)' },
+];
+
+function buildEqKeys(keys, containerId) {
+  const container = document.getElementById(containerId);
+  keys.forEach(k => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-outline-secondary ek';
+    btn.textContent = k.label;
+    btn.title = k.latex;
+    btn.addEventListener('click', () => appendLatex(k.latex));
+    container.appendChild(btn);
+  });
+}
+
+buildEqKeys(EQ_SYMBOLS,   'eqKeysMain');
+buildEqKeys(EQ_FUNCTIONS, 'eqKeysFn');
+
+function appendLatex(fragment) {
+  const inp = document.getElementById('eqInput');
+  const pos = inp.selectionStart;
+  const val = inp.value;
+  inp.value = val.slice(0, pos) + fragment + val.slice(inp.selectionEnd);
+  inp.selectionStart = inp.selectionEnd = pos + fragment.length;
+  inp.focus();
+  updateEqPreview();
+}
+
+function updateEqPreview() {
+  const raw  = document.getElementById('eqInput').value.trim();
+  const prev = document.getElementById('eqPreview');
+  if (!raw) { prev.innerHTML = '<span class="text-muted small">Preview will appear here</span>'; return; }
+  try {
+    prev.innerHTML = katex.renderToString(raw, { throwOnError: false, displayMode: true });
+  } catch(e) {
+    prev.innerHTML = `<span class="text-danger small">${e.message}</span>`;
+  }
+}
+
+function openEqModal() {
+  document.getElementById('eqInput').value = '';
+  updateEqPreview();
+  document.getElementById('eqSaveBtn').onclick = insertEquation;
+  new bootstrap.Modal(document.getElementById('eqModal')).show();
+}
+
+function insertEquation() {
+  const raw = document.getElementById('eqInput').value.trim();
+  if (!raw) return;
+  let rendered = '';
+  try { rendered = katex.renderToString(raw, { throwOnError: false, displayMode: false }); }
+  catch(e) { rendered = raw; }
+  const chip = `<span class="eq-chip" contenteditable="false" data-latex="${raw.replace(/"/g,'&quot;')}"
+    onclick="editEquation(this)" title="Click to edit">${rendered}</span>`;
+  editor.focus();
+  document.execCommand('insertHTML', false, chip);
+  bootstrap.Modal.getInstance(document.getElementById('eqModal')).hide();
+}
+
+function editEquation(chip) {
+  document.getElementById('eqInput').value = chip.dataset.latex;
+  updateEqPreview();
+  const modal = new bootstrap.Modal(document.getElementById('eqModal'));
+  document.getElementById('eqSaveBtn').onclick = () => {
+    const newLatex = document.getElementById('eqInput').value.trim();
+    if (!newLatex) return;
+    let rendered = '';
+    try { rendered = katex.renderToString(newLatex, { throwOnError: false, displayMode: false }); }
+    catch(e) { rendered = newLatex; }
+    chip.dataset.latex = newLatex;
+    chip.innerHTML = rendered;
+    chip.setAttribute('contenteditable', 'false');
+    modal.hide();
+    document.getElementById('eqSaveBtn').onclick = insertEquation;
+  };
+  modal.show();
+}
+
+// ════════════════════════════════════════════
+//  TYPE PICKER
+// ════════════════════════════════════════════
+const TYPE_META = {
+  0:  { label: 'Text / Numeric',             icon: '<i class="bx bx-text text-primary"></i>',              panels: [] },
+  4:  { label: 'Single choice',              icon: '<i class="bx bx-check-circle text-success"></i>',      panels: ['panelChoices'] },
+  1:  { label: 'Multiple choice',            icon: '<i class="bx bx-list-check text-primary"></i>',        panels: ['panelChoices'] },
+  5:  { label: 'Graphing',                   icon: '<i class="bx bx-line-chart text-info"></i>',           panels: ['panelVisual'] },
+  6:  { label: 'Geometry drawing',           icon: '<i class="bx bx-shape-triangle text-warning"></i>',    panels: ['panelVisual'] },
+  7:  { label: 'Number line',                icon: '<i class="bx bx-right-arrow-alt text-secondary"></i>', panels: ['panelNumberLine'] },
+  8:  { label: 'Dot plot',                   icon: '<i class="bx bx-scatter-chart text-danger"></i>',      panels: ['panelVisual'] },
+  9:  { label: 'Table check',                icon: '<i class="bx bx-grid-alt text-primary"></i>',          panels: ['panelTable'] },
+  10: { label: 'Table text',                 icon: '<i class="bx bx-table text-secondary"></i>',           panels: ['panelTable'] },
+  11: { label: 'Vertical operation',         icon: '<i class="bx bx-math text-info"></i>',                panels: ['panelVertical'] },
+  3:  { label: 'Math expression',            icon: '<i class="bx bx-calculator text-warning"></i>',        panels: [] },
+  12: { label: 'Protractor',                 icon: '<i class="bx bx-compass text-danger"></i>',            panels: ['panelVisual'] },
+  13: { label: 'Rectangular fraction model', icon: '<i class="bx bx-grid text-success"></i>',              panels: ['panelFraction'] },
+  2:  { label: 'Open text',                  icon: '<i class="bx bx-edit text-muted"></i>',                panels: ['panelOpenText'] },
+};
+
+const VISUAL_MSGS = {
+  5:  'Graphing: students plot points/lines on a coordinate plane. Describe the expected graph in the Answer Key.',
+  6:  'Geometry drawing: students construct shapes. Describe the expected construction in the Answer Key.',
+  8:  'Dot plot: students place dots on a number line. Describe the expected distribution in the Answer Key.',
+  12: 'Protractor: students measure or draw angles. Enter the expected angle (degrees) in the Answer Key.',
+};
+
+// Init dropdown label from server-side value
+(function initTypePicker() {
+  const val  = +document.getElementById('questionType').value || 0;
+  const meta = TYPE_META[val] || TYPE_META[0];
+  document.getElementById('typeDropLabel').textContent = meta.label;
+  document.getElementById('typeDropIcon').innerHTML    = meta.icon;
+  document.querySelectorAll('.type-opt').forEach(b => {
+    if (+b.dataset.val === val) b.classList.add('active');
+  });
+})();
+
+document.querySelectorAll('.type-opt').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const val = +btn.dataset.val;
+    document.getElementById('questionType').value = val;
+    const meta = TYPE_META[val];
+    document.getElementById('typeDropLabel').textContent = meta.label;
+    document.getElementById('typeDropIcon').innerHTML    = meta.icon;
+    document.querySelectorAll('.type-opt').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    bootstrap.Dropdown.getInstance(document.getElementById('typeDropBtn'))?.hide();
+    toggleTypePanels(val);
+  });
+});
+
+function toggleTypePanels(val) {
+  const allPanels = ['panelChoices','panelNumberLine','panelTable','panelVertical','panelFraction','panelOpenText','panelVisual'];
+  allPanels.forEach(id => document.getElementById(id).style.display = 'none');
+
+  const meta = TYPE_META[val] || { panels: [] };
+  meta.panels.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'block';
+  });
+
+  if (val === 4) {
+    document.getElementById('choicesCardTitle').innerHTML = '<i class="bx bx-check-circle me-2 text-success"></i>Answer Choices (Single)';
+  } else if (val === 1) {
+    document.getElementById('choicesCardTitle').innerHTML = '<i class="bx bx-list-check me-2 text-primary"></i>Answer Choices (Multiple)';
+  }
+  if (val === 9) document.getElementById('tableCardTitle').innerHTML = '<i class="bx bx-grid-alt me-2 text-primary"></i>Table (Check)';
+  if (val === 10) document.getElementById('tableCardTitle').innerHTML = '<i class="bx bx-table me-2 text-secondary"></i>Table (Text)';
+  if (VISUAL_MSGS[val]) document.getElementById('panelVisualMsg').innerHTML = VISUAL_MSGS[val];
+  if (val === 11) syncVertOpSign();
+  if (val === 13) renderFractionPreview();
+}
+
+// ════════════════════════════════════════════
+//  CHOICE OPTIONS
+// ════════════════════════════════════════════
+const LETTERS = ['A','B','C','D','E','F'];
+
+function toggleOptions() {} // kept for back-compat
+
+function addOption() {
+  const list  = document.getElementById('optionsList');
+  const count = list.children.length;
+  if (count >= 6) { alert('Maximum 6 options allowed.'); return; }
+  const div = document.createElement('div');
+  div.className = 'input-group mb-2';
+  div.innerHTML =
+    `<span class="input-group-text fw-bold">${LETTERS[count]}</span>
+     <input type="text" class="form-control" name="options" placeholder="Option ${LETTERS[count]}" />
+     <button type="button" class="btn btn-outline-danger" onclick="removeOption(this)">
+       <i class="bx bx-x"></i>
+     </button>`;
+  list.appendChild(div);
+}
+
+function removeOption(btn) {
+  const list = document.getElementById('optionsList');
+  if (list.children.length <= 2) { alert('Minimum 2 options required.'); return; }
+  btn.closest('.input-group').remove();
+  reindexOptions();
+}
+
+function reindexOptions() {
+  [...document.getElementById('optionsList').children].forEach((row, i) => {
+    row.querySelector('.input-group-text').textContent = LETTERS[i];
+    row.querySelector('input').placeholder = `Option ${LETTERS[i]}`;
+  });
+}
+
+// ════════════════════════════════════════════
+//  TABLE BUILDER
+// ════════════════════════════════════════════
+function addTableRow() {
+  const tbody = document.getElementById('tableBody');
+  const cols  = document.getElementById('tableHeaderRow').children.length;
+  const tr = document.createElement('tr');
+  for (let i = 0; i < cols; i++) {
+    tr.innerHTML += `<td><input type="text" class="form-control form-control-sm border-0" name="tableCell" /></td>`;
+  }
+  tbody.appendChild(tr);
+}
+
+function addTableCol() {
+  const hRow = document.getElementById('tableHeaderRow');
+  const num  = hRow.children.length + 1;
+  hRow.innerHTML += `<th><input type="text" class="form-control form-control-sm border-0" placeholder="Header ${num}" name="tableHeaders" /></th>`;
+  document.querySelectorAll('#tableBody tr').forEach(tr => {
+    tr.innerHTML += `<td><input type="text" class="form-control form-control-sm border-0" name="tableCell" /></td>`;
+  });
+}
+
+// ════════════════════════════════════════════
+//  VERTICAL OPERATION
+// ════════════════════════════════════════════
+function syncVertOpSign() {
+  const op = document.querySelector('[name="vertOp"]')?.value || '+';
+  document.getElementById('vertOpSign').textContent = op;
+}
+document.querySelector('[name="vertOp"]')?.addEventListener('change', syncVertOpSign);
+
+function addVertOperand() {
+  const list = document.getElementById('vertOperandList');
+  const op   = document.querySelector('[name="vertOp"]')?.value || '+';
+  const div  = document.createElement('div');
+  div.className = 'input-group';
+  div.style.maxWidth = '220px';
+  div.innerHTML = `<span class="input-group-text bg-transparent border-end-0">${op}</span>
+    <input type="text" class="form-control text-end font-monospace" name="vertOperands" placeholder="number" />`;
+  list.appendChild(div);
+}
+
+// ════════════════════════════════════════════
+//  FRACTION MODEL PREVIEW
+// ════════════════════════════════════════════
+function renderFractionPreview() {
+  const rows    = +document.querySelector('[name="fracRows"]')?.value  || 2;
+  const cols    = +document.querySelector('[name="fracCols"]')?.value  || 4;
+  const shaded  = +document.querySelector('[name="fracShaded"]')?.value || 3;
+  const total   = rows * cols;
+  const preview = document.getElementById('fracPreview');
+  if (!preview) return;
+  let html = '<div style="display:inline-grid;gap:2px;grid-template-columns:repeat(' + cols + ',32px);">';
+  for (let i = 0; i < total; i++) {
+    const filled = i < shaded;
+    html += `<div style="width:32px;height:32px;border:1.5px solid #696cff;border-radius:3px;background:${filled ? 'rgba(105,108,255,0.35)' : 'transparent'};"></div>`;
+  }
+  html += '</div>';
+  html += `<p class="small text-muted mt-2 mb-0">${shaded}/${total} = ${shaded}/${total}</p>`;
+  preview.innerHTML = html;
+}
+</script>
+}

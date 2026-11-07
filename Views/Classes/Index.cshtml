@@ -1,0 +1,104 @@
+@model IEnumerable<SmartSchoolAI.Models.Class>
+@{
+    ViewData["Title"] = "My Classes";
+    var showArchived  = ViewBag.ShowArchived  as bool? ?? false;
+    var activeCount   = ViewBag.ActiveCount   as int?  ?? 0;
+    var archivedCount = ViewBag.ArchivedCount as int?  ?? 0;
+}
+
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">SmartSchool AI /</span> My Classes
+    </h4>
+  </div>
+  <div class="col-auto">
+    <a href="/Classes/Create" class="btn btn-primary">
+      <i class="bx bx-plus me-1"></i> New Class
+    </a>
+  </div>
+</div>
+
+<!-- Active / Archived tabs -->
+<ul class="nav nav-pills mb-4">
+  <li class="nav-item">
+    <a class="nav-link @(showArchived ? "" : "active")" href="/Classes">
+      <i class="bx bx-group me-1"></i>Active
+      <span class="badge bg-label-secondary ms-1">@activeCount</span>
+    </a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link @(showArchived ? "active" : "")" href="/Classes?archived=true">
+      <i class="bx bx-archive me-1"></i>Archived
+      <span class="badge bg-label-secondary ms-1">@archivedCount</span>
+    </a>
+  </li>
+</ul>
+
+@if (!Model.Any())
+{
+  <div class="card">
+    <div class="card-body text-center py-5">
+      @if (showArchived)
+      {
+        <i class="bx bx-archive" style="font-size:3rem; color:#a1acb8;"></i>
+        <h5 class="mt-3">No archived classes</h5>
+        <p class="text-muted mb-0">Classes you archive will appear here and can be restored any time.</p>
+      }
+      else
+      {
+        <i class="bx bx-group" style="font-size:3rem; color:#696cff;"></i>
+        <h5 class="mt-3">No classes yet</h5>
+        <p class="text-muted">Create your first class to get started.</p>
+        <a href="/Classes/Create" class="btn btn-primary">Create Class</a>
+      }
+    </div>
+  </div>
+}
+else
+{
+  <div class="row">
+    @foreach (var cls in Model)
+    {
+      <div class="col-md-6 col-xl-4 mb-4">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex align-items-start justify-content-between mb-2">
+              <div class="avatar">
+                <span class="avatar-initial rounded bg-label-primary">
+                  <i class="bx bx-group"></i>
+                </span>
+              </div>
+              @if (cls.IsArchived)
+              {
+                <span class="badge bg-secondary">Archived</span>
+              }
+              else
+              {
+                <span class="badge bg-success">Active</span>
+              }
+            </div>
+            <h5 class="card-title mt-2 mb-1">@cls.Name</h5>
+            <p class="text-muted small mb-2">@cls.Subject — Grade @cls.GradeLevel — @cls.AcademicYear</p>
+            <div class="d-flex align-items-center gap-2 mb-3">
+              <span class="badge bg-label-info">
+                <i class="bx bx-key me-1"></i>@cls.InviteCode
+              </span>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+              <a href="/Classes/Details/@cls.Id?tab=assignments" class="btn btn-sm btn-primary">
+                <i class="bx bx-folder-open me-1"></i> Open
+              </a>
+              <a href="/Classes/Details/@cls.Id?tab=students" class="btn btn-sm btn-outline-primary">
+                <i class="bx bx-group me-1"></i> Students (@cls.ClassStudents.Count)
+              </a>
+              <a href="/Classes/Details/@cls.Id?tab=settings" class="btn btn-sm btn-outline-secondary">
+                <i class="bx bx-cog me-1"></i> Settings
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    }
+  </div>
+}

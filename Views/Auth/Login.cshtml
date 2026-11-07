@@ -1,0 +1,98 @@
+@{
+    ViewData["Title"] = "Login";
+    Layout = "_AuthLayout";
+}
+
+<div class="container-xxl">
+  <div class="authentication-wrapper authentication-basic container-p-y">
+    <div class="authentication-inner">
+      <div class="card card-hover shadow-lg" style="animation: fadeInUp 0.5s ease-out forwards; border-radius: 1rem; border: 1px solid rgba(0, 43, 73, 0.1);">
+        <div class="card-body p-4 p-sm-5">
+
+          <!-- Logo -->
+          <div class="app-brand justify-content-center mb-4">
+            <a href="/" class="app-brand-link gap-2 align-items-center">
+              <span class="eduai-logo-badge" style="width: 44px; height: 44px;">
+                <i class="bx bxs-graduation eduai-icon-cap" style="font-size: 26px;"></i>
+                <i class="bx bx-sparkles eduai-icon-spark" style="font-size: 15px;"></i>
+              </span>
+              <span class="app-brand-text demo text-body fw-bolder ms-1" style="font-size: 1.5rem; letter-spacing: -0.3px;">
+                EduSchool<span style="color:var(--wiut-crimson);">AI</span>
+              </span>
+            </a>
+          </div>
+
+          <p class="mb-4 text-muted">Sign in to access your school workspace & AI tutoring</p>
+
+          @if (!string.IsNullOrEmpty(ViewBag.Error))
+          {
+            <div class="alert alert-danger">
+              <i class="bx bx-error-circle me-1"></i> @ViewBag.Error
+            </div>
+          }
+
+          <form method="post" asp-action="Login" asp-controller="Auth">
+            @Html.AntiForgeryToken()
+
+            <div class="mb-3">
+              <label class="form-label" for="email">Email</label>
+              <input type="email" class="form-control" id="email" name="email"
+                     placeholder="Enter your email" autofocus required />
+            </div>
+
+            <div class="mb-3 form-password-toggle">
+              <div class="d-flex justify-content-between">
+                <label class="form-label" for="password">Password</label>
+                <a href="/Auth/ForgotPassword"><small>Forgot Password?</small></a>
+              </div>
+              <div class="input-group input-group-merge">
+                <input type="password" id="password" class="form-control" name="password"
+                       placeholder="············" required />
+                <span class="input-group-text cursor-pointer">
+                  <i class="bx bx-hide"></i>
+                </span>
+              </div>
+            </div>
+
+            <div class="mb-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" name="rememberMe" value="true" id="rememberMe" />
+                <label class="form-check-label" for="rememberMe">Remember Me</label>
+              </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(ViewBag.ReCaptchaSiteKey))
+            {
+              <div class="mb-3">
+                <div class="g-recaptcha" data-sitekey="@ViewBag.ReCaptchaSiteKey"></div>
+              </div>
+            }
+
+            <button class="btn btn-primary d-grid w-100 py-2 fw-semibold shadow-sm" type="submit">
+              <span class="d-flex align-items-center justify-content-center">
+                <i class="bx bx-log-in-circle me-2 fs-5"></i> Sign in
+              </span>
+            </button>
+          </form>
+
+          <p class="text-center mt-3">
+            <span>New student?</span>
+            <a href="/Auth/StudentRegister"> Join with invite code</a>
+          </p>
+          <p class="text-center mt-1">
+            <span>New teacher?</span>
+            <a href="/Auth/Register"> Create teacher account</a>
+          </p>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+@section Scripts {
+  @if (!string.IsNullOrEmpty(ViewBag.ReCaptchaSiteKey))
+  {
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+  }
+}

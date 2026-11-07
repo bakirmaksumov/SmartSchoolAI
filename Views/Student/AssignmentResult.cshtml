@@ -1,0 +1,400 @@
+@using SmartSchoolAI.Models.Dtos
+@using System.Text.Json
+@model SmartSchoolAI.Models.StudentResult
+@{
+    ViewData["Title"] = "My Result";
+    var questions  = ViewBag.Questions as List<QuestionDto> ?? new();
+
+    var voiceEnabled       = Model.Assignment.Class?.VoiceEnabled == true;
+    var translationEnabled = Model.Assignment.Class?.TranslationEnabled == true;
+    var enabledLanguages   = new List<KeyValuePair<string, string>>();
+    if (translationEnabled)
+    {
+        var codes = new HashSet<string>();
+        try
+        {
+            foreach (var code in JsonSerializer.Deserialize<List<string>>(
+                string.IsNullOrWhiteSpace(Model.Assignment.Class!.EnabledLanguages) ? "[]" : Model.Assignment.Class.EnabledLanguages) ?? new())
+                codes.Add(code);
+        }
+        catch (JsonException) { /* pre-migration rows — treat as none selected */ }
+
+        enabledLanguages = SmartSchoolAI.Controllers.ClassesController.SupportedLanguages
+            .Where(kv => codes.Contains(kv.Key))
+            .ToList();
+        translationEnabled = enabledLanguages.Count > 0;
+    }
+    var pass       = Model.Assignment.IsPass(Model.Score);
+    var scoreColor = pass ? "success"
+                   : Model.Score >= Model.Assignment.PassThreshold / 2 ? "warning" : "danger";
+
+    var correctCount   = Model.StudentAnswers.Count(a => a.IsCorrect == true);
+    var incorrectCount = Model.StudentAnswers.Count(a => a.IsCorrect == false);
+    var totalQuestions = questions.Count > 0 ? questions.Count : Model.StudentAnswers.Count;
+
+    var (cheerIcon, cheerText) = Model.Score switch
+    {
+        >= 90 => ("🎉", "Excellent! You understand this topic very well."),
+        >= 70 => ("💪", "Well done! You know this topic well."),
+        >= 40 => ("🌱", "Good progress. Keep practicing to improve your score."),
+        _     => ("💡", "Do not worry. Read the correct answers below, then try again.")
+    };
+}
+
+@if (voiceEnabled || translationEnabled)
+{
+  @Html.AntiForgeryToken()
+}
+
+<!-- EduSchool Hero Header with Print Certificate Button -->
+<div class="wiut-hero-card mb-4 d-print-none">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <div>
+      <h3 class="fw-bold text-white mb-1"><i class="bx bx-award me-2"></i>Academic Result Summary</h3>
+      <p class="text-white-50 mb-0">@Model.Assignment.Title · Attempt #@Model.AttemptNumber</p>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-danger shadow-sm" onclick="window.print();">
+        <i class="bx bx-printer me-1"></i> Print / Download Certificate PDF
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- STATS METRICS ROW -->
+<div class="row mb-4">
+  <!-- Overall Grade Score -->
+  <div class="col-md-4 mb-3 mb-md-0">
+    <div class="card card-hover text-center h-100">
+      <div class="card-body py-4 d-flex flex-column align-items-center justify-content-center">
+        <div class="avatar avatar-xl mb-3" style="width: 80px; height: 80px;">
+          <span class="avatar-initial rounded-circle bg-label-@scoreColor fw-bold fs-2 border border-@scoreColor">
+            @Model.Assignment.FormatGrade(Model.Score)
+          </span>
+        </div>
+        <h5 class="card-title fw-bold text-primary mb-1">Overall Score</h5>
+        <span class="badge bg-@scoreColor px-3 py-2 fs-6">@Model.OverallStatus</span>
+        <small class="text-muted mt-2">Attempt @Model.AttemptNumber of @Model.Assignment.MaxAttempts</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- Performance Metrics & Feedback -->
+  <div class="col-md-8">
+    <div class="card card-hover h-100">
+      <div class="card-header bg-transparent d-flex align-items-center justify-content-between py-3">
+        <h5 class="mb-0 fw-bold text-primary">
+          <i class="bx bx-comment-detail me-2 text-danger"></i>@(Model.TeacherReviewedAt.HasValue ? "Instructor Feedback" : "AI Academic Feedback")
+        </h5>
+        @if (Model.TeacherReviewedAt.HasValue)
+        {
+          <span class="badge bg-label-primary"><i class="bx bx-user-check me-1"></i>Reviewed by Instructor</span>
+        }
+      </div>
+      <div class="card-body d-flex flex-column justify-content-between">
+        <div>
+          <div class="d-flex gap-3 mb-3">
+            <div class="p-2 bg-label-success rounded text-center flex-grow-1">
+              <span class="d-block small text-muted fw-semibold">Correct</span>
+              <h5 class="mb-0 text-success fw-bold">@correctCount / @totalQuestions</h5>
+            </div>
+            <div class="p-2 bg-label-danger rounded text-center flex-grow-1">
+              <span class="d-block small text-muted fw-semibold">Incorrect</span>
+              <h5 class="mb-0 text-danger fw-bold">@incorrectCount / @totalQuestions</h5>
+            </div>
+          </div>
+          <p class="fw-semibold mb-1"><span style="font-size:1.2rem;">@cheerIcon</span> @cheerText</p>
+          <p class="mb-3 text-muted small" id="overallFeedback">@Model.AiSummary</p>
+          @if ((voiceEnabled || translationEnabled) && !string.IsNullOrWhiteSpace(Model.AiSummary))
+          {
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3 d-print-none">
+              @if (voiceEnabled)
+              {
+                <button type="button" class="btn btn-sm btn-outline-secondary read-aloud-btn" data-target="overallFeedback">
+                  <i class="bx bx-volume-full me-1"></i> Read aloud
+                </button>
+              }
+              @if (translationEnabled)
+              {
+                <div class="dropdown">
+                  <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                    <i class="bx bx-globe me-1"></i> Translate
+                  </button>
+                  <ul class="dropdown-menu">
+                    @foreach (var lang in enabledLanguages)
+                    {
+                      <li>
+                        <button type="button" class="dropdown-item translate-btn"
+                                data-source="overallFeedback" data-target="overallFeedback_translated"
+                                data-assignment="@Model.AssignmentId" data-lang="@lang.Key">@lang.Value</button>
+                      </li>
+                    }
+                    <li><hr class="dropdown-divider" /></li>
+                    <li><button type="button" class="dropdown-item translate-clear-btn" data-target="overallFeedback_translated">Show original</button></li>
+                  </ul>
+                </div>
+              }
+            </div>
+            <div class="translation-output d-none mb-3 p-3 rounded" id="overallFeedback_translated" style="background:#f5f5f9; border-left: 3px solid #696cff;"></div>
+          }
+        </div>
+
+        <div class="d-flex gap-2 flex-wrap pt-2 border-top">
+          @if (!Model.IsSubmitted && Model.Assignment.Status == SmartSchoolAI.Models.AssignmentStatus.Active)
+          {
+            <a asp-action="TakeAssignment" asp-route-assignmentId="@Model.AssignmentId"
+               class="btn btn-sm btn-primary">
+              <i class="bx bx-edit me-1"></i> Continue Quiz
+            </a>
+          }
+          <a asp-action="Chat" asp-route-resultId="@Model.Id" asp-route-mode="hint"
+             class="btn btn-sm btn-outline-primary">
+            <i class="bx bx-bulb me-1"></i> Get AI Hint
+          </a>
+          <a asp-action="Chat" asp-route-resultId="@Model.Id" asp-route-mode="explain"
+             class="btn btn-sm btn-outline-info">
+            <i class="bx bx-book-reader me-1"></i> Explain Steps
+          </a>
+          @if (Model.Assignment.MaxAttempts > Model.AttemptNumber)
+          {
+            <a asp-action="TakeAssignment" asp-route-assignmentId="@Model.AssignmentId"
+               class="btn btn-sm btn-outline-warning">
+              <i class="bx bx-refresh me-1"></i> Try Again
+            </a>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- QUESTION BREAKDOWN CARDS -->
+<div class="card card-hover mb-4">
+  <div class="card-header bg-transparent py-3">
+    <h5 class="mb-0 fw-bold text-primary"><i class="bx bx-list-check me-2 text-danger"></i>Question Breakdown</h5>
+  </div>
+  <div class="card-body p-0">
+    <div class="list-group list-group-flush">
+      @for (int i = 0; i < questions.Count; i++)
+      {
+        var q      = questions[i];
+        var answer = Model.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == i);
+        var res    = answer?.IsCorrect == true ? "success" : answer?.IsCorrect == false ? "danger" : "secondary";
+        var resLbl = answer?.IsCorrect == true ? "Correct" : answer?.IsCorrect == false ? "Incorrect" : "N/A";
+        var resIcon= answer?.IsCorrect == true ? "bx-check-circle" : answer?.IsCorrect == false ? "bx-x-circle" : "bx-minus-circle";
+
+        <div class="list-group-item p-4 border-bottom">
+          <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+            <div class="d-flex align-items-center gap-2">
+              <span class="badge bg-label-primary fs-6 px-3 py-1">Question @(i + 1)</span>
+              <span class="badge bg-label-@res fs-6 px-3 py-1"><i class="bx @resIcon me-1"></i>@resLbl</span>
+            </div>
+          </div>
+
+          <!-- Question Content -->
+          <div class="fs-6 fw-semibold text-dark mb-3 math-render">@q.Title</div>
+
+          @if (!string.IsNullOrEmpty(q.ImagePath))
+          {
+            <div class="mb-3">
+              <img src="@q.ImagePath" class="img-fluid rounded border shadow-sm" style="max-height:220px;" alt="Question diagram" />
+            </div>
+          }
+
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="p-3 bg-light rounded border">
+                <small class="text-muted d-block mb-1 fw-semibold">Your Answer:</small>
+                <div class="fw-bold @(answer?.IsCorrect == true ? "text-success" : answer?.IsCorrect == false ? "text-danger" : "text-muted") math-render">
+                  @(string.IsNullOrWhiteSpace(answer?.AnswerValue) ? "—" : answer.AnswerValue)
+                </div>
+              </div>
+            </div>
+
+            <div class="col-md-6">
+              <div class="p-3 bg-light rounded border">
+                <small class="text-muted d-block mb-1 fw-semibold">Correct Solution:</small>
+                <div class="fw-bold text-success math-render">
+                  @(string.IsNullOrWhiteSpace(q.AnswerKey) ? "—" : q.AnswerKey)
+                </div>
+              </div>
+            </div>
+          </div>
+
+          @if (!string.IsNullOrEmpty(answer?.TeacherComment))
+          {
+            <div class="alert alert-info mt-3 mb-0 d-flex align-items-center">
+              <i class="bx bx-user-voice fs-4 me-2"></i>
+              <div><strong>Instructor Comment:</strong> @answer.TeacherComment</div>
+            </div>
+          }
+          else if (answer is not null && !string.IsNullOrEmpty(answer.AiSummary) && string.IsNullOrEmpty(answer.ImagePath))
+          {
+            <div class="alert alert-lighter border mt-3 mb-2 d-flex align-items-center">
+              <i class="bx bx-bot fs-4 text-primary me-2"></i>
+              <div class="small"><strong>AI Analysis:</strong> <span id="qFeedback_@i">@answer.AiSummary</span></div>
+            </div>
+            @if (voiceEnabled || translationEnabled)
+            {
+              <div class="d-flex flex-wrap align-items-center gap-2 mb-2 d-print-none">
+                @if (voiceEnabled)
+                {
+                  <button type="button" class="btn btn-sm btn-outline-secondary read-aloud-btn" data-target="qFeedback_@i">
+                    <i class="bx bx-volume-full me-1"></i> Read aloud
+                  </button>
+                }
+                @if (translationEnabled)
+                {
+                  <div class="dropdown">
+                    <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                      <i class="bx bx-globe me-1"></i> Translate
+                    </button>
+                    <ul class="dropdown-menu">
+                      @foreach (var lang in enabledLanguages)
+                      {
+                        <li>
+                          <button type="button" class="dropdown-item translate-btn"
+                                  data-source="qFeedback_@i" data-target="qFeedback_@(i)_translated"
+                                  data-assignment="@Model.AssignmentId" data-lang="@lang.Key">@lang.Value</button>
+                        </li>
+                      }
+                      <li><hr class="dropdown-divider" /></li>
+                      <li><button type="button" class="dropdown-item translate-clear-btn" data-target="qFeedback_@(i)_translated">Show original</button></li>
+                    </ul>
+                  </div>
+                }
+              </div>
+              <div class="translation-output d-none mb-2 p-3 rounded" id="qFeedback_@(i)_translated" style="background:#f5f5f9; border-left: 3px solid #696cff;"></div>
+            }
+          }
+        </div>
+      }
+    </div>
+  </div>
+</div>
+
+<!-- YOUR WORKING SECTION (LaTeX Formatted) -->
+@{
+  var workedOut = Model.StudentAnswers
+      .Where(a => !string.IsNullOrWhiteSpace(a.WorkText))
+      .OrderBy(a => a.QuestionIndex)
+      .ToList();
+}
+@if (workedOut.Any())
+{
+  <div class="card card-hover mb-4">
+    <div class="card-header bg-transparent py-3">
+      <h5 class="mb-0 fw-bold text-primary"><i class="bx bx-edit me-2 text-danger"></i>Your Step-by-Step Working</h5>
+    </div>
+    <div class="card-body">
+      @foreach (var ans in workedOut)
+      {
+        var qTitle = ans.QuestionIndex < questions.Count
+            ? questions[ans.QuestionIndex].Title
+            : $"Question {ans.QuestionIndex + 1}";
+        var qImagePath = ans.QuestionIndex < questions.Count ? questions[ans.QuestionIndex].ImagePath : null;
+        <div class="mb-4 p-3 border rounded bg-white shadow-sm">
+          <div class="fw-bold text-primary mb-2">
+            Question @(ans.QuestionIndex + 1): <span class="math-render text-dark fw-normal">@qTitle</span>
+          </div>
+          @if (!string.IsNullOrEmpty(qImagePath))
+          {
+            <img src="@qImagePath" class="img-fluid rounded border mb-3" style="max-height:220px;" alt="Diagram" />
+          }
+          <div class="p-3 bg-light rounded border math-render"
+               style="font-family: 'Public Sans', monospace; line-height: 2; font-size: 0.95rem; white-space: pre-wrap;">@ans.WorkText</div>
+        </div>
+      }
+    </div>
+  </div>
+}
+
+<!-- HANDWRITTEN SOLUTIONS SECTION -->
+@{
+  var handwritten = Model.StudentAnswers
+      .Where(a => !string.IsNullOrEmpty(a.ImagePath))
+      .OrderBy(a => a.QuestionIndex)
+      .ToList();
+}
+@if (handwritten.Any())
+{
+  <div class="card card-hover mb-4">
+    <div class="card-header bg-transparent py-3">
+      <h5 class="mb-0 fw-bold text-primary"><i class="bx bx-camera me-2 text-danger"></i>Handwritten Solutions</h5>
+    </div>
+    <div class="card-body">
+      @foreach (var ans in handwritten)
+      {
+        var steps  = Model.StepResults.Where(s => s.QuestionIndex == ans.QuestionIndex).OrderBy(s => s.StepNumber).ToList();
+        var qTitle = ans.QuestionIndex < questions.Count ? questions[ans.QuestionIndex].Title : $"Question {ans.QuestionIndex + 1}";
+        var qImagePath = ans.QuestionIndex < questions.Count ? questions[ans.QuestionIndex].ImagePath : null;
+        <div class="mb-4 p-3 border rounded bg-white shadow-sm">
+          <div class="fw-bold text-primary mb-2">Question @(ans.QuestionIndex + 1): <span class="math-render text-dark fw-normal">@qTitle</span></div>
+          @if (!string.IsNullOrEmpty(qImagePath))
+          {
+            <img src="@qImagePath" class="img-fluid rounded border mb-2" style="max-height:220px;" alt="Diagram" />
+          }
+          <div class="row g-3">
+            <div class="col-md-4">
+              <div class="d-flex flex-column gap-2">
+                @foreach (var photo in SmartSchoolAI.Services.SubmissionMedia.Paths(ans.ImagePath))
+                {
+                  <a href="@photo" target="_blank">
+                    <img src="@photo" class="img-fluid rounded border shadow-sm" style="max-height:280px; object-fit:contain;" alt="Solution photo" />
+                  </a>
+                }
+              </div>
+            </div>
+            <div class="col-md-8">
+              @if (!string.IsNullOrEmpty(ans.AiSummary))
+              {
+                <div class="small text-muted mb-2 bg-light p-2 rounded border"><i class="bx bx-bot text-primary me-1"></i>@ans.AiSummary</div>
+              }
+              @foreach (var s in steps)
+              {
+                var ok = s.Status == SmartSchoolAI.Models.ResultStatus.Correct;
+                <div class="border rounded p-2 mb-2" style="border-left:4px solid @(ok ? "#71dd37" : "#ff3e1d") !important;">
+                  <div class="small fw-semibold">@(ok ? "✅" : "❌") Step @s.StepNumber: @s.StepText</div>
+                  @if (!ok && !string.IsNullOrEmpty(s.Explanation))
+                  {
+                    <div class="small text-muted mt-1">💡 @s.Explanation</div>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+        </div>
+      }
+    </div>
+  </div>
+}
+
+<div class="mt-3 mb-4">
+  <a asp-action="Index" asp-controller="Student" class="btn btn-outline-secondary">
+    <i class="bx bx-arrow-back me-1"></i> Back to Dashboard
+  </a>
+</div>
+
+@section Scripts {
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+  <script src="~/js/accessibility-widget.js" asp-append-version="true"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      if (typeof renderMathInElement === 'function') {
+        document.querySelectorAll('.math-render').forEach(function (el) {
+          renderMathInElement(el, {
+            delimiters: [
+              { left: '$$', right: '$$', display: true },
+              { left: '$',  right: '$',  display: false },
+              { left: '\\(', right: '\\)', display: false },
+              { left: '\\[', right: '\\]', display: true }
+            ],
+            throwOnError: false
+          });
+        });
+      }
+    });
+  </script>
+}
