@@ -51,7 +51,7 @@
       btn.addEventListener('click', function () {
         assignmentId  = $('assignmentId').value;
         questionIndex = parseInt(this.dataset.qindex, 10);
-        $('hwQuestionTitle').textContent = this.dataset.qtitle || '';
+        showQuestion(this.dataset.qtitle || '');
 
         // Restore a saved draft so the student never has to re-analyze.
         var draft = loadDraft();
@@ -474,6 +474,24 @@
     });
   }
 
+  // ── Readable maths ─────────────────────────────────────────────────────────
+  // The question and the OCR steps arrive as LaTeX ("$y_{1,2} = \\pm 2$"). They are shown as
+  // readable text; notation that cannot be converted reliably is left as written and
+  // shown formatted, never guessed at.
+  function readable(str) { return MathText.inline(str); }
+
+  function showQuestion(title) {
+    var q = readable(title), box = $('hwQuestionTitle');
+    box.textContent = q.text;
+    if (q.hasComplex && typeof renderMathInElement === 'function') {
+      renderMathInElement(box, {
+        delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false },
+                     { left: '\\(', right: '\\)', display: false }, { left: '\\[', right: '\\]', display: true }],
+        throwOnError: false
+      });
+    }
+  }
+
   // ── Editable steps ────────────────────────────────────────────────────────--
   function renderEditableSteps(steps) {
     $('hwStepsList').innerHTML = '';
@@ -489,7 +507,33 @@
       '<input type="text" class="form-control hw-step-input" />' +
       '<button type="button" class="btn btn-sm btn-outline-danger hw-step-del"><i class="bx bx-trash"></i></button>';
     row.querySelector('.hw-step-num').textContent = number;
-    row.querySelector('.hw-step-input').value = text || '';
+
+    var input = row.querySelector('.hw-step-input');
+    input.spellcheck = false;
+    var shown = readable(text || '');
+    if (!shown.hasComplex) {
+      // Edited as readable text. The untouched original (the maths as recognized) is what
+      // is submitted while the text is unchanged, so no meaning is lost to the conversion.
+      input.value = shown.text;
+      row.dataset.original = text || '';
+      row.dataset.display  = shown.text;
+    } else {
+      // Not safely convertible: keep the source as written and show it formatted underneath.
+      input.value = text || '';
+      row.dataset.original = text || '';
+      var note = document.createElement('div');
+      note.className = 'hw-step-preview';
+      row.appendChild(note);
+      var refresh = function () {
+        note.textContent = input.value;
+        if (typeof renderMathInElement === 'function') {
+          note.textContent = '$' + input.value.replace(/^\$+|\$+$/g, '') + '$';
+          renderMathInElement(note, { delimiters: [{ left: '$', right: '$', display: false }], throwOnError: false });
+        }
+      };
+      refresh();
+      input.addEventListener('input', refresh);
+    }
     row.querySelector('.hw-step-del').addEventListener('click', function () {
       row.remove();
       renumberSteps();
@@ -510,7 +554,11 @@
   function collectSteps() {
     const steps = [];
     document.querySelectorAll('#hwStepsList .hw-step-row').forEach(function (row, i) {
-      const text = row.querySelector('.hw-step-input').value.trim();
+      let text = row.querySelector('.hw-step-input').value.trim();
+      // Unchanged readable text goes back out as the original maths; an edit goes out as typed.
+      if (text && row.dataset.display !== undefined && text === row.dataset.display) {
+        text = row.dataset.original;
+      }
       if (text) steps.push({ number: i + 1, text: text });
     });
     return steps;
@@ -528,7 +576,7 @@
     let html =
       '<div class="alert alert-' + (correct ? 'success' : 'warning') + ' py-2 px-3">' +
         '<strong>' + (correct ? '✅ Correct' : '❌ Not correct') + '</strong>' +
-        (data.summary ? '<div class="small mt-1">' + escapeHtml(data.summary) + '</div>' : '') +
+        (data.summary ? '<div class="small mt-1">' + escapeHtml(readable(data.summary).text) + '</div>' : '') +
       '</div>';
 
     (data.steps || []).forEach(function (s) {
@@ -542,7 +590,7 @@
             '>❌</span>';
       html +=
         '<div class="hw-result-step ' + (ok ? 'correct' : 'incorrect') + '">' +
-          '<div class="hw-step-text">' + mark + ' Step ' + s.number + ': ' + escapeHtml(s.text) + '</div>' +
+          '<div class="hw-step-text">' + mark + ' Step ' + s.number + ': ' + escapeHtml(readable(s.text).text) + '</div>' +
         '</div>';
     });
 

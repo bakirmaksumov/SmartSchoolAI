@@ -639,6 +639,7 @@
     var overlay = document.getElementById('tutorialOverlay');
     if (panel)   panel.classList.add('open');
     if (overlay) overlay.classList.add('open');
+    document.body.classList.add('tutorial-open');
 
     // Reopen the same conversation only for the SAME assignment AND question.
     var sameConversation = chatAssignmentId === currentAssignment
@@ -672,6 +673,7 @@
     var overlay = document.getElementById('tutorialOverlay');
     if (panel)   panel.classList.remove('open');
     if (overlay) overlay.classList.remove('open');
+    document.body.classList.remove('tutorial-open');
   }
 
   // Called whenever the visible question changes (Next/Previous, a nav pill,
@@ -733,10 +735,24 @@
       if (!el) return;
       el.style.top = offset + 'px';
       el.style.height = 'calc(100vh - ' + offset + 'px)';
+      // On phones 100vh includes the browser bar and would push the composer off screen.
+      if (window.CSS && CSS.supports && CSS.supports('height', '100dvh')) {
+        el.style.height = 'calc(100dvh - ' + offset + 'px)';
+      }
     });
   }
 
   // ── SSE Streaming helpers ────────────────────────────────────────────────
+
+  // The server sends each chunk as a JSON string so newlines and edge whitespace
+  // survive the SSE framing; anything that is not a JSON string is taken literally.
+  function decodeSseChunk(payload) {
+    try {
+      var value = JSON.parse(payload);
+      if (typeof value === 'string') return value;
+    } catch (e) { /* not JSON — use as is */ }
+    return payload;
+  }
 
   async function readSseStream(response, onChunk) {
     var reader  = response.body.getReader();
@@ -751,14 +767,15 @@
 
       var newlineIdx;
       while ((newlineIdx = buffer.indexOf('\n')) !== -1) {
-        var line = buffer.slice(0, newlineIdx).trimEnd();
+        // Only the line terminator is stripped: a chunk may legitimately end in a space.
+        var line = buffer.slice(0, newlineIdx).replace(/\r$/, '');
         buffer   = buffer.slice(newlineIdx + 1);
 
         if (!line.startsWith('data: ')) continue;
         var payload = line.slice(6);
         if (!payload || payload === '[DONE]') continue;
 
-        onChunk(payload);
+        onChunk(decodeSseChunk(payload));
       }
     }
   }
@@ -831,6 +848,11 @@
     }
   }
 
+  // Markdown prose and maths → readable DOM (never innerHTML: the reply is untrusted).
+  function renderTutorText(bubble, text) {
+    MathText.renderInto(bubble, text);
+  }
+
   // Sends one tutor turn: appends the user message, streams the assistant reply,
   // and keeps the running history so the conversation continues across modes.
   async function streamTutorTurn(userMessage, showUserBubble) {
@@ -854,31 +876,29 @@
         })
       });
 
+      if (!response.ok) {
+        throw new Error(response.status === 429
+          ? 'Too many questions in a short time. Please wait a moment and try again.'
+          : 'The tutor is unavailable right now (' + response.status + ').');
+      }
+
+      // The raw text is accumulated untouched and re-rendered from scratch on every chunk,
+      // so a chunk that ends in a space or starts mid-word can never garble what came before.
       var fullText = '';
       await readSseStream(response, function (chunk) {
         fullText += chunk;
         var bubble = document.getElementById(bubbleId);
         if (bubble) {
-          bubble.textContent = fullText;
+          renderTutorText(bubble, fullText);
           if (msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
         }
       });
 
       chatHistory.push({ role: 'assistant', content: fullText });
 
-      // Render math in the response
-      var bubble = document.getElementById(bubbleId);
-      if (bubble && typeof renderMathInElement === 'function') {
-        renderMathInElement(bubble, {
-          delimiters: [
-            { left: '$$', right: '$$', display: true },
-            { left: '$',  right: '$',  display: false },
-            { left: '\\(', right: '\\)', display: false },
-            { left: '\\[', right: '\\]', display: true }
-          ],
-          throwOnError: false
-        });
-      }
+      // Notation that could not be converted to readable text is shown formatted.
+      var done = document.getElementById(bubbleId);
+      if (done) MathText.typeset(done);
 
     } catch (err) {
       var bubble = document.getElementById(bubbleId);

@@ -1137,8 +1137,7 @@ public class StudentController : Controller
                 _logger.LogError(
                     "ChatStream: OpenRouter returned {Status}: {Body}", httpResponse.StatusCode, errorBody);
 
-                await Response.WriteAsync("data: ⚠️ Sorry, I couldn't reach the tutor right now. Please try again.\n\n");
-                await Response.Body.FlushAsync();
+                await WriteSseAsync("⚠️ Sorry, I couldn't reach the tutor right now. Please try again.");
                 return;
             }
 
@@ -1164,10 +1163,7 @@ public class StudentController : Controller
                         .GetString();
 
                     if (!string.IsNullOrEmpty(deltaContent))
-                    {
-                        await Response.WriteAsync($"data: {deltaContent}\n\n");
-                        await Response.Body.FlushAsync();
-                    }
+                        await WriteSseAsync(deltaContent);
                 }
                 catch { /* skip malformed chunk */ }
             }
@@ -1175,9 +1171,20 @@ public class StudentController : Controller
         catch (Exception ex)
         {
             _logger.LogError(ex, "ChatStream failed");
-            await Response.WriteAsync("data: ⚠️ Sorry, I couldn't reach the tutor right now. Please try again.\n\n");
-            await Response.Body.FlushAsync();
+            await WriteSseAsync("⚠️ Sorry, I couldn't reach the tutor right now. Please try again.");
         }
+    }
+
+    /// <summary>
+    /// Writes one text chunk as an SSE event. The chunk is JSON-encoded so it travels as a
+    /// single line: a raw chunk containing a newline would break the "data: " framing (the
+    /// lines after the first are dropped by the client, losing text and paragraph breaks),
+    /// and leading or trailing whitespace reaches the browser exactly as the model produced it.
+    /// </summary>
+    private async Task WriteSseAsync(string chunk)
+    {
+        await Response.WriteAsync($"data: {JsonSerializer.Serialize(chunk)}\n\n");
+        await Response.Body.FlushAsync();
     }
 
     // ── HANDWRITTEN HELPERS ──────────────────────────────────────────────────────
