@@ -3,6 +3,7 @@
 @{
     var result    = Model.Result;
     var questions = Model.Questions;
+    var layout    = SmartSchoolAI.Services.QuestionLayout.Compute(questions);   // "2a", "2b"; shared stems are context only
     ViewData["Title"] = $"Submission — {result.Student.FullName}";
     var scoreColor = result.Assignment.IsPass(result.Score) ? "success"
                  : result.Score >= result.Assignment.PassThreshold / 2 ? "warning" : "danger";
@@ -115,6 +116,19 @@
     @for (int i = 0; i < questions.Count; i++)
     {
       var q = questions[i];
+      if (layout.IsStem[i])
+      {
+        @* A shared stem: context for the parts that follow. Nothing to grade here. *@
+        <div class="p-3 bg-light border-start border-primary border-3 @(i > 0 ? "border-top" : "")">
+          <span class="badge bg-label-primary mb-1">Question @layout.Labels[i] — shared question</span>
+          <h6 class="mb-0 math-render">@q.Title</h6>
+          @if (!string.IsNullOrEmpty(q.ImagePath))
+          {
+            <img src="@q.ImagePath" class="img-fluid rounded border mt-2 mb-1" style="max-height:220px;" alt="Diagram" />
+          }
+        </div>
+        continue;
+      }
       var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == i);
       var isCorrect = answer?.IsCorrect;
       var borderClass = isCorrect == true ? "border-start border-success border-3" :
@@ -126,7 +140,7 @@
           <div>
             <span class="avatar avatar-sm">
               <span class="avatar-initial rounded-circle bg-label-@(isCorrect == true ? "success" : isCorrect == false ? "danger" : "secondary")">
-                @(i + 1)
+                @layout.Labels[i]
               </span>
             </span>
           </div>

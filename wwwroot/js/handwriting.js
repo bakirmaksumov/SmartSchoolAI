@@ -20,6 +20,9 @@
   let cropper       = null;      // active Cropper.js instance for the crop stage
   let cropImageUrl  = null;      // object URL behind #hwCropImage's current src, revoked once done with it
   let waitGame      = null;      // tic-tac-toe played during the AI wait, or null if unavailable
+  // Bumped whenever the dialog is closed or the photo is replaced. A response that started in an earlier
+  // session (an older OCR or grading call) is dropped for the dialog instead of drawing into the new one.
+  let generation    = 0;
 
   const $ = (id) => document.getElementById(id);
 
@@ -69,6 +72,7 @@
   }
 
   function resetModal() {
+    generation++;
     // Closed after submitting → the work is saved server-side, drop the draft.
     // Closed mid-edit → keep the recognized steps (with any edits) as a draft.
     var resultsVisible = !$('hwStage-results').classList.contains('d-none');
@@ -172,8 +176,9 @@
     } catch (e) { return null; }
   }
 
-  function clearDraft() {
-    try { localStorage.removeItem(draftKey()); } catch (e) { /* ignore */ }
+  function clearDraft(qi) {
+    const key = 'hwDraft:' + assignmentId + ':' + (qi === undefined ? questionIndex : qi);
+    try { localStorage.removeItem(key); } catch (e) { /* ignore */ }
   }
 
   // ── Upload tabs ─────────────────────────────────────────────────────────────
@@ -220,6 +225,10 @@
    */
   function addFiles(fileList) {
     const before = cropQueue.length + files.length;
+    if (window.QuizChecks && fileList && fileList.length) {
+      generation++;                               // an older OCR/grading response must not land on the new photo
+      QuizChecks.invalidateWork(questionIndex);   // and the old photo's verdict no longer applies
+    }
     Array.from(fileList).forEach(function (f) {
       if (!f.type.startsWith('image/')) return;
       const dup = files.some(function (x) { return x.name === f.name && x.size === f.size; })
@@ -401,6 +410,7 @@
   async function analyze() {
     if (files.length === 0) return;
 
+    const gen = generation;
     showStage('loading');
     startProgress('AI is reading your solution…');
 
@@ -413,6 +423,7 @@
     try {
       const res  = await fetch('/Student/AnalyzeHandwritten', { method: 'POST', body: fd });
       const data = await res.json();
+      if (gen !== generation) return;   // the dialog was closed or the photo replaced meanwhile
       if (!data.success) throw new Error(data.error || 'Analysis failed.');
 
       finishProgress();
@@ -421,6 +432,7 @@
       saveDraft();   // recognized steps cost an AI call — persist immediately
       showStage('edit');
     } catch (err) {
+      if (gen !== generation) return;
       stopProgress();
       alert(err.message);
       showStage('upload');
@@ -431,6 +443,9 @@
     const steps = collectSteps();
     if (steps.length === 0) { alert('Please add at least one step.'); return; }
 
+    const gen = generation;
+    const qi  = questionIndex;
+    const photoKey = imagePaths.join('|');   // identifies which photo this verdict is about
     showStage('loading');
     startProgress('AI is checking your steps…');
 
@@ -439,6 +454,7 @@
     fd.append('questionIndex', questionIndex);
     fd.append('imagePathsJson', JSON.stringify(imagePaths));
     fd.append('stepsJson', JSON.stringify(steps));
+    if (window.QuizChecks) fd.append('selectedAnswer', QuizChecks.selectedAnswer(qi));
     fd.append('__RequestVerificationToken', token());
 
     try {
@@ -448,8 +464,9 @@
 
       // Grading runs in the background now (several AI calls); poll until it's done.
       // The local progress ticker keeps the bar moving; the poll decides completion.
-      pollGrading(data.jobId);
+      pollGrading(data.jobId, qi, gen, photoKey);
     } catch (err) {
+      if (gen !== generation) return;
       stopProgress();
       alert(err.message);
       showStage('edit');
@@ -458,17 +475,22 @@
 
   // Polls the background grading job for a photo/typed-step submission and shows
   // the result when it lands. Shared by the handwritten and (future) typed paths.
-  function pollGrading(jobId) {
+  function pollGrading(jobId, qi, gen, token) {
     if (!window.GradePoll) { stopProgress(); alert('Could not start grading.'); showStage('edit'); return; }
     GradePoll.start(jobId, {
       onDone: function (result) {
+        clearDraft(qi);   // evaluated and saved server-side — that question's draft is done
+        // The verdict belongs to the question it was started for, whichever question the dialog shows now.
+        if (window.QuizChecks) QuizChecks.recordWork(qi, 'photo', token, result);
+        else markAnswered(qi);
+
+        if (gen !== generation || qi !== questionIndex) return;   // the dialog moved on: do not draw into it
         finishProgress();
-        clearDraft();   // evaluated and saved server-side — the draft is done
         renderResults(result);
-        markAnswered(questionIndex);
         showStage('results');
       },
       onError: function (msg) {
+        if (gen !== generation) return;
         stopProgress();
         alert(msg);
         showStage('edit');
@@ -630,8 +652,7 @@
   }
 
   function markAnswered(idx) {
-    const btn = document.querySelector('.question-nav .nav-btn[data-idx="' + idx + '"]');
-    if (btn) btn.classList.add('answered');
+    if (window.QuizPills) QuizPills.setAnswered(idx, true);
   }
 
   function escapeHtml(str) {

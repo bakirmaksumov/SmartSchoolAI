@@ -185,9 +185,11 @@
 
     var restoreBtn = function () { btn.disabled = false; btn.innerHTML = original; };
 
+    // The verdict is about the working as it was when the check started and about THIS question only.
+    var workToken = window.QuizChecks ? QuizChecks.workToken(qIndex) : '';
     var applyResult = function (result) {
       renderResults(resultsBox, result);
-      markPillResult(qIndex, (result && (result.overall || '')).toLowerCase() === 'correct');
+      if (window.QuizChecks) QuizChecks.recordWork(qIndex, 'typed', workToken, result);
       restoreBtn();
     };
 
@@ -196,6 +198,7 @@
       fd.append('assignmentId', document.getElementById('assignmentId').value);
       fd.append('questionIndex', qIndex);
       fd.append('stepsJson', JSON.stringify(steps));
+      if (window.QuizChecks) fd.append('selectedAnswer', QuizChecks.selectedAnswer(qIndex));
       fd.append('__RequestVerificationToken', token());
 
       var res = await fetch('/Student/SubmitTypedSteps', { method: 'POST', body: fd });

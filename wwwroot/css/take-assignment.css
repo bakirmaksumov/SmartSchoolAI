@@ -93,6 +93,19 @@
   display: block;
 }
 
+/* A part of a grouped question sits under the shared stem, indented with a rule down its side. */
+.question-panel.question-part.active {
+  margin-left: 1rem;
+  padding-left: .75rem;
+  border-left: 3px solid #d9dee3;
+}
+
+/* Some, but not all, parts of a grouped question are answered. */
+.question-nav .nav-btn.partial {
+  background: linear-gradient(90deg, rgba(105, 108, 255, .22) 50%, transparent 50%);
+  border-color: #696cff;
+}
+
 .question-card-main {
   border: 1px solid #e7e7e8;
   border-radius: .625rem;

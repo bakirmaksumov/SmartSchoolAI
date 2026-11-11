@@ -644,7 +644,7 @@ public class StudentController : Controller
     [ValidateAntiForgeryToken]
     [EnableRateLimiting("ai")]
     public async Task<IActionResult> SubmitHandwritten(
-        Guid assignmentId, int questionIndex, string imagePathsJson, [FromForm] string stepsJson)
+        Guid assignmentId, int questionIndex, string imagePathsJson, [FromForm] string stepsJson, string? selectedAnswer = null)
     {
         var studentId = CurrentStudentId;
         var (_, _, accessError) = await _grader.LoadAssignedQuestionAsync(assignmentId, questionIndex, studentId);
@@ -658,7 +658,7 @@ public class StudentController : Controller
             imagePaths.Any(p => string.IsNullOrEmpty(p) || !p.StartsWith(expectedPrefix, StringComparison.Ordinal)))
             return Json(new { success = false, error = "Invalid image reference." });
 
-        return EnqueueStepGrading(assignmentId, questionIndex, studentId, stepsJson, JsonSerializer.Serialize(imagePaths));
+        return EnqueueStepGrading(assignmentId, questionIndex, studentId, stepsJson, JsonSerializer.Serialize(imagePaths), selectedAnswer);
     }
 
     /// <summary>
@@ -671,14 +671,14 @@ public class StudentController : Controller
     [ValidateAntiForgeryToken]
     [EnableRateLimiting("ai")]
     public async Task<IActionResult> SubmitTypedSteps(
-        Guid assignmentId, int questionIndex, [FromForm] string stepsJson)
+        Guid assignmentId, int questionIndex, [FromForm] string stepsJson, string? selectedAnswer = null)
     {
         var studentId = CurrentStudentId;
         var (_, _, accessError) = await _grader.LoadAssignedQuestionAsync(assignmentId, questionIndex, studentId);
         if (accessError is not null)
             return Json(new { success = false, error = accessError });
 
-        return EnqueueStepGrading(assignmentId, questionIndex, studentId, stepsJson, imagePath: string.Empty);
+        return EnqueueStepGrading(assignmentId, questionIndex, studentId, stepsJson, imagePath: string.Empty, selectedAnswer: selectedAnswer);
     }
 
     /// <summary>
@@ -688,7 +688,7 @@ public class StudentController : Controller
     /// handwritten (with photo path) and typed (empty path) submission actions.
     /// </summary>
     private IActionResult EnqueueStepGrading(
-        Guid assignmentId, int questionIndex, Guid studentId, string? stepsJson, string imagePath)
+        Guid assignmentId, int questionIndex, Guid studentId, string? stepsJson, string imagePath, string? selectedAnswer = null)
     {
         var job = _jobs.Create(TimeSpan.FromSeconds(25));
         job.OwnerId = studentId;
@@ -700,7 +700,7 @@ public class StudentController : Controller
                 using var scope = _scopeFactory.CreateScope();
                 var grader = scope.ServiceProvider.GetRequiredService<GradingService>();
 
-                var outcome = await grader.EvaluateStepsAsync(assignmentId, questionIndex, studentId, stepsJson, imagePath);
+                var outcome = await grader.EvaluateStepsAsync(assignmentId, questionIndex, studentId, stepsJson, imagePath, selectedAnswer);
                 if (!outcome.Success)
                 {
                     job.Error  = outcome.Error;
@@ -715,7 +715,8 @@ public class StudentController : Controller
                     summary        = outcome.Summary,
                     expectedAnswer = outcome.ExpectedAnswer,
                     score          = outcome.Score,
-                    steps          = outcome.Steps
+                    steps          = outcome.Steps,
+                    option         = outcome.Option is null ? null : new { correct = outcome.Option.Correct, feedback = outcome.Option.Feedback }
                 };
                 job.Status = "done";
 

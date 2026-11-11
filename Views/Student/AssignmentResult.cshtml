@@ -4,6 +4,8 @@
 @{
     ViewData["Title"] = "My Result";
     var questions  = ViewBag.Questions as List<QuestionDto> ?? new();
+    var layout     = SmartSchoolAI.Services.QuestionLayout.Compute(questions);   // "2a", "2b"; shared stems are context only
+    string LabelOf(int index) => index >= 0 && index < layout.Labels.Length ? layout.Labels[index] : (index + 1).ToString();
 
     var voiceEnabled       = Model.Assignment.Class?.VoiceEnabled == true;
     var translationEnabled = Model.Assignment.Class?.TranslationEnabled == true;
@@ -178,6 +180,19 @@
       @for (int i = 0; i < questions.Count; i++)
       {
         var q      = questions[i];
+        if (layout.IsStem[i])
+        {
+          @* A shared stem: context for the parts that follow, with nothing to answer or mark. *@
+          <div class="list-group-item p-4 border-bottom bg-light">
+            <span class="badge bg-label-primary fs-6 px-3 py-1 mb-2">Question @LabelOf(i)</span>
+            <div class="fs-6 fw-semibold text-dark mb-2 math-render">@q.Title</div>
+            @if (!string.IsNullOrEmpty(q.ImagePath))
+            {
+              <img src="@q.ImagePath" class="img-fluid rounded border shadow-sm" style="max-height:220px;" alt="Question diagram" />
+            }
+          </div>
+          continue;
+        }
         var answer = Model.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == i);
         var res    = answer?.IsCorrect == true ? "success" : answer?.IsCorrect == false ? "danger" : "secondary";
         var resLbl = answer?.IsCorrect == true ? "Correct" : answer?.IsCorrect == false ? "Incorrect" : "N/A";
@@ -186,7 +201,7 @@
         <div class="list-group-item p-4 border-bottom">
           <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
             <div class="d-flex align-items-center gap-2">
-              <span class="badge bg-label-primary fs-6 px-3 py-1">Question @(i + 1)</span>
+              <span class="badge bg-label-primary fs-6 px-3 py-1">Question @LabelOf(i)</span>
               <span class="badge bg-label-@res fs-6 px-3 py-1"><i class="bx @resIcon me-1"></i>@resLbl</span>
             </div>
           </div>
@@ -291,11 +306,11 @@
       {
         var qTitle = ans.QuestionIndex < questions.Count
             ? questions[ans.QuestionIndex].Title
-            : $"Question {ans.QuestionIndex + 1}";
+            : $"Question {LabelOf(ans.QuestionIndex)}";
         var qImagePath = ans.QuestionIndex < questions.Count ? questions[ans.QuestionIndex].ImagePath : null;
         <div class="mb-4 p-3 border rounded bg-white shadow-sm">
           <div class="fw-bold text-primary mb-2">
-            Question @(ans.QuestionIndex + 1): <span class="math-render text-dark fw-normal">@qTitle</span>
+            Question @LabelOf(ans.QuestionIndex): <span class="math-render text-dark fw-normal">@qTitle</span>
           </div>
           @if (!string.IsNullOrEmpty(qImagePath))
           {
@@ -326,10 +341,10 @@
       @foreach (var ans in handwritten)
       {
         var steps  = Model.StepResults.Where(s => s.QuestionIndex == ans.QuestionIndex).OrderBy(s => s.StepNumber).ToList();
-        var qTitle = ans.QuestionIndex < questions.Count ? questions[ans.QuestionIndex].Title : $"Question {ans.QuestionIndex + 1}";
+        var qTitle = ans.QuestionIndex < questions.Count ? questions[ans.QuestionIndex].Title : $"Question {LabelOf(ans.QuestionIndex)}";
         var qImagePath = ans.QuestionIndex < questions.Count ? questions[ans.QuestionIndex].ImagePath : null;
         <div class="mb-4 p-3 border rounded bg-white shadow-sm">
-          <div class="fw-bold text-primary mb-2">Question @(ans.QuestionIndex + 1): <span class="math-render text-dark fw-normal">@qTitle</span></div>
+          <div class="fw-bold text-primary mb-2">Question @LabelOf(ans.QuestionIndex): <span class="math-render text-dark fw-normal">@qTitle</span></div>
           @if (!string.IsNullOrEmpty(qImagePath))
           {
             <img src="@qImagePath" class="img-fluid rounded border mb-2" style="max-height:220px;" alt="Diagram" />

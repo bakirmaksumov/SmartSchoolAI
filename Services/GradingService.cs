@@ -45,9 +45,12 @@ public class GradingService
 
     public record TypedCheckOutcome(bool Success, string? Error, bool Correct, string? Feedback);
 
+    /// <summary>The selected option's verdict, judged on its own and apart from the working.</summary>
+    public record OptionVerdict(bool Correct, string? Feedback);
+
     public record StepsGradeOutcome(
         bool Success, string? Error, Guid ResultId, string? Overall,
-        string? Summary, string? ExpectedAnswer, int Score, object? Steps);
+        string? Summary, string? ExpectedAnswer, int Score, object? Steps, OptionVerdict? Option = null);
 
     // ── Access / load ────────────────────────────────────────────────────────────
 
@@ -195,7 +198,8 @@ public class GradingService
     /// an <paramref name="imagePath"/> to record.
     /// </summary>
     public async Task<StepsGradeOutcome> EvaluateStepsAsync(
-        Guid assignmentId, int questionIndex, Guid studentId, string? stepsJson, string imagePath)
+        Guid assignmentId, int questionIndex, Guid studentId, string? stepsJson, string imagePath,
+        string? selectedAnswer = null)
     {
         var (assignment, question, error) = await LoadAssignedQuestionAsync(assignmentId, questionIndex, studentId);
         if (error is not null)
@@ -264,9 +268,25 @@ public class GradingService
 
         await _db.SaveChangesAsync();
 
+        // On a choice question the selected option is judged separately from the working: by the teacher's
+        // key when there is one, otherwise by the AI with the full choices. Correct working can never make a
+        // wrong option right, and a working error never makes a right option wrong.
+        var option = await JudgeSelectedOptionAsync(question, questionIndex, selectedAnswer);
+
         return new StepsGradeOutcome(
             true, null, result.Id, analysis.Overall, analysis.Summary,
-            analysis.ExpectedAnswer, result.Score, analysis.Steps);
+            analysis.ExpectedAnswer, result.Score, analysis.Steps, option);
+    }
+
+    private async Task<OptionVerdict?> JudgeSelectedOptionAsync(QuestionDto question, int questionIndex, string? selectedAnswer)
+    {
+        if (!IsChoiceQuestion(question) || string.IsNullOrWhiteSpace(selectedAnswer)) return null;
+
+        var byKey = EvaluateTypedAnswer(question, selectedAnswer);
+        if (byKey is not null) return new OptionVerdict(byKey.Value, null);
+
+        var ai = await AiCheckTypedAnswerAsync(question, questionIndex, selectedAnswer);
+        return ai.Success ? new OptionVerdict(ai.Correct, ai.Feedback) : null;
     }
 
     // ── Final submission ─────────────────────────────────────────────────────────

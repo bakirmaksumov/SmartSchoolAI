@@ -1616,8 +1616,10 @@ function pdfBuildReviewList() {
         <div class="d-flex gap-2 align-items-center mb-1">
           <span class="badge bg-${badge}">${q.type}</span>
           <span class="badge bg-light text-dark">${q.difficulty ?? 'Medium'}</span>
-          ${q.number ? '<span class="text-muted small">Q' + q.number + '</span>' : ''}
+          ${q.number ? '<span class="text-muted small">Q' + q.number + (q.groupKey && q.part ? '(' + pdfEscapeHtml(q.part) + ')' : '') + '</span>' : ''}
+          ${q.groupKey ? '<span class="badge bg-label-success">part of a shared question</span>' : ''}
         </div>
+        ${q.groupKey && q.stem ? '<div class="small text-muted border-start ps-2 mb-1">Shared: ' + pdfEscapeHtml(q.stem) + '</div>' : ''}
         <div class="small fw-semibold">${pdfEscapeHtml(q.title)}</div>
         ${q.options?.length ? '<div class="text-muted" style="font-size:.78rem;">' + q.options.slice(0,4).map(pdfEscapeHtml).join(' &bull; ') + '</div>' : ''}
         ${q.hasDiagram ? '<div class="alert alert-warning py-1 px-2 small mt-1 mb-0"><i class="bx bx-image me-1"></i>Likely has a diagram this import couldn\'t carry over' + (q.diagramHint ? ': ' + pdfEscapeHtml(q.diagramHint) : '') + ' — attach it after adding.</div>' : ''}
@@ -1652,16 +1654,46 @@ async function pdfAddSelected() {
   const typeMap = { MultipleChoice: 1, SingleChoice: 4, ShortAnswer: 0, OpenText: 3 };
   const token   = document.querySelector('input[name="__RequestVerificationToken"]')?.value ?? '';
 
+  const sharedParents = {};   // groupKey -> id of the shared question already added for it
+
+  async function addQuestionJson(obj) {
+    const fd = new FormData();
+    fd.append('questionJson', JSON.stringify(obj));
+    fd.append('__RequestVerificationToken', token);
+    await fetch('/Assignments/AddQuestion/@a.Id', { method: 'POST', body: fd });
+  }
+
   for (const q of toAdd) {
+    // Parts the import clearly identified share one parent question (the stem and its diagram), added once
+    // before the first part. Questions the import was unsure about were not grouped and are added as listed.
+    let groupId = null;
+    if (q.groupKey && q.stem) {
+      if (!sharedParents[q.groupKey]) {
+        const sharedHint = toAdd.filter(p => p.groupKey === q.groupKey && p.hasDiagram).map(p => p.diagramHint).find(Boolean) ?? '';
+        sharedParents[q.groupKey] = genUUID();
+        await addQuestionJson({
+          id:         sharedParents[q.groupKey],
+          title:      q.stem,
+          type:       0,
+          difficulty: q.difficulty ?? 'Medium',
+          answerKey:  '',
+          options:    [],
+          diagramHint: toAdd.some(p => p.groupKey === q.groupKey && p.hasDiagram) ? sharedHint : null
+        });
+      }
+      groupId = sharedParents[q.groupKey];
+    }
+
     // Controller expects a single "questionJson" field with a JSON string
     const questionObj = {
       id:                genUUID(),
+      groupId:           groupId,
       title:             q.title,
       type:              typeMap[q.type] ?? 0,
       difficulty:        q.difficulty ?? 'Medium',
       answerKey:         q.answerKey ?? '',
       options:           q.options ?? [],
-      diagramHint:       q.hasDiagram ? (q.diagramHint ?? '') : null,
+      diagramHint:       (q.hasDiagram && !groupId) ? (q.diagramHint ?? '') : null,   // a shared diagram belongs to the shared question
       validationWarning: q.validationWarning ?? null
     };
     const fd = new FormData();
