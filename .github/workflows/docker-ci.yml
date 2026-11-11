@@ -27,7 +27,7 @@ jobs:
       RECAPTCHA_SITE_KEY: ""
       RECAPTCHA_SECRET_KEY: ""
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build the image
         run: docker compose build
@@ -45,7 +45,7 @@ jobs:
         env:
           BASE_URL: http://localhost:8080
           RECREATE_CMD: docker compose down && docker compose up -d
-        run: scripts/ci/docker-smoke.sh
+        run: bash scripts/ci/docker-smoke.sh
 
       - name: Container healthcheck reports healthy
         run: |
