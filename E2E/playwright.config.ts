@@ -82,7 +82,10 @@ export default defineConfig({
   },
   projects: [
     // Everything except the display tests runs against the normal instance (real AI when a key is present).
-    { name: "default", testIgnore: /display\.spec\.ts$/ },
+    { name: "default", testIgnore: /(display\.spec\.ts|system-[\w-]+\.spec\.ts)$/ },
+    // The whole-system checks (access matrix, page crawl, cross-role journey) use the seeded accounts and never call
+    // the AI. They run on the normal instance, or on the container when E2E_BASE_URL is set.
+    { name: "system", testMatch: /system-[\w-]+\.spec\.ts$/, use: { baseURL: externalBaseUrl ?? baseURL } },
     // The tutor/OCR display tests run against an instance whose AI provider is the deterministic mock,
     // whatever E2E_AI is, so they never depend on a live provider.
     { name: "display", testMatch: /display\.spec\.ts$/, use: { baseURL: displayBaseURL } }

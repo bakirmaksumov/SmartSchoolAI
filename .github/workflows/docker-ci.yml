@@ -1,8 +1,9 @@
 name: Docker CI
 
-# Builds the container and proves it works the way it will be deployed: health, sign-in, data that
-# survives re-creating the container, and the tutor / "Solve with photo" browser scenarios run against
-# the container. It does not publish the image or deploy anywhere.
+# Builds the container and proves it works the way it will be deployed. Job "container": health, sign-in, data that
+# survives re-creating the container, and the tutor / "Solve with photo" browser scenarios. Job "system": the whole
+# application as teacher, student and admin (access matrix, page crawl, cross-role journey) against a seeded
+# database. It does not publish the image or deploy anywhere.
 on:
   pull_request:
     branches: [main]
@@ -102,3 +103,91 @@ jobs:
       - name: Clean up
         if: always()
         run: docker compose down -v --remove-orphans
+
+  # The whole system, as all three roles, against the running container.
+  system:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: system
+      COMPOSE_FILE: compose.yml:compose.ci.yml:compose.system.yml
+      OPENROUTER_API_KEY: ""
+      RECAPTCHA_SITE_KEY: ""
+      RECAPTCHA_SECRET_KEY: ""
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: E2E/package-lock.json
+
+      - name: Install the browser test tooling
+        working-directory: E2E
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # Random passwords, known only to this run and masked in its log.
+      - name: Generate the synthetic account passwords
+        run: |
+          for role in TEACHER STUDENT ADMIN; do
+            value="$(openssl rand -hex 12)Aa1!"
+            echo "::add-mask::$value"
+            echo "E2E_${role}_PASSWORD=$value" >> "$GITHUB_ENV"
+          done
+
+      # A fresh SQLite file with the schema and one teacher, one student and one admin. The container opens it.
+      - name: Seed the database
+        working-directory: E2E
+        env:
+          E2E_DATA_DIR: ${{ github.workspace }}/E2E/.e2e-data
+          E2E_BUILD_DIR: ${{ runner.temp }}/seed-build
+        run: |
+          mkdir -p .e2e-data
+          dotnet run --project Seed/SmartSchoolAI.E2E.Seed.csproj -- "$PWD/.e2e-data/smartschool-e2e.db"
+          # The container runs as an unprivileged user and must be able to write the database and its journal files.
+          chmod -R a+rwX .e2e-data
+
+      - name: Build and start the container on the seeded database
+        run: |
+          docker compose build
+          docker compose up -d
+
+      - name: Wait until the application is ready
+        run: |
+          for i in $(seq 1 60); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/health/ready)" = "200" ] && exit 0
+            sleep 2
+          done
+          echo "the application did not become ready" >&2
+          exit 1
+
+      - name: Whole-system tests as teacher, student and admin
+        working-directory: E2E
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8080
+        run: npx playwright test --project=system
+
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-traces
+          path: E2E/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color --tail=200 web
+
+      - name: Clean up
+        if: always()
+        run: docker compose down -v --remove-orphans
+

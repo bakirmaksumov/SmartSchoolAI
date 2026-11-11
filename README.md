@@ -63,3 +63,20 @@ E2E_BASE_URL=http://127.0.0.1:8080 E2E_MOCK_AI_HOST=0.0.0.0 npx playwright test 
 ```
 
 Without Docker, `cd E2E && npm test -- --project=display` starts the app and the mock itself.
+
+### Whole-system tests (teacher, student, admin) in Docker CI
+
+A second job, **system**, in the same workflow starts the container on a SQLite database that the job seeds with one
+teacher, one student and one admin (`E2E/Seed`, random passwords masked in the log), then runs
+`npx playwright test --project=system` against it:
+
+- `system-access.spec.ts`: every page route against anonymous, student, teacher and admin visitors, unknown ids and
+  addresses, security headers, anti-forgery tokens, cross-role posts;
+- `system-crawl.spec.ts`: after real data exists, each role follows the links on the pages and every page must open
+  cleanly (no server error, no uncaught script error, no failed local asset);
+- `system-journey.spec.ts`: one school day across all roles with the numbers cross-checked between the student's
+  result, the teacher's table, the CSV export and analytics.
+
+`compose.system.yml` mounts the seeded database and sets `Proxy__ForceHttpsScheme=false`, because the browser reaches
+the container over plain HTTP with no TLS proxy (production keeps the default of declaring every request HTTPS).
+Locally: `cd E2E && npm test -- --project=system`.
