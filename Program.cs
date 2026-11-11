@@ -193,6 +193,20 @@ app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
+// Readiness probe for containers and CI: 200 once the app is serving (startup migrations
+// below finish before Kestrel starts listening) and can reach its database, 503 otherwise.
+// Anonymous, returns no data, and does no heavy work.
+app.MapGet("/health/ready", async (AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var canConnect = false;
+    try { canConnect = await db.Database.CanConnectAsync(cancellationToken); }
+    catch (Exception) { /* reported as not ready below */ }
+
+    return canConnect
+        ? Results.Ok(new { status = "ready" })
+        : Results.Json(new { status = "database unavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+}).AllowAnonymous();
+
 // ── Auto-migrate on startup ───────────────────────────────────────────────────
 // A bad migration or a crash mid-Migrate() would otherwise leave no way back —
 // take a timestamped copy of the SQLite file first, but only when there's
