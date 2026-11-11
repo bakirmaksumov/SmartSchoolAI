@@ -28,5 +28,7 @@ appsettings.Production.json
 
 # Docker files themselves
 Dockerfile
-docker-compose*.yml
+compose*.yml
 .dockerignore
+.github/
+scripts/

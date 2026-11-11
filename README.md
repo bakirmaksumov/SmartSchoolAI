@@ -44,3 +44,20 @@ docker compose up -d --build
 BASE_URL=http://localhost:8080 RECREATE_CMD='docker compose down && docker compose up -d' scripts/ci/docker-smoke.sh
 docker compose down -v
 ```
+
+### Tutor and "Solve with photo" scenarios against the container
+
+The same workflow also runs the browser scenarios in `E2E/tests/tutor-ocr-display.spec.ts` against the
+running container: a tutor reply streamed in chunks, the OCR review dialog (an edit must reach the grader)
+and a 375px layout check. The AI provider is a deterministic mock (`E2E/scripts/mock-ai.mjs`) that the
+container reaches through `compose.ci.yml`; accounts are registered through the UI in the temporary
+volume, and no real keys are used. Screenshots and traces are attached to the run as the
+`display-evidence` artifact.
+
+```bash
+docker compose -f compose.yml -f compose.ci.yml up -d --build
+cd E2E && npm ci && npx playwright install chromium
+E2E_BASE_URL=http://127.0.0.1:8080 E2E_MOCK_AI_HOST=0.0.0.0 npx playwright test --project=display
+```
+
+Without Docker, `cd E2E && npm test -- --project=display` starts the app and the mock itself.

@@ -1,12 +1,13 @@
 name: Docker CI
 
-# Builds the container and proves it works the way it will be deployed. It does not publish
-# the image or deploy anywhere.
+# Builds the container and proves it works the way it will be deployed: health, sign-in, data that
+# survives re-creating the container, and the tutor / "Solve with photo" browser scenarios run against
+# the container. It does not publish the image or deploy anywhere.
 on:
   pull_request:
     branches: [main]
   push:
-    branches: [main]
+    branches: [main, fix/tutor-math-display] # TEMP: feature branch removed before merge
   workflow_dispatch:
 
 permissions:
@@ -19,10 +20,11 @@ concurrency:
 jobs:
   container:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       COMPOSE_PROJECT_NAME: smoke
-      # No real keys here: OpenRouter and reCAPTCHA stay disabled, as in E2E_AI=0.
+      # compose.ci.yml points the app at the mock AI and lifts the login rate limit. No real keys here.
+      COMPOSE_FILE: compose.yml:compose.ci.yml
       OPENROUTER_API_KEY: ""
       RECAPTCHA_SITE_KEY: ""
       RECAPTCHA_SECRET_KEY: ""
@@ -56,6 +58,41 @@ jobs:
             sleep 2
           done
           exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: E2E/package-lock.json
+
+      - name: Install the browser test tooling
+        working-directory: E2E
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # The browser talks to the running container. The mock AI is started by Playwright on the runner
+      # (0.0.0.0 so the container reaches it as host.docker.internal) and answers the tutor, OCR and grading
+      # calls with fixed text; accounts are registered through the UI in a temporary SQLite volume.
+      - name: Tutor and "Solve with photo" scenarios against the container
+        working-directory: E2E
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8080
+          E2E_MOCK_AI_HOST: 0.0.0.0
+          E2E_AI: "0"
+          E2E_SHOT_DIR: ${{ runner.temp }}/screenshots
+        run: npx playwright test --project=display
+
+      - name: Upload screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: display-evidence
+          path: |
+            ${{ runner.temp }}/screenshots
+            E2E/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Container logs
         if: failure()
