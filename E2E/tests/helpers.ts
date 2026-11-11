@@ -9,20 +9,22 @@ function requiredEnvironmentVariable(name: string): string {
   return value;
 }
 
+// Passwords are read when first used, so specs that register their own accounts (the display
+// tests, which also run against a container with no seeded users) can import this module.
 export const accounts = {
   teacher: {
     email: "e2e.teacher@example.test",
-    password: requiredEnvironmentVariable("E2E_TEACHER_PASSWORD"),
+    get password() { return requiredEnvironmentVariable("E2E_TEACHER_PASSWORD"); },
     name: "E2E Teacher"
   },
   student: {
     email: "e2e.student@example.test",
-    password: requiredEnvironmentVariable("E2E_STUDENT_PASSWORD"),
+    get password() { return requiredEnvironmentVariable("E2E_STUDENT_PASSWORD"); },
     name: "E2E Student"
   },
   admin: {
     email: "e2e.admin@example.test",
-    password: requiredEnvironmentVariable("E2E_ADMIN_PASSWORD"),
+    get password() { return requiredEnvironmentVariable("E2E_ADMIN_PASSWORD"); },
     name: "E2E Admin"
   }
 };
@@ -90,6 +92,8 @@ export interface QuestionSpec {
   text: string;
   answerKey: string;
   options?: string[];
+  /** Text to wait for in the question list when it differs from `text` (e.g. `$…$` is rendered as maths there). */
+  listText?: string;
 }
 
 export async function addQuestion(page: Page, q: QuestionSpec): Promise<void> {
@@ -124,7 +128,7 @@ export async function addQuestion(page: Page, q: QuestionSpec): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     await fillAndSave();
     try {
-      await expect(page.locator("#questionsList")).toContainText(q.text, { timeout: 8_000 });
+      await expect(page.locator("#questionsList")).toContainText(q.listText ?? q.text, { timeout: 8_000 });
       break;
     } catch (error) {
       if (attempt >= 3) throw error;
