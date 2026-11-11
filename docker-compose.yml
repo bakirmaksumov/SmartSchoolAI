@@ -1,0 +1,22 @@
+# Run:  cp .env.example .env   (fill in the keys)   then   docker compose up -d --build
+services:
+  web:
+    build: .
+    image: smartschoolai:latest
+    restart: unless-stopped
+    environment:
+      OpenRouter__ApiKey: ${OPENROUTER_API_KEY:-}
+      ReCaptcha__SiteKey: ${RECAPTCHA_SITE_KEY:-}
+      ReCaptcha__SecretKey: ${RECAPTCHA_SECRET_KEY:-}
+    ports:
+      # Loopback only: the app trusts X-Forwarded-* from any caller and treats every
+      # request as HTTPS (see Program.cs), so Kestrel must only be reachable through
+      # your TLS-terminating reverse proxy. Change the left side to expose it deliberately.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - app-data:/app/App_Data
+      - dp-keys:/home/app/.aspnet
+
+volumes:
+  app-data:
+  dp-keys:
