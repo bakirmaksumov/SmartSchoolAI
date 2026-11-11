@@ -11,7 +11,7 @@
 //   GET  /health             readiness probe
 //
 // Request kinds: tutor (streamed), ocr, eval (step grading), verify (second opinion),
-// answer (typed-answer / choice grading), other.
+// answer (typed-answer / choice grading), import (question import), other.
 //
 // Environment: E2E_MOCK_AI_PORT (default 5199), E2E_MOCK_AI_HOST (default 127.0.0.1; CI uses 0.0.0.0
 // so a container can reach it through host.docker.internal).
@@ -29,11 +29,13 @@ const defaults = () => ({
   // Scripted model answers. When unset the mock behaves as an agreeable grader: every step "correct".
   evalReply: null,    // { steps: [{ number, text?, status, explanation }], overall, expectedAnswer, summary }
   verifyReply: null,  // { overall, agrees, confidence, notes, steps?: [{ number, status, explanation }] }
-  answerReply: null   // { correct, feedback }
+  answerReply: null,  // { correct, feedback } — or an array, one entry per call (the last repeats)
+  importReply: null   // the question list an import (PDF / photo) returns, as an array
 });
 
 let script = defaults();
 let requests = [];
+let answerCalls = 0;
 
 const readBody = req => new Promise((resolve, reject) => {
   const parts = [];
@@ -65,6 +67,7 @@ function describe(body) {
   else if (system.includes("expert math teacher")) kind = "eval";
   else if (system.includes("exam moderator")) kind = "verify";
   else if (system.includes("grading students' typed answers")) kind = "answer";
+  else if (system.includes("expert educator assistant")) kind = "import";
   return { kind, system, user, stream: body.stream === true };
 }
 
@@ -115,9 +118,12 @@ async function chatCompletions(req, res) {
   if (seen.kind === "answer") {
     // "Item 2:" -> the question index the app is asking about.
     const index = Number(/Item (\d+):/.exec(seen.user)?.[1] ?? 0);
-    const reply = script.answerReply ?? { correct: true, feedback: "That is right." };
+    const replies = Array.isArray(script.answerReply) ? script.answerReply : [script.answerReply ?? { correct: true, feedback: "That is right." }];
+    const reply = replies[Math.min(answerCalls++, replies.length - 1)];
     return json(res, 200, completion(JSON.stringify([{ index, ...reply }])));
   }
+
+  if (seen.kind === "import") return json(res, 200, completion(JSON.stringify(script.importReply ?? [])));
 
   return json(res, 200, completion("{}"));
 }
@@ -131,10 +137,12 @@ createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/__reset") {
       script = defaults();
       requests = [];
+      answerCalls = 0;
       return json(res, 200, { ok: true });
     }
     if (req.method === "POST" && url.pathname === "/__script") {
       script = { ...script, ...JSON.parse(await readBody(req) || "{}") };
+      answerCalls = 0;
       return json(res, 200, { ok: true });
     }
     if (req.method === "GET" && url.pathname === "/__requests") {
