@@ -48,7 +48,7 @@ docker compose down -v
 ### Tutor and "Solve with photo" scenarios against the container
 
 The same workflow also runs the browser scenarios in `E2E/tests/tutor-ocr-display.spec.ts` and
-`E2E/tests/games-steps-display.spec.ts` against the running container: a tutor reply streamed in chunks, the
+`E2E/tests/games-steps-display.spec.ts` and `E2E/tests/grading-help-display.spec.ts` (step feedback with a corrected false green, choice-question checks, tutor Hint/Explain/Get help payloads) against the running container: a tutor reply streamed in chunks, the
 OCR review dialog (an edit must reach the grader), the three waiting games (tic-tac-toe, rock-paper-scissors,
 repeat the sequence) while a photo or steps are checked, the plain-text "Type solution" editor (reload,
 "Check my work", final submission) and 375px layout checks. The AI provider is a deterministic mock (`E2E/scripts/mock-ai.mjs`) that the

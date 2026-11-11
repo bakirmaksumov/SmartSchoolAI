@@ -5,10 +5,13 @@
 // scripted. Tests control it over a small HTTP API and can read back what the app sent.
 //
 //   POST /chat/completions   the OpenAI-compatible endpoint the app calls
-//   POST /__script           { tutorChunks?, tutorDelayMs?, ocr?, ocrDelayMs?, evalDelayMs? }  set replies and delays
+//   POST /__script           set replies and delays (see `defaults` below for the fields)
 //   POST /__reset            clear scripted replies and recorded requests
 //   GET  /__requests?kind=   what the app sent: [{ kind, system, user, stream }]
 //   GET  /health             readiness probe
+//
+// Request kinds: tutor (streamed), ocr, eval (step grading), verify (second opinion),
+// answer (typed-answer / choice grading), other.
 //
 // Environment: E2E_MOCK_AI_PORT (default 5199), E2E_MOCK_AI_HOST (default 127.0.0.1; CI uses 0.0.0.0
 // so a container can reach it through host.docker.internal).
@@ -22,7 +25,11 @@ const defaults = () => ({
   tutorDelayMs: 15,
   ocrDelayMs: 0,    // hold the OCR answer back, to leave time to look at the waiting screen
   evalDelayMs: 0,   // the same for the step-grading answer
-  ocr: { detectedProblem: "", steps: [{ number: 1, text: "$x = 1$" }] }
+  ocr: { detectedProblem: "", steps: [{ number: 1, text: "$x = 1$" }] },
+  // Scripted model answers. When unset the mock behaves as an agreeable grader: every step "correct".
+  evalReply: null,    // { steps: [{ number, text?, status, explanation }], overall, expectedAnswer, summary }
+  verifyReply: null,  // { overall, agrees, confidence, notes, steps?: [{ number, status, explanation }] }
+  answerReply: null   // { correct, feedback }
 });
 
 let script = defaults();
@@ -57,6 +64,7 @@ function describe(body) {
   else if (hasImage && system.includes("OCR engine")) kind = "ocr";
   else if (system.includes("expert math teacher")) kind = "eval";
   else if (system.includes("exam moderator")) kind = "verify";
+  else if (system.includes("grading students' typed answers")) kind = "answer";
   return { kind, system, user, stream: body.stream === true };
 }
 
@@ -92,6 +100,7 @@ async function chatCompletions(req, res) {
 
   if (seen.kind === "eval") {
     await sleep(script.evalDelayMs);
+    if (script.evalReply) return json(res, 200, completion(JSON.stringify(script.evalReply)));
     const steps = parseSteps(seen.user).map(s => ({ ...s, status: "correct", explanation: "" }));
     return json(res, 200, completion(JSON.stringify({
       steps, overall: "correct", expectedAnswer: "x = 5/2 or x = 1/2", summary: "All steps are correct."
@@ -99,7 +108,15 @@ async function chatCompletions(req, res) {
   }
 
   if (seen.kind === "verify") {
-    return json(res, 200, completion(JSON.stringify({ overall: "correct", agrees: true, confidence: 0.95, notes: "Agreed." })));
+    const reply = script.verifyReply ?? { overall: "correct", agrees: true, confidence: 0.95, notes: "Agreed." };
+    return json(res, 200, completion(JSON.stringify(reply)));
+  }
+
+  if (seen.kind === "answer") {
+    // "Item 2:" -> the question index the app is asking about.
+    const index = Number(/Item (\d+):/.exec(seen.user)?.[1] ?? 0);
+    const reply = script.answerReply ?? { correct: true, feedback: "That is right." };
+    return json(res, 200, completion(JSON.stringify([{ index, ...reply }])));
   }
 
   return json(res, 200, completion("{}"));

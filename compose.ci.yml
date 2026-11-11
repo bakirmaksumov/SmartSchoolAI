@@ -8,5 +8,6 @@ services:
       OpenRouter__ApiKey: e2e-mock-key
       OpenRouter__BaseUrl: http://host.docker.internal:5199
       RateLimit__LoginPermitLimit: "1000"
+      RateLimit__AiPermitLimit: "1000"
     extra_hosts:
       - "host.docker.internal:host-gateway"

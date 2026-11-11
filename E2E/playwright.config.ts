@@ -48,6 +48,8 @@ function appServer(url: string, extraEnv: Record<string, string>) {
       ReCaptcha__SecretKey: "",
       OpenRouter__ApiKey: process.env.E2E_OPENROUTER_API_KEY ?? "",
       RateLimit__LoginPermitLimit: "1000",
+      // The AI limiter ends up keyed by IP (see Program.cs), so every test user shares one bucket.
+      RateLimit__AiPermitLimit: "1000",
       ...extraEnv
     } as Record<string, string>
   };
