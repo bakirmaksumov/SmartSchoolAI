@@ -29,7 +29,7 @@ test.afterAll(async () => {
   await student.context().close();
 });
 
-async function draftWithQuestion(title: string, settings: { maxAttempts?: string; deadline?: string }): Promise<string> {
+async function draftWithQuestion(title: string, settings: { maxAttempts?: string; deadline?: string; allowLate?: boolean }): Promise<string> {
   const id = await createDraftAssignment(teacher, title, className);
   await addQuestion(teacher, { kind: "Text/Numeric", text: `${title}: 2 plus 2`, answerKey: "4" });
 
@@ -40,7 +40,8 @@ async function draftWithQuestion(title: string, settings: { maxAttempts?: string
     await teacher.locator("#settingsTypeSelect").selectOption("1");
     await teacher.locator("#settingsDeadlineInput").fill(settings.deadline);
     // The deadline only blocks students when late submissions are switched off.
-    await teacher.locator("#settingsLateCheck").uncheck();
+    if (settings.allowLate) await teacher.locator("#settingsLateCheck").check();
+    else await teacher.locator("#settingsLateCheck").uncheck();
   }
   await teacher.locator('#settingsForm button[type="submit"]').click();
   await expect(teacher).toHaveURL(/\/Assignments\/?(\?.*)?$/);
@@ -49,12 +50,33 @@ async function draftWithQuestion(title: string, settings: { maxAttempts?: string
     await teacher.goto(`/Assignments/Edit/${id}?tab=settings`);
     await expect(teacher.locator("#settingsDeadlineInput"), "saved deadline").toHaveValue(/^2099-01-01T/);
     await expect(teacher.locator("#settingsTypeSelect"), "saved type").toHaveValue("1");
-    await expect(teacher.locator("#settingsLateCheck"), "late submission").not.toBeChecked();
+    if (settings.allowLate) await expect(teacher.locator("#settingsLateCheck"), "late submission").toBeChecked();
+    else await expect(teacher.locator("#settingsLateCheck"), "late submission").not.toBeChecked();
   }
 
   await teacher.goto(`/Assignments/Edit/${id}`);
   await publishAndAssignAll(teacher, id);
   return id;
+}
+
+// Sets the (only) enrolled student's own start and due dates from the teacher's assignment page.
+async function setDates(id: string, startDate: string, dueDate: string): Promise<void> {
+  await teacher.goto(`/Assignments/Details/${id}`);
+  // The per-student date row is collapsed until its toggle is clicked.
+  await teacher.locator('[data-bs-toggle="collapse"][data-bs-target^="#"]').first().click();
+  const form = teacher.locator('form[action*="UpdateStudentDates"]').first();
+  await expect(form).toBeVisible();
+  await form.locator('input[name="startDate"]').fill(startDate);
+  await form.locator('input[name="dueDate"]').fill(dueDate);
+  await form.locator('button[type="submit"]').first().click();
+  await expect(teacher.locator("body")).toContainText(/dates updated/i);
+}
+
+// Opens the form and fills in an answer, leaving the tab open without submitting.
+async function openAndFill(id: string, value: string): Promise<void> {
+  await student.goto(`/Student/TakeAssignment?assignmentId=${id}`);
+  await student.locator('.nav-btn[data-idx="0"]').click();
+  await student.locator('.answer-textarea[data-qkey="q_0"]').fill(value);
 }
 
 async function answer(id: string, value: string): Promise<void> {
@@ -89,30 +111,70 @@ test("a per-student past due date or future start date stops the student from st
   // Publishing needs a deadline at least an hour ahead, so the student's own dates are changed afterwards.
   const id = await draftWithQuestion(unique("E2E Student Dates"), { deadline: "2099-01-01T10:00" });
 
-  const setDates = async (startDate: string, dueDate: string) => {
-    await teacher.goto(`/Assignments/Details/${id}`);
-    // The per-student date row is collapsed until its toggle is clicked.
-    await teacher.locator('[data-bs-toggle="collapse"][data-bs-target^="#"]').first().click();
-    const form = teacher.locator('form[action*="UpdateStudentDates"]').first();
-    await expect(form).toBeVisible();
-    await form.locator('input[name="startDate"]').fill(startDate);
-    await form.locator('input[name="dueDate"]').fill(dueDate);
-    await form.locator('button[type="submit"]').first().click();
-    await expect(teacher.locator("body")).toContainText(/dates updated/i);
-  };
-
-  await setDates("", "2020-01-01T10:00");
+  await setDates(id, "", "2020-01-01T10:00");
   await student.goto(`/Student/TakeAssignment?assignmentId=${id}`);
   await expect(student).not.toHaveURL(/TakeAssignment/i);
   await expect(student.locator("body")).toContainText(/deadline has passed/i);
 
-  await setDates("2099-01-01T10:00", "");
+  await setDates(id, "2099-01-01T10:00", "");
   await student.goto(`/Student/TakeAssignment?assignmentId=${id}`);
   await expect(student).not.toHaveURL(/TakeAssignment/i);
   await expect(student.locator("body")).toContainText(/isn't available to you yet/i);
 
-  await setDates("", "");
+  await setDates(id, "", "");
   await student.goto(`/Student/TakeAssignment?assignmentId=${id}`);
   await expect(student).toHaveURL(/TakeAssignment/i);
   await expect(student.locator('.nav-btn[data-idx="0"]')).toBeVisible();
+});
+
+test("submitting from an already-open form is refused once the student's due date has passed", async () => {
+  test.setTimeout(180_000);
+  const title = unique("E2E Stale Deadline");
+  const id = await draftWithQuestion(title, { maxAttempts: "1", deadline: "2099-01-01T10:00" });
+
+  await openAndFill(id, "4");
+  await setDates(id, "", "2020-01-01T10:00"); // the deadline passes while the tab is still open
+  await submitAssignment(student);
+
+  await expect(student).toHaveURL(/\/Student\/Assignments/i);
+  const alert = student.locator(".alert-danger");
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText(`Submission closed. The deadline for ${title} has passed. Your answers were not submitted.`);
+
+  // Nothing was recorded: with a single attempt allowed, a submission would send the student to the result page.
+  await setDates(id, "", "");
+  await student.goto(`/Student/TakeAssignment?assignmentId=${id}`);
+  await expect(student).toHaveURL(/TakeAssignment/i);
+  await expect(student.locator('.nav-btn[data-idx="0"]')).toBeVisible();
+});
+
+test("submitting from an already-open form is refused before the student's start date", async () => {
+  test.setTimeout(180_000);
+  const title = unique("E2E Stale Start");
+  const id = await draftWithQuestion(title, { maxAttempts: "1", deadline: "2099-01-01T10:00" });
+
+  await openAndFill(id, "4");
+  await setDates(id, "2099-01-01T10:00", ""); // the start date moves into the future while the tab is open
+  await submitAssignment(student);
+
+  await expect(student).toHaveURL(/\/Student\/Assignments/i);
+  const alert = student.locator(".alert-danger");
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText(/isn't available to you yet/i);
+
+  await setDates(id, "", "");
+  await student.goto(`/Student/TakeAssignment?assignmentId=${id}`);
+  await expect(student).toHaveURL(/TakeAssignment/i);
+});
+
+test("a late submission still goes through when late submissions are enabled", async () => {
+  test.setTimeout(180_000);
+  const id = await draftWithQuestion(unique("E2E Late Allowed"), { maxAttempts: "1", deadline: "2099-01-01T10:00", allowLate: true });
+
+  await openAndFill(id, "4");
+  await setDates(id, "", "2020-01-01T10:00");
+  await submitAssignment(student);
+
+  await expect(student).toHaveURL(/\/Student\/AssignmentResult/i);
+  await expect(student.getByText("100%", { exact: true }).first()).toBeVisible();
 });

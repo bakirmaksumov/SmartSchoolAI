@@ -290,10 +290,26 @@ public class StudentController : Controller
 
         if (assignment is null) return NotFound();
 
-        var isAssigned = await _db.AssignmentStudents
-            .AnyAsync(asn => asn.AssignmentId == assignmentId && asn.StudentId == studentId);
+        var enrollment = await _db.AssignmentStudents
+            .FirstOrDefaultAsync(asn => asn.AssignmentId == assignmentId && asn.StudentId == studentId);
 
-        if (!isAssigned) return Forbid();
+        if (enrollment is null) return Forbid();
+
+        // Re-check the student's own window on the server: the form may have been
+        // opened before the deadline passed or the dates were changed. This runs
+        // before any result is created or answer saved, so a rejection leaves
+        // existing drafts and attempt counts untouched.
+        if (GradingService.IsBeforeStart(assignment, enrollment))
+        {
+            TempData["Error"] = $"{assignment.Title} isn't available to you yet. Your answers were not submitted.";
+            return RedirectToAction(nameof(Assignments), new { classId = assignment.ClassId });
+        }
+
+        if (GradingService.IsPastDeadline(assignment, enrollment))
+        {
+            TempData["Error"] = $"Submission closed. The deadline for {assignment.Title} has passed. Your answers were not submitted.";
+            return RedirectToAction(nameof(Assignments), new { classId = assignment.ClassId });
+        }
 
         var submittedCount = await _db.StudentResults
             .CountAsync(r => r.AssignmentId == assignmentId && r.StudentId == studentId && r.IsSubmitted);
