@@ -393,12 +393,16 @@ public class StudentController : Controller
 
         var isCorrect = _grader.EvaluateTypedAnswer(question!, answer);
 
+        // A choice is graded on its own; when the teacher requires working, the client says so
+        // separately ("Your choice is correct. Add your working…") instead of passing or failing it.
+        var requireWork = question!.RequireWork && _grader.IsChoice(question);
+
         // Has an answer key → decided instantly, no AI, no waiting.
         if (isCorrect is not null)
         {
             ActivityLog.Record(_env, "QuestionSolved", "Student", studentId,
                 $"assignment={assignmentId} q={questionIndex} correct={isCorrect.Value}");
-            return Json(new { success = true, status = "completed", correct = isCorrect.Value, feedback = (string?)null });
+            return Json(new { success = true, status = "completed", correct = isCorrect.Value, feedback = (string?)null, requireWork });
         }
 
         // No key → judge with the AI in the background and let the client poll.
@@ -420,7 +424,7 @@ public class StudentController : Controller
                     return;
                 }
 
-                job.Result = new { correct = outcome.Correct, feedback = outcome.Feedback };
+                job.Result = new { correct = outcome.Correct, feedback = outcome.Feedback, requireWork };
                 job.Status = "done";
 
                 var jobEnv = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
@@ -885,16 +889,19 @@ public class StudentController : Controller
     /// </summary>
     private static string BuildTutorSystemPrompt(string mode, int priorAssistantTurns, bool allowReveal)
     {
-        const string latex = "Use LaTeX with $ delimiters for any math.";
+        const string latex = "Write in plain sentences with normal spacing and line breaks. Use LaTeX with $ delimiters " +
+                             "only for an expression that needs it (a fraction, a power, a formula), never for ordinary words.";
 
         return mode switch
         {
             "hint" => priorAssistantTurns switch
             {
-                0 => "You are an encouraging AI tutor for school students. Give ONE gentle hint in 2-3 sentences " +
-                     "and ask a single guiding question. Do NOT reveal the answer or do the final calculation. " + latex,
+                0 => "You are an encouraging AI tutor for school students. Look at the student's actual answer and " +
+                     "working in the context below and give ONE actionable next move in one or two sentences, for " +
+                     "example \"Expand the bracket and compare the coefficient of x.\" If they have not started, name " +
+                     "the first thing to do. Do NOT reveal the answer or do the final calculation. " + latex,
                 1 => "You are an AI tutor. The student needs more help. Point to the specific step or method they " +
-                     "should use, still WITHOUT giving the final answer, and ask one focused question. " + latex,
+                     "should use on THEIR working, still WITHOUT giving the final answer, and ask one focused question. " + latex,
                 _ => "You are an AI tutor. The student is stuck after several hints. Walk through the reasoning " +
                      "step by step" + (allowReveal
                          ? ", and you may state the final answer if it helps. "
@@ -904,12 +911,13 @@ public class StudentController : Controller
             // student got wrong, what they answered, and the AI feedback already given —
             // this must be about THAT, not a generic concept refresher with invented
             // numbers the student never saw.
-            "explain" or "concept" => "You are an AI teacher reviewing a graded assignment with the student. The system " +
-                         "message below lists which question(s) they got wrong, what they answered, and why. Address " +
-                         "THOSE specific mistakes directly — quote or refer to their actual answer, explain where the " +
-                         "reasoning went wrong, and correct the misconception. Do not invent an unrelated example " +
-                         "instead of discussing their real answer. Do not simply state the correct final answer unless " +
-                         "the context explicitly allows revealing it. Keep it to 3-5 sentences. " + latex,
+            "explain" or "concept" => "You are an AI teacher helping a student understand a mistake. The system messages " +
+                         "below describe the question and the student's actual answer and working (or, after grading, list " +
+                         "which questions they got wrong, what they answered and why). Describe the error in THEIR work: " +
+                         "quote the step or answer, say what is wrong and why, and what to check instead. If they have " +
+                         "written nothing yet, explain the key idea they need. Do not invent an unrelated example. Do not " +
+                         "state the correct final answer unless the context explicitly allows revealing it. Keep it to " +
+                         "3-5 sentences. " + latex,
             "solution" => allowReveal
                 ? "You are an AI tutor. Show the complete step-by-step solution, numbering each step. Be structured " +
                   "and thorough. " + latex
@@ -919,6 +927,66 @@ public class StudentController : Controller
             _ => "You are a helpful AI tutor for school students. Answer in 2-4 sentences without giving the final " +
                  "answer directly. " + latex
         };
+    }
+
+    private const int MaxContextAnswerChars = 600;
+    private const int MaxContextSteps = 15;
+
+    /// <summary>
+    /// What the tutor needs to help with THIS question: the question (and its choices), the student's
+    /// latest answer and working, the step help was opened from with the checker's feedback, the
+    /// teacher's reference answer (private, to judge the work) and whether it may be revealed.
+    /// </summary>
+    private static string BuildActiveQuestionContext(Assignment assignment, TutorChatRequest request, bool allowReveal)
+    {
+        var questions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment.Questions) ?? new();
+        var index = request.QuestionIndex ?? -1;
+        if (index < 0 || index >= questions.Count) return "";
+
+        var q = questions[index];
+        var sb = new StringBuilder();
+        sb.AppendLine($"The student is working on Q{index + 1}: {q.Title}");
+
+        if (!string.IsNullOrWhiteSpace(q.Options))
+        {
+            try
+            {
+                var options = JsonSerializer.Deserialize<List<string>>(q.Options) ?? new();
+                for (var i = 0; i < options.Count; i++) sb.AppendLine($"  {(char)('A' + i)}. {options[i]}");
+            }
+            catch (JsonException) { /* options unreadable: the stem is enough */ }
+        }
+
+        sb.AppendLine("Student's latest answer: " +
+            (string.IsNullOrWhiteSpace(request.Answer) ? "(none yet)" : Truncate(request.Answer.Trim(), MaxContextAnswerChars)));
+
+        var work = (request.Work ?? new()).Where(w => !string.IsNullOrWhiteSpace(w)).Take(MaxContextSteps).ToList();
+        if (work.Count == 0)
+        {
+            sb.AppendLine("Student's working: (none yet)");
+        }
+        else
+        {
+            sb.AppendLine("Student's working:");
+            for (var i = 0; i < work.Count; i++) sb.AppendLine($"  {i + 1}. {Truncate(work[i].Trim(), MaxContextAnswerChars)}");
+        }
+
+        if (request.StepNumber is int step && !string.IsNullOrWhiteSpace(request.StepText))
+        {
+            sb.AppendLine($"The student asked for help with step {step}: \"{Truncate(request.StepText.Trim(), MaxContextAnswerChars)}\".");
+            if (!string.IsNullOrWhiteSpace(request.StepFeedback))
+                sb.AppendLine($"The checker said about that step: {Truncate(request.StepFeedback.Trim(), MaxFeedbackChars)}");
+        }
+
+        var key = ResolveAnswerKeyText(q);
+        if (!string.IsNullOrWhiteSpace(key))
+            sb.AppendLine($"Teacher's reference answer (private, only for judging the student's work): {Truncate(key, MaxContextAnswerChars)}");
+
+        sb.AppendLine(allowReveal
+            ? "Solution reveal: allowed by the teacher."
+            : "Solution reveal: NOT allowed by the teacher — never state the final answer or the reference answer.");
+
+        return sb.ToString().TrimEnd();
     }
 
     /// <summary>Builds a short context string describing the assignment's questions.</summary>
@@ -1094,6 +1162,7 @@ public class StudentController : Controller
         var allowReveal         = assignment?.AllowSolutionReveal ?? false;
         var systemPrompt        = BuildTutorSystemPrompt(request.Mode ?? "hint", priorAssistantTurns, allowReveal);
         var questionContext     = assignment is null ? "" : BuildQuestionContext(assignment);
+        var activeContext       = assignment is null ? "" : BuildActiveQuestionContext(assignment, request, allowReveal);
 
         // Assemble messages
         var messages = new List<object>
@@ -1103,6 +1172,9 @@ public class StudentController : Controller
 
         if (!string.IsNullOrEmpty(questionContext))
             messages.Add(new { role = "system", content = questionContext });
+
+        if (!string.IsNullOrEmpty(activeContext))
+            messages.Add(new { role = "system", content = activeContext });
 
         if (request.History != null)
         {

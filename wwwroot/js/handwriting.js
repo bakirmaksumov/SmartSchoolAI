@@ -581,18 +581,17 @@
         (data.summary ? '<div class="small mt-1">' + escapeHtml(readable(data.summary).text) + '</div>' : '') +
       '</div>';
 
+    let firstMistake = true;
     (data.steps || []).forEach(function (s) {
       const ok = (s.status || '').toLowerCase() === 'correct';
-      // The reason a step is wrong shows on hover (a tooltip on the ✗ mark),
-      // not as a permanently-open block of text under every wrong line.
-      const mark = ok
-        ? '✅'
-        : '<span class="hw-step-mark"' +
-            (s.explanation ? ' data-bs-toggle="tooltip" data-bs-placement="top" title="' + escapeAttr(readable(s.explanation).text) + '"' : '') +
-            '>❌</span>';
+      // The reason sits directly under the step as ordinary text, so it reads on a phone;
+      // the first wrong step is marked as the place to start.
+      const badge = (!ok && firstMistake) ? ' <span class="badge bg-label-danger hw-first-mistake">First mistake</span>' : '';
+      if (!ok) firstMistake = false;
       html +=
         '<div class="hw-result-step ' + (ok ? 'correct' : 'incorrect') + '">' +
-          '<div class="hw-step-text">' + mark + ' Step ' + s.number + ': ' + escapeHtml(readable(s.text).text) + '</div>' +
+          '<div class="hw-step-text">' + (ok ? '✅' : '❌') + ' Step ' + s.number + ': ' + escapeHtml(readable(s.text).text) + badge + '</div>' +
+          (!ok && s.explanation ? '<div class="hw-step-reason">' + escapeHtml(readable(s.explanation).text) + '</div>' : '') +
         '</div>';
     });
 

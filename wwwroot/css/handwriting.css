@@ -197,6 +197,17 @@
   overflow-wrap: anywhere;
 }
 
+/* Why a step is wrong: ordinary text directly under it, readable on a phone. */
+.hw-step-reason {
+  margin: 4px 0 0 1.6rem;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #b3361b;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hw-first-mistake { font-size: 10px; vertical-align: middle; }
+
 /* The reason a step is wrong lives in a hover tooltip on this mark now,
    not in an always-visible block of text (see hw-result-step .hw-step-mark
    below and renderResults() in handwriting.js / type-steps.js). */

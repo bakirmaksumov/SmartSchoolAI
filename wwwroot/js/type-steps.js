@@ -242,24 +242,32 @@
         (data.summary ? '<div class="small mt-1">' + escapeHtml(readable(data.summary)) + '</div>' : '') +
       '</div>';
 
-    (data.steps || []).forEach(function (s) {
+    var firstMistake = true;
+    (data.steps || []).forEach(function (s, i) {
       var ok = (s.status || '').toLowerCase() === 'correct';
-      // The reason a step is wrong shows on hover (a tooltip on the ✗ mark),
-      // not as a permanently-open block of text under every wrong line.
-      var mark = ok
-        ? '✅'
-        : '<span class="hw-step-mark"' +
-            (s.explanation ? ' data-bs-toggle="tooltip" data-bs-placement="top" title="' + escapeAttr(readable(s.explanation)) + '"' : '') +
-            '>❌</span>';
+      // The reason sits directly under the step as ordinary text, so it reads on a phone
+      // (a hover tooltip never does). The first wrong step is marked as where to start.
+      var badge = (!ok && firstMistake) ? ' <span class="badge bg-label-danger hw-first-mistake">First mistake</span>' : '';
+      if (!ok) firstMistake = false;
       html +=
         '<div class="hw-result-step ' + (ok ? 'correct' : 'incorrect') + '">' +
-          '<div class="hw-step-text">' + mark + ' Step ' + s.number + ': ' + escapeHtml(readable(s.text)) + '</div>' +
-          (!ok ? '<button type="button" class="btn btn-sm btn-outline-primary mt-1 type-step-help" onclick="window.openTutorial && window.openTutorial()">' +
+          '<div class="hw-step-text">' + (ok ? '✅' : '❌') + ' Step ' + s.number + ': ' + escapeHtml(readable(s.text)) + badge + '</div>' +
+          (!ok && s.explanation ? '<div class="hw-step-reason">' + escapeHtml(readable(s.explanation)) + '</div>' : '') +
+          (!ok ? '<button type="button" class="btn btn-sm btn-outline-primary mt-1 type-step-help" data-step-index="' + i + '">' +
                    '<i class="bx bx-help-circle me-1"></i>Get help</button>' : '') +
         '</div>';
     });
 
     wrap.innerHTML = html;
+
+    // "Get help" opens the tutor about that very step, with the checker's reason.
+    wrap.querySelectorAll('.type-step-help').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var step = (data.steps || [])[parseInt(btn.dataset.stepIndex, 10)];
+        if (!step || !window.openTutorial) return;
+        window.openTutorial({ step: { number: step.number, text: step.text, feedback: step.explanation || '' } });
+      });
+    });
 
     if (typeof renderMathInElement === 'function') {
       renderMathInElement(wrap, {

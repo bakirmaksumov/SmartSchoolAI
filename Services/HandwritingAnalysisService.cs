@@ -88,6 +88,26 @@ public class HandwritingAnalysisService
         - Keep each step's text exactly as given, including its $...$ math delimiters,
           and wrap any maths you add in $...$ too so it renders.
 
+        Checking the steps one by one:
+        - Check EVERY step on its own, in order. For an algebraic step, expand or simplify it
+          yourself and compare it with what the task or the previous step implies. Never accept a
+          step because it looks like the expected answer.
+        - A step that is itself an error is "incorrect", and its explanation shows the check in one
+          short sentence, for example "Expanding gives 2x² − 16x + 14, not 2x² − 8x + 14." Do not
+          mark later steps wrong only because an earlier step was; mark them by their own merit.
+        - "overall" is about the final result. A wrong step does not by itself make it "incorrect",
+          and a correct final line does not make a wrong step correct.
+
+        Transformations of graphs:
+        - Apply the student's operations to the function IN THE ORDER GIVEN, then expand the result
+          and compare it with the target function. Translation by (a, b): y = f(x − a) + b.
+          Stretch parallel to the y-axis by factor k: y = k·f(x). Stretch parallel to the x-axis by
+          factor k: y = f(x/k). Reflection in the x-axis: y = −f(x); in the y-axis: y = f(−x).
+        - The order changes the numbers: for example "translate by (2, 3), then stretch by factor 2
+          in the y-direction" and "stretch by factor 2 in the y-direction, then translate by (2, 6)"
+          give the same function. Accept every sequence whose result equals the target; the expected
+          answer shows only one of them.
+
         Return ONLY valid JSON — no markdown fences, no explanation:
         {
           "steps": [ { "number": 1, "text": "<step text>", "status": "correct|incorrect", "explanation": "<why, only if incorrect>" } ],
@@ -212,6 +232,13 @@ public class HandwritingAnalysisService
         - Marking a valid but unusual method as wrong.
         - Sign errors and dropped terms.
 
+        Also check each of the student's steps yourself, independently of the marker, and give
+        your own mark for EVERY step even when you agree with the overall verdict. Expand or
+        simplify algebraic steps before judging them. A step the marker passed can still be wrong:
+        mark it "incorrect" with a one-sentence reason that shows the check. For transformations,
+        apply the operations in the order given and compare the resulting function with the target;
+        different valid orders (with correspondingly different numbers) are all correct.
+
         Report your own verdict, whether you agree with the marker, and how confident
         you are. Use a LOW confidence when the task is ambiguous, the steps are unclear
         or you cannot verify the result. Write notes in simple, clear English.
@@ -221,7 +248,8 @@ public class HandwritingAnalysisService
           "overall": "correct|incorrect",
           "agrees": true|false,
           "confidence": 0.0,
-          "notes": "<one or two short sentences for the teacher>"
+          "notes": "<one or two short sentences for the teacher>",
+          "steps": [ { "number": 1, "status": "correct|incorrect", "explanation": "<why, only if incorrect>" } ]
         }
         """;
 
@@ -245,7 +273,11 @@ public class HandwritingAnalysisService
             $"Expected answer: {(string.IsNullOrWhiteSpace(answerKey) ? "(not provided)" : answerKey)}\n\n" +
             $"Student's steps:\n{stepLines}\n\n" +
             $"The marker's grade was: {evaluation.Overall}\n" +
-            $"The marker's reason: {evaluation.Summary}";
+            $"The marker's reason: {evaluation.Summary}\n" +
+            "The marker's mark for each step:\n" +
+            string.Join("\n", evaluation.Steps.Select(s =>
+                $"{s.Number}. {(string.IsNullOrWhiteSpace(s.Status) ? "unmarked" : s.Status)}" +
+                (string.IsNullOrWhiteSpace(s.Explanation) ? "" : $" ({s.Explanation})")));
 
         var payload = new
         {

@@ -69,7 +69,7 @@ builder.Services.AddRateLimiter(options =>
             ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 15,
+            PermitLimit = builder.Configuration.GetValue("RateLimit:AiPermitLimit", 15),
             Window      = TimeSpan.FromMinutes(5),
             QueueLimit  = 0
         }));

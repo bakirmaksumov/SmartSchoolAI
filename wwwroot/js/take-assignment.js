@@ -15,6 +15,7 @@
   let chatMode        = 'hint';
   let chatQuestionIdx = null;   // question the current conversation belongs to
   let chatAssignmentId = null;  // assignment the conversation belongs to
+  let chatStep        = null;   // { number, text, feedback } when help was opened from one step
   let isSubmitting    = false;  // true once the quiz is being submitted (skip leave warning)
   let dirty           = false;  // student has entered/changed an answer but not submitted
   let wrongStreak     = {};     // { questionIndex: consecutive wrong "Check answer" clicks }
@@ -72,7 +73,14 @@
     // Show the verdict, colour the nav pill, and celebrate a correct answer.
     // `v` is { correct, feedback } — from an instant reply or a finished job.
     var applyVerdict = function (v) {
-      if (v && v.correct) {
+      if (v && v.correct && v.requireWork && !(answers['work_' + idx] || '').trim()) {
+        // The choice is right, but the teacher requires working: say so separately, and do not
+        // celebrate a question that is not complete yet.
+        showFeedback(box, true, 'Your choice is correct. Add your working to complete this question.');
+        markPillResult(idx, true);
+        wrongStreak[idx] = 0;
+        toggleTutorNudge(btn, false);
+      } else if (v && v.correct) {
         showFeedback(box, true, (v && v.feedback) || 'Your answer is correct! 🎉');
         markPillResult(idx, true);
         celebrate();
@@ -649,11 +657,16 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   // Expose globally so the button onclick works
-  window.openTutorial = openTutorial;
+  window.openTutorial = function (opts) {
+    // Inline onclick handlers call this with no arguments; the step buttons pass { step }.
+    return openTutorial(opts && opts.step ? opts : undefined);
+  };
   window.closeTutorial = closeTutorial;
   window.setTutorialMode = setTutorialMode;
 
-  function openTutorial() {
+  function openTutorial(opts) {
+    // Help opened from a step starts its own conversation about that step.
+    var fromStep = opts && opts.step ? opts.step : null;
     var currentAssignment = document.getElementById('assignmentId') ? document.getElementById('assignmentId').value : '';
     var q = document.querySelector('.question-panel.active');
     var qIdx = q ? parseInt(q.dataset.qindex, 10) : 0;
@@ -666,7 +679,8 @@
     document.body.classList.add('tutorial-open');
 
     // Reopen the same conversation only for the SAME assignment AND question.
-    var sameConversation = chatAssignmentId === currentAssignment
+    var sameConversation = !fromStep
+                        && chatAssignmentId === currentAssignment
                         && chatQuestionIdx === qIdx
                         && chatHistory.length > 0;
     if (sameConversation) {
@@ -677,6 +691,7 @@
     // New assignment or question → start a fresh conversation.
     chatAssignmentId = currentAssignment;
     chatQuestionIdx = qIdx;
+    chatStep = fromStep;
     chatHistory = [];
     chatMode = 'hint';
     updateModeButtons();
@@ -688,6 +703,12 @@
     var contextMsg = 'I need help with Question ' + (qIdx + 1) + ': "' + qTitle + '"';
     var ans = answers['q_' + qIdx] || '';
     if (ans) contextMsg += '. My current answer is: ' + ans;
+    var working = tutorWork(qIdx);
+    if (working.length) contextMsg += '. My working so far: ' + working.map(function (s, i) { return (i + 1) + ') ' + s; }).join(' ');
+    if (chatStep) {
+      contextMsg += '. I need help with step ' + chatStep.number + ': "' + chatStep.text + '"';
+      if (chatStep.feedback) contextMsg += ' (the checker said: ' + chatStep.feedback + ')';
+    }
 
     streamTutorTurn(contextMsg, false);  // hidden priming; assistant replies with the first hint
   }
@@ -713,6 +734,7 @@
 
     chatHistory = [];
     chatQuestionIdx = null;
+    chatStep = null;
     chatMode = 'hint';
     var msgs = document.getElementById('tutorialMessages');
     if (msgs) msgs.innerHTML = '';
@@ -872,6 +894,30 @@
     }
   }
 
+  // The student's working for a question as a list of steps (one per line of the hidden mirror).
+  function tutorWork(qIdx) {
+    return (answers['work_' + qIdx] || '').split('\n').map(function (s) { return s.trim(); })
+      .filter(function (s) { return s !== ''; });
+  }
+
+  // What the tutor must know to help with THIS question right now: sent with every turn, so the
+  // latest answer and working are always the current ones.
+  function tutorContextFields() {
+    var idx = chatQuestionIdx;
+    if (idx === null || idx === undefined) return {};
+    var fields = {
+      questionIndex: idx,
+      answer:        answers['q_' + idx] || '',
+      work:          tutorWork(idx)
+    };
+    if (chatStep) {
+      fields.stepNumber   = chatStep.number;
+      fields.stepText     = chatStep.text;
+      fields.stepFeedback = chatStep.feedback || '';
+    }
+    return fields;
+  }
+
   // Markdown prose and maths → readable DOM (never innerHTML: the reply is untrusted).
   function renderTutorText(bubble, text) {
     MathText.renderInto(bubble, text);
@@ -892,12 +938,12 @@
       var response = await fetch('/Student/ChatStream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
-        body: JSON.stringify({
+        body: JSON.stringify(Object.assign({
           message:      userMessage,
           mode:         chatMode,
           assignmentId: assignmentId,
           history:      chatHistory.slice(0, -1)
-        })
+        }, tutorContextFields()))
       });
 
       if (!response.ok) {

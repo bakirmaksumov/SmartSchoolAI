@@ -36,6 +36,10 @@ public class AnswerGradingService
         - Watch boundary conditions: an even root's radicand is ≥ 0 (may be zero), a
           denominator must be ≠ 0. Include the boundary unless it breaks the denominator.
         - An answer like "I don't know" or an unrelated statement is incorrect.
+        - For a multiple-choice item you receive the choices and the option(s) the student
+          selected. Grade only whether the selected statement(s) are true; there is no working to judge.
+        - Test special cases before deciding: a parameter equal to zero, a quadratic that becomes
+          linear, the endpoints of an interval. A statement that holds in every case is true.
         - Write the feedback in simple, clear English — many students are still
           learning English. Use short sentences and avoid idioms and slang.
         Return ONLY valid JSON — no markdown fences, no explanation:
