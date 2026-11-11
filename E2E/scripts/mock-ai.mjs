@@ -5,7 +5,7 @@
 // scripted. Tests control it over a small HTTP API and can read back what the app sent.
 //
 //   POST /chat/completions   the OpenAI-compatible endpoint the app calls
-//   POST /__script           { tutorChunks?: string[], tutorDelayMs?: number, ocr?: {...} }  set replies
+//   POST /__script           { tutorChunks?, tutorDelayMs?, ocr?, ocrDelayMs?, evalDelayMs? }  set replies and delays
 //   POST /__reset            clear scripted replies and recorded requests
 //   GET  /__requests?kind=   what the app sent: [{ kind, system, user, stream }]
 //   GET  /health             readiness probe
@@ -20,6 +20,8 @@ const host = process.env.E2E_MOCK_AI_HOST ?? "127.0.0.1";
 const defaults = () => ({
   tutorChunks: ["Here is a hint."],
   tutorDelayMs: 15,
+  ocrDelayMs: 0,    // hold the OCR answer back, to leave time to look at the waiting screen
+  evalDelayMs: 0,   // the same for the step-grading answer
   ocr: { detectedProblem: "", steps: [{ number: 1, text: "$x = 1$" }] }
 });
 
@@ -83,9 +85,13 @@ async function chatCompletions(req, res) {
     return;
   }
 
-  if (seen.kind === "ocr") return json(res, 200, completion(JSON.stringify(script.ocr)));
+  if (seen.kind === "ocr") {
+    await sleep(script.ocrDelayMs);
+    return json(res, 200, completion(JSON.stringify(script.ocr)));
+  }
 
   if (seen.kind === "eval") {
+    await sleep(script.evalDelayMs);
     const steps = parseSteps(seen.user).map(s => ({ ...s, status: "correct", explanation: "" }));
     return json(res, 200, completion(JSON.stringify({
       steps, overall: "correct", expectedAnswer: "x = 5/2 or x = 1/2", summary: "All steps are correct."
