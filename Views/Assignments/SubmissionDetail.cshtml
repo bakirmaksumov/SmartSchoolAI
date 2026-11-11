@@ -343,6 +343,18 @@
     });
   });
 
+  // Marking a question correct gives it its point and marking it incorrect takes the point back. Without this the
+  // mark and the points disagree: a question shown as correct with 0 points leaves the student's score unchanged.
+  document.querySelectorAll('.grade-correct').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      var points = document.querySelector('.grade-points[data-idx="' + radio.dataset.idx + '"]');
+      if (!points || !radio.checked) return;
+      var value = parseFloat(points.value) || 0;
+      if (radio.value === 'true' && value === 0) points.value = '1';
+      if (radio.value === 'false' && value > 0) points.value = '0';
+    });
+  });
+
   // Collect all per-question grade controls into the hidden gradesJson field
   // right before the form posts, so the controller receives one tidy array.
   document.getElementById('gradeForm').addEventListener('submit', function () {

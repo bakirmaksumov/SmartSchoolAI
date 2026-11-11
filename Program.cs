@@ -108,11 +108,17 @@ if (!app.Environment.IsDevelopment())
     // to read. Since Kestrel is never reached except through that (always-HTTPS)
     // proxy, it's safe to just declare every request HTTPS outright instead of
     // depending on a header the proxy may or may not send.
-    app.Use((context, next) =>
+    // Proxy:ForceHttpsScheme (default true) can be switched off for a test setup that reaches the app over plain
+    // HTTP with no TLS proxy in front, such as the browser tests against the container in CI; otherwise sign-in
+    // redirects point at https:// and a browser cannot follow them. Production keeps the default.
+    if (builder.Configuration.GetValue("Proxy:ForceHttpsScheme", true))
     {
-        context.Request.Scheme = "https";
-        return next();
-    });
+        app.Use((context, next) =>
+        {
+            context.Request.Scheme = "https";
+            return next();
+        });
+    }
 
     app.UseExceptionHandler("/Home/Error");
     app.UseHsts();
