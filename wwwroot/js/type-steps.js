@@ -6,6 +6,12 @@
    check → render-results shape) but for typed text instead of a photo: no
    OCR pass, steps go straight to POST /Student/SubmitTypedSteps.
 
+   Each step is an ordinary text field: the student writes words and maths together
+   ("Stretch by factor 2 parallel to the y-axis", "x = 2.5 or x = 1/2") and it is stored and
+   sent exactly as typed, spaces included, with no "$…$" wrapping. Steps saved by an older
+   version (LaTeX in "$…$") are shown as readable text through MathText, and are sent back
+   unchanged while the student does not edit them, so their meaning is kept.
+
    Not a single shared instance like the hw modal — every question panel has
    its own step list, so everything here is scoped by data-qindex rather than
    by one global piece of state.
@@ -23,17 +29,15 @@
     bindReportModal();
   });
 
-  // A step field's LaTeX, "$…$"-delimited — the format the hidden work_i
-  // mirror stores per line, and what SubmitTypedSteps/EvaluateStepsAsync
-  // already expect (the same shape OCR'd steps arrive in from the photo path).
-  function wrapValue(mf) {
-    var v = (mf.value || '').trim();
-    return v ? '$' + v + '$' : '';
-  }
-
-  // Inverse — for seeding a math-field's .value from stored ($-delimited) text.
-  function unwrapValue(stored) {
-    return String(stored || '').replace(/^\$|\$$/g, '');
+  // A step's text as it is stored and submitted. Typed text goes out as typed; a step restored
+  // from an older "$…$" save goes out as that original while the field still shows the readable
+  // form it was seeded with (so converting for display never changes what is graded).
+  function rowValue(row) {
+    var text = row.querySelector('.type-step-input').value.trim();
+    if (text && row.dataset.display !== undefined && text === row.dataset.display) {
+      return row.dataset.original;
+    }
+    return text;
   }
 
   // ── Init one question's step list ─────────────────────────────────────────
@@ -47,13 +51,13 @@
     var restored = mirror && mirror.value ? mirror.value.split('\n') : [];
 
     if (restored.length > 0) {
-      restored.forEach(function (text, i) { addStepRow(list, i + 1, unwrapValue(text)); });
+      restored.forEach(function (text, i) { addStepRow(list, i + 1, text); });
     } else {
       addStepRow(list, 1, '');
     }
 
     list.addEventListener('input', function (e) {
-      if (e.target.tagName === 'MATH-FIELD' && e.target.classList.contains('type-step-input')) {
+      if (e.target.classList && e.target.classList.contains('type-step-input')) {
         syncMirror(qIndex);
       }
     });
@@ -69,15 +73,16 @@
     }
   }
 
-  function addStepRow(list, number, text) {
+  function addStepRow(list, number, stored) {
     var row = document.createElement('div');
     row.className = 'hw-step-row';
     row.innerHTML =
       '<span class="hw-step-num"></span>' +
-      '<math-field class="form-control type-step-input"></math-field>' +
+      '<input type="text" class="form-control type-step-input" autocomplete="off" spellcheck="false" />' +
       '<button type="button" class="btn btn-sm btn-outline-danger type-step-del"><i class="bx bx-trash"></i></button>';
     row.querySelector('.hw-step-num').textContent = number;
-    row.querySelector('.type-step-input').value = text || '';
+    row.querySelector('.type-step-input').setAttribute('aria-label', 'Step ' + number);
+    seedStep(row, stored || '');
 
     row.querySelector('.type-step-del').addEventListener('click', function () {
       var qIndex = list.dataset.qindex;
@@ -91,9 +96,37 @@
     return row;
   }
 
+  // Puts a stored step into its field: simple LaTeX from an older save is shown readably,
+  // anything that cannot be converted reliably is kept as written with a formatted preview.
+  function seedStep(row, stored) {
+    var input = row.querySelector('.type-step-input');
+    var shown = window.MathText ? MathText.inline(stored) : { text: stored, hasComplex: false };
+    row.dataset.original = stored;
+
+    if (!shown.hasComplex) {
+      input.value = shown.text;
+      row.dataset.display = shown.text;
+      return;
+    }
+
+    input.value = stored;
+    var note = document.createElement('div');
+    note.className = 'hw-step-preview';
+    row.appendChild(note);
+    var refresh = function () {
+      note.textContent = '$' + input.value.replace(/^\$+|\$+$/g, '') + '$';
+      if (typeof renderMathInElement === 'function') {
+        renderMathInElement(note, { delimiters: [{ left: '$', right: '$', display: false }], throwOnError: false });
+      }
+    };
+    refresh();
+    input.addEventListener('input', refresh);
+  }
+
   function renumberSteps(list) {
     list.querySelectorAll('.hw-step-row').forEach(function (row, i) {
       row.querySelector('.hw-step-num').textContent = i + 1;
+      row.querySelector('.type-step-input').setAttribute('aria-label', 'Step ' + (i + 1));
     });
   }
 
@@ -104,14 +137,13 @@
   function collectSteps(list) {
     var steps = [];
     list.querySelectorAll('.hw-step-row').forEach(function (row, i) {
-      var text = wrapValue(row.querySelector('.type-step-input'));
+      var text = rowValue(row);
       if (text) steps.push({ number: i + 1, text: text });
     });
     return steps;
   }
 
-  // Mirrors the steps into the hidden work_i textarea as $-delimited joined
-  // lines, then fires a real "input" event so take-assignment.js's own
+  // Mirrors the steps into the hidden work_i textarea as joined lines (one per step), then fires a real "input" event so take-assignment.js's own
   // listener (already bound to .work-textarea) persists it exactly like a
   // keystroke would — answers{}, the hidden POST field, the session draft,
   // all for free.
@@ -121,8 +153,8 @@
     if (!list || !mirror) return;
 
     var lines = [];
-    list.querySelectorAll('.type-step-input').forEach(function (field) {
-      lines.push(wrapValue(field));
+    list.querySelectorAll('.hw-step-row').forEach(function (row) {
+      lines.push(rowValue(row));
     });
     mirror.value = lines.join('\n');
     mirror.dispatchEvent(new Event('input', { bubbles: true }));
@@ -207,7 +239,7 @@
     var html =
       '<div class="alert alert-' + (correct ? 'success' : 'warning') + ' py-2 px-3">' +
         '<strong>' + (correct ? '✅ Correct' : '❌ Not correct') + '</strong>' +
-        (data.summary ? '<div class="small mt-1">' + escapeHtml(data.summary) + '</div>' : '') +
+        (data.summary ? '<div class="small mt-1">' + escapeHtml(readable(data.summary)) + '</div>' : '') +
       '</div>';
 
     (data.steps || []).forEach(function (s) {
@@ -217,11 +249,11 @@
       var mark = ok
         ? '✅'
         : '<span class="hw-step-mark"' +
-            (s.explanation ? ' data-bs-toggle="tooltip" data-bs-placement="top" title="' + escapeAttr(s.explanation) + '"' : '') +
+            (s.explanation ? ' data-bs-toggle="tooltip" data-bs-placement="top" title="' + escapeAttr(readable(s.explanation)) + '"' : '') +
             '>❌</span>';
       html +=
         '<div class="hw-result-step ' + (ok ? 'correct' : 'incorrect') + '">' +
-          '<div class="hw-step-text">' + mark + ' Step ' + s.number + ': ' + escapeHtml(s.text) + '</div>' +
+          '<div class="hw-step-text">' + mark + ' Step ' + s.number + ': ' + escapeHtml(readable(s.text)) + '</div>' +
           (!ok ? '<button type="button" class="btn btn-sm btn-outline-primary mt-1 type-step-help" onclick="window.openTutorial && window.openTutorial()">' +
                    '<i class="bx bx-help-circle me-1"></i>Get help</button>' : '') +
         '</div>';
@@ -246,6 +278,11 @@
         bootstrap.Tooltip.getOrCreateInstance(el);
       });
     }
+  }
+
+  // Plain text with simple maths made readable (complex notation is left as written).
+  function readable(str) {
+    return window.MathText ? MathText.inline(str).text : String(str || '');
   }
 
   function renderError(wrap, message) {

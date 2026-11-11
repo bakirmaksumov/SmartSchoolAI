@@ -414,6 +414,9 @@
 
       bar.querySelectorAll('button').forEach(function (btn) {
         btn.addEventListener('click', function () {
+          // The typed-steps editor holds plain text fields: insert readable symbols at the caret.
+          if (block.querySelector('.type-steps-list')) { insertStepText(block, btn); return; }
+
           var field = activeField || block.querySelector('math-field');
           if (!field || typeof field.insert !== 'function') return;
           // `insertionMode: 'insertAfter'` places the caret right after the
@@ -424,6 +427,27 @@
         });
       });
     });
+  }
+
+  // Inserts a toolbar button's readable form (data-text, e.g. "√()" with the caret at
+  // data-caret) into the step field that last had focus, at the caret or over the selection.
+  var lastStepInput = null;
+  document.addEventListener('focusin', function (e) {
+    if (e.target.classList && e.target.classList.contains('type-step-input')) lastStepInput = e.target;
+  });
+
+  function insertStepText(block, btn) {
+    var input = lastStepInput && block.contains(lastStepInput) ? lastStepInput : block.querySelector('.type-step-input');
+    var text = btn.dataset.text;
+    if (!input || !text) return;
+
+    var start = input.selectionStart == null ? input.value.length : input.selectionStart;
+    var end   = input.selectionEnd == null ? start : input.selectionEnd;
+    input.setRangeText(text, start, end, 'end');
+    var caret = start + (btn.dataset.caret != null ? parseInt(btn.dataset.caret, 10) : text.length);
+    input.focus();
+    input.setSelectionRange(caret, caret);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
   // Kept only so any leftover ".math-preview-wrap" markup elsewhere no-ops

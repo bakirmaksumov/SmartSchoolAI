@@ -150,7 +150,7 @@
   margin-bottom: 8px;
 }
 
-.hw-step-input { flex: 1 1 0; min-width: 0; }
+.hw-step-input, .type-step-input { flex: 1 1 0; min-width: 0; }
 
 /* Complex notation that could not be turned into plain text: shown formatted under the field. */
 .hw-step-preview {
@@ -193,6 +193,8 @@
 .hw-result-step .hw-step-text {
   font-size: 14px;
   color: #566a7f;
+  white-space: pre-wrap;        /* keep the spaces the student typed */
+  overflow-wrap: anywhere;
 }
 
 /* The reason a step is wrong lives in a hover tooltip on this mark now,

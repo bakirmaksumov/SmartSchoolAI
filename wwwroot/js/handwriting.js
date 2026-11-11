@@ -35,7 +35,7 @@
     // rather than opening a second modal on top.
     if (window.WaitingGame && $('hwWaitBoard')) {
       waitGame = WaitingGame.attach($('hwWaitBoard'), $('hwWaitStatus'));
-      $('hwWaitNewGame').addEventListener('click', function () { waitGame.newGame(); });
+      $('hwWaitNewGame').addEventListener('click', function () { waitGame.restart(); });
     }
 
     bindOpenButtons();
@@ -91,6 +91,8 @@
 
   /** Shows exactly one stage: 'upload' | 'crop' | 'loading' | 'edit' | 'results'. */
   function showStage(stage) {
+    // Leaving the wait ends the game, so no pending move can show up in the next round.
+    if (stage !== 'loading' && waitGame) waitGame.stop();
     ['upload', 'crop', 'loading', 'edit', 'results'].forEach(function (s) {
       $('hwStage-' + s).classList.toggle('d-none', s !== stage);
     });
@@ -586,7 +588,7 @@
       const mark = ok
         ? '✅'
         : '<span class="hw-step-mark"' +
-            (s.explanation ? ' data-bs-toggle="tooltip" data-bs-placement="top" title="' + escapeAttr(s.explanation) + '"' : '') +
+            (s.explanation ? ' data-bs-toggle="tooltip" data-bs-placement="top" title="' + escapeAttr(readable(s.explanation).text) + '"' : '') +
             '>❌</span>';
       html +=
         '<div class="hw-result-step ' + (ok ? 'correct' : 'incorrect') + '">' +
