@@ -1549,8 +1549,12 @@ public class AssignmentsController : Controller
         result.BonusPoints       = Math.Clamp(bonusPoints, 0m, 1000m);
         result.TeacherReviewedAt = DateTime.UtcNow;
 
-        var totalQuestions = (JsonSerializer.Deserialize<List<SmartSchoolAI.Models.Dtos.QuestionDto>>(
-                                  result.Assignment.Questions) ?? new()).Count;
+        // Only questions a student can answer count: a stem that other questions point to
+        // through GroupId has no answer box and is excluded, exactly as when the work was first graded.
+        var allQuestions = JsonSerializer.Deserialize<List<SmartSchoolAI.Models.Dtos.QuestionDto>>(
+                               result.Assignment.Questions) ?? new();
+        var totalQuestions = allQuestions.Count(q =>
+            string.IsNullOrEmpty(q.Id) || !allQuestions.Any(x => x.GroupId == q.Id));
         result.RecomputeScore(totalQuestions, result.Assignment.PassThreshold);
 
         await _db.SaveChangesAsync();

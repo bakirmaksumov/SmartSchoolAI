@@ -228,7 +228,7 @@ for (const file of pdfFiles) {
       return body.status !== "running";
     }, { timeout: 240_000 });
     await teacher.locator("#pdfAnalyseBtn").click();
-    const job = await (await finished).json() as { status: string; error?: string; questions?: unknown[] };
+    const job = await (await finished).json() as { status: string; error?: string; questions?: { groupKey?: string | null; stem?: string | null }[] };
 
     if (!aiEnabled) {
       expect(job.status).toBe("error");
@@ -241,6 +241,8 @@ for (const file of pdfFiles) {
     expect(found, `AI import of ${file} finished but produced 0 questions`).toBeGreaterThan(0);
 
     await expect(teacher.locator("#pdfQuestionList .list-group-item")).toHaveCount(found);
+    // Parts of one question share a parent (the stem), which the page adds once per group on top of the parts.
+    const sharedParents = new Set((job.questions ?? []).filter(q => q.groupKey && q.stem).map(q => q.groupKey)).size;
     await teacher.locator("#pdfAddBtn").click();
     await teacher.waitForLoadState("load");
     // The page adds the questions one by one and then reloads, so the evaluate can hit a page that is
@@ -248,7 +250,7 @@ for (const file of pdfFiles) {
     await expect.poll(
       () => teacher.evaluate(() => (typeof QUESTIONS_DATA === "undefined" ? -1 : QUESTIONS_DATA.length)).catch(() => -1),
       { timeout: 120_000 }
-    ).toBe(found);
+    ).toBe(found + sharedParents);
 
     await publishAndAssignAll(teacher, draftId);
     await student.goto(`/Student/TakeAssignment?assignmentId=${draftId}`);

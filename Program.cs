@@ -171,7 +171,10 @@ var cspHeaderValue =
     // IT, which 'none' would also refuse. 'self' still blocks every other site
     // from framing this app (the actual clickjacking defense) while allowing this
     // one legitimate same-origin use.
-    "frame-ancestors 'self'";
+    "frame-ancestors 'self'; " +
+    // MathLive starts its speech/compute helpers in a Web Worker built from a blob: URL; without
+    // worker-src the browser falls back to script-src, which does not allow blob:, and logs a CSP error.
+    "worker-src 'self' blob:";
 
 app.Use(async (context, next) =>
 {
@@ -187,8 +190,10 @@ app.Use(async (context, next) =>
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
+app.UseAuthentication();   // must come before UseAuthorization and the rate limiter
+// After authentication so the "ai" policy sees the signed-in user and limits each person
+// separately; before it, every request looked anonymous and the whole school shared one IP bucket.
 app.UseRateLimiter();
-app.UseAuthentication();   // must come before UseAuthorization
 app.UseAuthorization();
 
 // Hold users flagged for a password reset on the change-password page. Runs after
