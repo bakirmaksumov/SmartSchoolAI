@@ -1,0 +1,13 @@
+# CI-only override, layered on compose.yml (COMPOSE_FILE=compose.yml:compose.ci.yml).
+# Points the app at the deterministic mock AI that the Playwright run starts on the runner
+# (E2E/scripts/mock-ai.mjs), so no real OpenRouter key or network call is involved, and lifts
+# the login rate limit so the browser tests can register accounts quickly.
+services:
+  web:
+    environment:
+      OpenRouter__ApiKey: e2e-mock-key
+      OpenRouter__BaseUrl: http://host.docker.internal:5199
+      RateLimit__LoginPermitLimit: "1000"
+      RateLimit__AiPermitLimit: "1000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

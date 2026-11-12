@@ -46,4 +46,10 @@ public class GradingVerificationDto
 
     /// <summary>Short explanation for the teacher when something looks off.</summary>
     public string Notes      { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The verifier's own mark for each step (number, status, explanation), given even when it
+    /// agrees with the overall verdict, so a step the first marker wrongly passed can be corrected.
+    /// </summary>
+    public List<HandwritingStepDto> Steps { get; set; } = new();
 }

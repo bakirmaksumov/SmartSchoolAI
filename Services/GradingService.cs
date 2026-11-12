@@ -45,9 +45,12 @@ public class GradingService
 
     public record TypedCheckOutcome(bool Success, string? Error, bool Correct, string? Feedback);
 
+    /// <summary>The selected option's verdict, judged on its own and apart from the working.</summary>
+    public record OptionVerdict(bool Correct, string? Feedback);
+
     public record StepsGradeOutcome(
         bool Success, string? Error, Guid ResultId, string? Overall,
-        string? Summary, string? ExpectedAnswer, int Score, object? Steps);
+        string? Summary, string? ExpectedAnswer, int Score, object? Steps, OptionVerdict? Option = null);
 
     // ── Access / load ────────────────────────────────────────────────────────────
 
@@ -117,8 +120,8 @@ public class GradingService
             // text as the key. Normalise both sides to letters before comparing,
             // order-independently (e.g. "A,C" == "C,A").
             var options = ParseOptions(q.Options);
-            var student = answerValue.Split(',').Select(t => NormalizeChoiceToken(t, options)).OrderBy(s => s);
-            var correct = q.AnswerKey.Split(',').Select(t => NormalizeChoiceToken(t, options)).OrderBy(s => s);
+            var student = SplitChoice(answerValue, options).Select(t => NormalizeChoiceToken(t, options)).OrderBy(s => s);
+            var correct = SplitChoice(q.AnswerKey, options).Select(t => NormalizeChoiceToken(t, options)).OrderBy(s => s);
             return student.SequenceEqual(correct);
         }
 
@@ -164,9 +167,15 @@ public class GradingService
     {
         try
         {
+            // A choice answer is a bare letter ("B"), meaningless on its own: send the whole
+            // question with its choices and the text of what was selected.
+            var (questionText, answerText) = IsChoiceQuestion(question)
+                ? DescribeChoiceQuestion(question, answer)
+                : (question.Title, answer);
+
             var graded = await _grading.GradeAsync(new[]
             {
-                new AnswerGradingService.ItemToGrade(questionIndex, question.Title, answer, null)
+                new AnswerGradingService.ItemToGrade(questionIndex, questionText, answerText, null)
             });
 
             if (graded.TryGetValue(questionIndex, out var verdict))
@@ -189,7 +198,8 @@ public class GradingService
     /// an <paramref name="imagePath"/> to record.
     /// </summary>
     public async Task<StepsGradeOutcome> EvaluateStepsAsync(
-        Guid assignmentId, int questionIndex, Guid studentId, string? stepsJson, string imagePath)
+        Guid assignmentId, int questionIndex, Guid studentId, string? stepsJson, string imagePath,
+        string? selectedAnswer = null)
     {
         var (assignment, question, error) = await LoadAssignedQuestionAsync(assignmentId, questionIndex, studentId);
         if (error is not null)
@@ -226,6 +236,9 @@ public class GradingService
             return new StepsGradeOutcome(false, "Evaluation failed. Please try again.", Guid.Empty, null, null, null, 0, null);
         }
 
+        // The student's own words are never replaced by the model's rewording of them.
+        analysis.Steps = AlignWithStudentSteps(analysis.Steps, steps);
+
         // Second opinion: an independent pass re-solves the task and checks the grade.
         // A single grading call can mark a correct solution wrong, so a disagreement
         // or a low-confidence verdict is escalated to the teacher instead of standing.
@@ -238,11 +251,16 @@ public class GradingService
             analysis.Overall = verification.Overall;   // the more rigorous pass wins
         }
 
+        // The verifier marks every step on its own. A step it proves wrong is corrected together with
+        // its reason, even when it agrees with the overall verdict (a step wrongly passed by the
+        // first marker was the reported false green).
+        var correctedSteps = ApplyStepCorrections(analysis.Steps, verification);
+
         var result          = await GetOrCreateResultAsync(assignmentId, studentId);
         var questionCorrect = string.Equals(analysis.Overall, "correct", StringComparison.OrdinalIgnoreCase);
 
         UpsertQuestionAnswer(result, question, questionIndex, imagePath, analysis, questionCorrect);
-        ApplyVerification(result, questionIndex, verification);
+        ApplyVerification(result, questionIndex, verification, correctedSteps);
         ReplaceStepResults(result, questionIndex, analysis);
 
         var allQuestions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment!.Questions) ?? new();
@@ -250,9 +268,25 @@ public class GradingService
 
         await _db.SaveChangesAsync();
 
+        // On a choice question the selected option is judged separately from the working: by the teacher's
+        // key when there is one, otherwise by the AI with the full choices. Correct working can never make a
+        // wrong option right, and a working error never makes a right option wrong.
+        var option = await JudgeSelectedOptionAsync(question, questionIndex, selectedAnswer);
+
         return new StepsGradeOutcome(
             true, null, result.Id, analysis.Overall, analysis.Summary,
-            analysis.ExpectedAnswer, result.Score, analysis.Steps);
+            analysis.ExpectedAnswer, result.Score, analysis.Steps, option);
+    }
+
+    private async Task<OptionVerdict?> JudgeSelectedOptionAsync(QuestionDto question, int questionIndex, string? selectedAnswer)
+    {
+        if (!IsChoiceQuestion(question) || string.IsNullOrWhiteSpace(selectedAnswer)) return null;
+
+        var byKey = EvaluateTypedAnswer(question, selectedAnswer);
+        if (byKey is not null) return new OptionVerdict(byKey.Value, null);
+
+        var ai = await AiCheckTypedAnswerAsync(question, questionIndex, selectedAnswer);
+        return ai.Success ? new OptionVerdict(ai.Correct, ai.Feedback) : null;
     }
 
     // ── Final submission ─────────────────────────────────────────────────────────
@@ -421,7 +455,7 @@ public class GradingService
     /// teacher when the verifier disagreed with it or was not sure enough.
     /// </summary>
     private static void ApplyVerification(
-        StudentResult result, int questionIndex, GradingVerificationDto? verification)
+        StudentResult result, int questionIndex, GradingVerificationDto? verification, int correctedSteps = 0)
     {
         var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == questionIndex);
         if (answer is null) return;
@@ -439,13 +473,83 @@ public class GradingService
 
         answer.AiConfidence = verification.Confidence;
 
-        var unsure = !verification.Agrees || verification.Confidence < ConfidenceThreshold;
+        var unsure = !verification.Agrees || verification.Confidence < ConfidenceThreshold || correctedSteps > 0;
         answer.NeedsReview = unsure;
         answer.ReviewNote  = unsure
-            ? (verification.Agrees
-                ? $"Low confidence ({verification.Confidence:0.00}). {verification.Notes}"
-                : $"The check disagreed with the first grade ({verification.Confidence:0.00}). {verification.Notes}")
+            ? (correctedSteps > 0 && verification.Agrees && verification.Confidence >= ConfidenceThreshold
+                ? $"The second check corrected {correctedSteps} step mark(s). {verification.Notes}"
+                : verification.Agrees
+                    ? $"Low confidence ({verification.Confidence:0.00}). {verification.Notes}"
+                    : $"The check disagreed with the first grade ({verification.Confidence:0.00}). {verification.Notes}")
             : null;
+    }
+
+    /// <summary>
+    /// One entry per step the student wrote, in their order, carrying exactly the text they wrote.
+    /// The model's status and explanation are matched by step number; a step it left out is
+    /// reported as not checked rather than silently dropped or passed.
+    /// </summary>
+    private static List<HandwritingStepDto> AlignWithStudentSteps(
+        List<HandwritingStepDto> modelSteps, List<HandwritingStepDto> studentSteps)
+    {
+        var byNumber = modelSteps.GroupBy(s => s.Number).ToDictionary(g => g.Key, g => g.First());
+        var sameCount = modelSteps.Count == studentSteps.Count;
+
+        return studentSteps.Select((s, i) =>
+        {
+            byNumber.TryGetValue(s.Number, out var m);
+            if (m is null && sameCount) m = modelSteps[i];   // the model renumbered its list
+
+            return new HandwritingStepDto
+            {
+                Number      = s.Number,
+                Text        = s.Text,
+                Status      = m?.Status ?? "incorrect",
+                Explanation = m is null ? "This step could not be checked automatically." : m.Explanation
+            };
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Applies the verifier's per-step marks. Marking a step incorrect, with its reason, is applied
+    /// at once; clearing a mark needs a confident verifier. Status and explanation always change
+    /// together, so a red step is never left without its reason and a green one never keeps a stale
+    /// one. Returns how many steps changed status.
+    /// </summary>
+    private static int ApplyStepCorrections(List<HandwritingStepDto> steps, GradingVerificationDto? verification)
+    {
+        if (verification is null || verification.Steps.Count == 0) return 0;
+
+        var changed = 0;
+        foreach (var verified in verification.Steps)
+        {
+            var step = steps.FirstOrDefault(s => s.Number == verified.Number);
+            if (step is null) continue;
+
+            var verifiedWrong = string.Equals(verified.Status, "incorrect", StringComparison.OrdinalIgnoreCase);
+            var verifiedRight = string.Equals(verified.Status, "correct",   StringComparison.OrdinalIgnoreCase);
+            var markedWrong   = string.Equals(step.Status,     "incorrect", StringComparison.OrdinalIgnoreCase);
+
+            if (verifiedWrong && !markedWrong)
+            {
+                step.Status      = "incorrect";
+                step.Explanation = string.IsNullOrWhiteSpace(verified.Explanation)
+                    ? "This step is not correct." : verified.Explanation;
+                changed++;
+            }
+            else if (verifiedWrong && markedWrong && string.IsNullOrWhiteSpace(step.Explanation)
+                     && !string.IsNullOrWhiteSpace(verified.Explanation))
+            {
+                step.Explanation = verified.Explanation;     // red but unexplained: give the reason
+            }
+            else if (verifiedRight && markedWrong && verification.Confidence >= ConfidenceThreshold)
+            {
+                step.Status      = "correct";
+                step.Explanation = string.Empty;
+                changed++;
+            }
+        }
+        return changed;
     }
 
     /// <summary>Replaces all step results for a question with the latest evaluation.</summary>
@@ -485,16 +589,78 @@ public class GradingService
         catch { return new(); }
     }
 
-    /// <summary>Resolves an option letter or full option text to its letter (A, B, C…).</summary>
+    /// <summary>True for multiple/single choice questions.</summary>
+    public bool IsChoice(QuestionDto q) => IsChoiceQuestion(q);
+
+    private static readonly System.Text.RegularExpressions.Regex ChoicePrefix =
+        new(@"^\(?([A-Za-z])[\).:]\s*\S", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>Option text compared without markup, spacing, case or a closing full stop.</summary>
+    private static bool SameOptionText(string? a, string? b)
+    {
+        static string Norm(string? s) =>
+            System.Text.RegularExpressions.Regex.Replace((s ?? "").Replace("$", ""), @"\s+", " ")
+                .Trim().TrimEnd('.').Trim().ToLowerInvariant();
+        var left = Norm(a);
+        return left.Length > 0 && left == Norm(b);
+    }
+
+    /// <summary>
+    /// Splits a stored or submitted choice value into its selections. A value that is one option's
+    /// whole text stays whole, because option text may itself contain commas.
+    /// </summary>
+    private static IEnumerable<string> SplitChoice(string value, List<string> options)
+    {
+        if (options.Any(o => SameOptionText(o, value))) return new[] { value };
+        return value.Split(',', StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    /// <summary>
+    /// Resolves what a teacher's key or a student's selection means to its option letter (A, B, C…):
+    /// a bare letter, "B) text" / "B. text", or the option's full text (ignoring $…$ and spacing).
+    /// </summary>
     private static string NormalizeChoiceToken(string token, List<string> options)
     {
-        token = token.Trim();
+        token = NormalizeAnswerText(token);
         if (token.Length == 1 && char.IsLetter(token[0]))
             return token.ToUpperInvariant();
 
-        var index = options.FindIndex(o =>
-            string.Equals(o?.Trim(), token, StringComparison.OrdinalIgnoreCase));
+        var index = options.FindIndex(o => SameOptionText(o, token));
+        if (index >= 0) return ((char)('A' + index)).ToString();
 
-        return index >= 0 ? ((char)('A' + index)).ToString() : token.ToUpperInvariant();
+        if (ChoicePrefix.IsMatch(token))
+        {
+            var letterIndex = char.ToUpperInvariant(token.TrimStart('(')[0]) - 'A';
+            if (letterIndex >= 0 && letterIndex < options.Count) return ((char)('A' + letterIndex)).ToString();
+        }
+
+        return token.ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// A choice question as the AI needs it: the stem with every option, and the text of the
+    /// option(s) the student selected rather than just a letter.
+    /// </summary>
+    private static (string question, string answer) DescribeChoiceQuestion(QuestionDto q, string answer)
+    {
+        var options = ParseOptions(q.Options);
+        var question = new System.Text.StringBuilder(q.Title);
+        if (options.Count > 0)
+        {
+            question.Append("\n\nChoices:");
+            for (var i = 0; i < options.Count; i++)
+                question.Append($"\n{(char)('A' + i)}. {options[i]}");
+        }
+
+        var selected = SplitChoice(answer, options)
+            .Select(t => NormalizeChoiceToken(t, options))
+            .Distinct()
+            .Select(letter =>
+            {
+                var i = letter.Length == 1 ? letter[0] - 'A' : -1;
+                return i >= 0 && i < options.Count ? $"{letter}. {options[i]}" : letter;
+            });
+
+        return (question.ToString(), "Selected option(s): " + string.Join("; ", selected));
     }
 }

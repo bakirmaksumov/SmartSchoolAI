@@ -20,6 +20,9 @@
   let cropper       = null;      // active Cropper.js instance for the crop stage
   let cropImageUrl  = null;      // object URL behind #hwCropImage's current src, revoked once done with it
   let waitGame      = null;      // tic-tac-toe played during the AI wait, or null if unavailable
+  // Bumped whenever the dialog is closed or the photo is replaced. A response that started in an earlier
+  // session (an older OCR or grading call) is dropped for the dialog instead of drawing into the new one.
+  let generation    = 0;
 
   const $ = (id) => document.getElementById(id);
 
@@ -35,7 +38,7 @@
     // rather than opening a second modal on top.
     if (window.WaitingGame && $('hwWaitBoard')) {
       waitGame = WaitingGame.attach($('hwWaitBoard'), $('hwWaitStatus'));
-      $('hwWaitNewGame').addEventListener('click', function () { waitGame.newGame(); });
+      $('hwWaitNewGame').addEventListener('click', function () { waitGame.restart(); });
     }
 
     bindOpenButtons();
@@ -51,7 +54,7 @@
       btn.addEventListener('click', function () {
         assignmentId  = $('assignmentId').value;
         questionIndex = parseInt(this.dataset.qindex, 10);
-        $('hwQuestionTitle').textContent = this.dataset.qtitle || '';
+        showQuestion(this.dataset.qtitle || '');
 
         // Restore a saved draft so the student never has to re-analyze.
         var draft = loadDraft();
@@ -69,6 +72,7 @@
   }
 
   function resetModal() {
+    generation++;
     // Closed after submitting → the work is saved server-side, drop the draft.
     // Closed mid-edit → keep the recognized steps (with any edits) as a draft.
     var resultsVisible = !$('hwStage-results').classList.contains('d-none');
@@ -91,6 +95,8 @@
 
   /** Shows exactly one stage: 'upload' | 'crop' | 'loading' | 'edit' | 'results'. */
   function showStage(stage) {
+    // Leaving the wait ends the game, so no pending move can show up in the next round.
+    if (stage !== 'loading' && waitGame) waitGame.stop();
     ['upload', 'crop', 'loading', 'edit', 'results'].forEach(function (s) {
       $('hwStage-' + s).classList.toggle('d-none', s !== stage);
     });
@@ -170,8 +176,9 @@
     } catch (e) { return null; }
   }
 
-  function clearDraft() {
-    try { localStorage.removeItem(draftKey()); } catch (e) { /* ignore */ }
+  function clearDraft(qi) {
+    const key = 'hwDraft:' + assignmentId + ':' + (qi === undefined ? questionIndex : qi);
+    try { localStorage.removeItem(key); } catch (e) { /* ignore */ }
   }
 
   // ── Upload tabs ─────────────────────────────────────────────────────────────
@@ -218,6 +225,10 @@
    */
   function addFiles(fileList) {
     const before = cropQueue.length + files.length;
+    if (window.QuizChecks && fileList && fileList.length) {
+      generation++;                               // an older OCR/grading response must not land on the new photo
+      QuizChecks.invalidateWork(questionIndex);   // and the old photo's verdict no longer applies
+    }
     Array.from(fileList).forEach(function (f) {
       if (!f.type.startsWith('image/')) return;
       const dup = files.some(function (x) { return x.name === f.name && x.size === f.size; })
@@ -399,6 +410,7 @@
   async function analyze() {
     if (files.length === 0) return;
 
+    const gen = generation;
     showStage('loading');
     startProgress('AI is reading your solution…');
 
@@ -411,6 +423,7 @@
     try {
       const res  = await fetch('/Student/AnalyzeHandwritten', { method: 'POST', body: fd });
       const data = await res.json();
+      if (gen !== generation) return;   // the dialog was closed or the photo replaced meanwhile
       if (!data.success) throw new Error(data.error || 'Analysis failed.');
 
       finishProgress();
@@ -419,6 +432,7 @@
       saveDraft();   // recognized steps cost an AI call — persist immediately
       showStage('edit');
     } catch (err) {
+      if (gen !== generation) return;
       stopProgress();
       alert(err.message);
       showStage('upload');
@@ -429,6 +443,9 @@
     const steps = collectSteps();
     if (steps.length === 0) { alert('Please add at least one step.'); return; }
 
+    const gen = generation;
+    const qi  = questionIndex;
+    const photoKey = imagePaths.join('|');   // identifies which photo this verdict is about
     showStage('loading');
     startProgress('AI is checking your steps…');
 
@@ -437,6 +454,7 @@
     fd.append('questionIndex', questionIndex);
     fd.append('imagePathsJson', JSON.stringify(imagePaths));
     fd.append('stepsJson', JSON.stringify(steps));
+    if (window.QuizChecks) fd.append('selectedAnswer', QuizChecks.selectedAnswer(qi));
     fd.append('__RequestVerificationToken', token());
 
     try {
@@ -446,8 +464,9 @@
 
       // Grading runs in the background now (several AI calls); poll until it's done.
       // The local progress ticker keeps the bar moving; the poll decides completion.
-      pollGrading(data.jobId);
+      pollGrading(data.jobId, qi, gen, photoKey);
     } catch (err) {
+      if (gen !== generation) return;
       stopProgress();
       alert(err.message);
       showStage('edit');
@@ -456,22 +475,45 @@
 
   // Polls the background grading job for a photo/typed-step submission and shows
   // the result when it lands. Shared by the handwritten and (future) typed paths.
-  function pollGrading(jobId) {
+  function pollGrading(jobId, qi, gen, token) {
     if (!window.GradePoll) { stopProgress(); alert('Could not start grading.'); showStage('edit'); return; }
     GradePoll.start(jobId, {
       onDone: function (result) {
+        clearDraft(qi);   // evaluated and saved server-side — that question's draft is done
+        // The verdict belongs to the question it was started for, whichever question the dialog shows now.
+        if (window.QuizChecks) QuizChecks.recordWork(qi, 'photo', token, result);
+        else markAnswered(qi);
+
+        if (gen !== generation || qi !== questionIndex) return;   // the dialog moved on: do not draw into it
         finishProgress();
-        clearDraft();   // evaluated and saved server-side — the draft is done
         renderResults(result);
-        markAnswered(questionIndex);
         showStage('results');
       },
       onError: function (msg) {
+        if (gen !== generation) return;
         stopProgress();
         alert(msg);
         showStage('edit');
       }
     });
+  }
+
+  // ── Readable maths ─────────────────────────────────────────────────────────
+  // The question and the OCR steps arrive as LaTeX ("$y_{1,2} = \\pm 2$"). They are shown as
+  // readable text; notation that cannot be converted reliably is left as written and
+  // shown formatted, never guessed at.
+  function readable(str) { return MathText.inline(str); }
+
+  function showQuestion(title) {
+    var q = readable(title), box = $('hwQuestionTitle');
+    box.textContent = q.text;
+    if (q.hasComplex && typeof renderMathInElement === 'function') {
+      renderMathInElement(box, {
+        delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false },
+                     { left: '\\(', right: '\\)', display: false }, { left: '\\[', right: '\\]', display: true }],
+        throwOnError: false
+      });
+    }
   }
 
   // ── Editable steps ────────────────────────────────────────────────────────--
@@ -489,7 +531,33 @@
       '<input type="text" class="form-control hw-step-input" />' +
       '<button type="button" class="btn btn-sm btn-outline-danger hw-step-del"><i class="bx bx-trash"></i></button>';
     row.querySelector('.hw-step-num').textContent = number;
-    row.querySelector('.hw-step-input').value = text || '';
+
+    var input = row.querySelector('.hw-step-input');
+    input.spellcheck = false;
+    var shown = readable(text || '');
+    if (!shown.hasComplex) {
+      // Edited as readable text. The untouched original (the maths as recognized) is what
+      // is submitted while the text is unchanged, so no meaning is lost to the conversion.
+      input.value = shown.text;
+      row.dataset.original = text || '';
+      row.dataset.display  = shown.text;
+    } else {
+      // Not safely convertible: keep the source as written and show it formatted underneath.
+      input.value = text || '';
+      row.dataset.original = text || '';
+      var note = document.createElement('div');
+      note.className = 'hw-step-preview';
+      row.appendChild(note);
+      var refresh = function () {
+        note.textContent = input.value;
+        if (typeof renderMathInElement === 'function') {
+          note.textContent = '$' + input.value.replace(/^\$+|\$+$/g, '') + '$';
+          renderMathInElement(note, { delimiters: [{ left: '$', right: '$', display: false }], throwOnError: false });
+        }
+      };
+      refresh();
+      input.addEventListener('input', refresh);
+    }
     row.querySelector('.hw-step-del').addEventListener('click', function () {
       row.remove();
       renumberSteps();
@@ -510,7 +578,11 @@
   function collectSteps() {
     const steps = [];
     document.querySelectorAll('#hwStepsList .hw-step-row').forEach(function (row, i) {
-      const text = row.querySelector('.hw-step-input').value.trim();
+      let text = row.querySelector('.hw-step-input').value.trim();
+      // Unchanged readable text goes back out as the original maths; an edit goes out as typed.
+      if (text && row.dataset.display !== undefined && text === row.dataset.display) {
+        text = row.dataset.original;
+      }
       if (text) steps.push({ number: i + 1, text: text });
     });
     return steps;
@@ -528,21 +600,20 @@
     let html =
       '<div class="alert alert-' + (correct ? 'success' : 'warning') + ' py-2 px-3">' +
         '<strong>' + (correct ? '✅ Correct' : '❌ Not correct') + '</strong>' +
-        (data.summary ? '<div class="small mt-1">' + escapeHtml(data.summary) + '</div>' : '') +
+        (data.summary ? '<div class="small mt-1">' + escapeHtml(readable(data.summary).text) + '</div>' : '') +
       '</div>';
 
+    let firstMistake = true;
     (data.steps || []).forEach(function (s) {
       const ok = (s.status || '').toLowerCase() === 'correct';
-      // The reason a step is wrong shows on hover (a tooltip on the ✗ mark),
-      // not as a permanently-open block of text under every wrong line.
-      const mark = ok
-        ? '✅'
-        : '<span class="hw-step-mark"' +
-            (s.explanation ? ' data-bs-toggle="tooltip" data-bs-placement="top" title="' + escapeAttr(s.explanation) + '"' : '') +
-            '>❌</span>';
+      // The reason sits directly under the step as ordinary text, so it reads on a phone;
+      // the first wrong step is marked as the place to start.
+      const badge = (!ok && firstMistake) ? ' <span class="badge bg-label-danger hw-first-mistake">First mistake</span>' : '';
+      if (!ok) firstMistake = false;
       html +=
         '<div class="hw-result-step ' + (ok ? 'correct' : 'incorrect') + '">' +
-          '<div class="hw-step-text">' + mark + ' Step ' + s.number + ': ' + escapeHtml(s.text) + '</div>' +
+          '<div class="hw-step-text">' + (ok ? '✅' : '❌') + ' Step ' + s.number + ': ' + escapeHtml(readable(s.text).text) + badge + '</div>' +
+          (!ok && s.explanation ? '<div class="hw-step-reason">' + escapeHtml(readable(s.explanation).text) + '</div>' : '') +
         '</div>';
     });
 
@@ -581,8 +652,7 @@
   }
 
   function markAnswered(idx) {
-    const btn = document.querySelector('.question-nav .nav-btn[data-idx="' + idx + '"]');
-    if (btn) btn.classList.add('answered');
+    if (window.QuizPills) QuizPills.setAnswered(idx, true);
   }
 
   function escapeHtml(str) {

@@ -93,6 +93,19 @@
   display: block;
 }
 
+/* A part of a grouped question sits under the shared stem, indented with a rule down its side. */
+.question-panel.question-part.active {
+  margin-left: 1rem;
+  padding-left: .75rem;
+  border-left: 3px solid #d9dee3;
+}
+
+/* Some, but not all, parts of a grouped question are answered. */
+.question-nav .nav-btn.partial {
+  background: linear-gradient(90deg, rgba(105, 108, 255, .22) 50%, transparent 50%);
+  border-color: #696cff;
+}
+
 .question-card-main {
   border: 1px solid #e7e7e8;
   border-radius: .625rem;
@@ -218,6 +231,7 @@
   right: -420px;
   width: 400px;
   height: 100vh;
+  max-width: 100vw;
   background: #fff;
   box-shadow: -4px 0 24px rgba(0, 0, 0, .12);
   z-index: 1050;
@@ -304,7 +318,9 @@
 
 .tutorial-messages {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 16px 20px;
   display: flex;
   flex-direction: column;
@@ -315,6 +331,14 @@
   display: flex;
   gap: 8px;
   max-width: 88%;
+  min-width: 0;
+}
+
+/* A flex child will not shrink below its content unless told it may — without this a long
+   word or formula stretches the bubble past the panel and the chat scrolls sideways. */
+.msg-content {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .chat-msg.assistant {
@@ -343,9 +367,22 @@
   border-radius: 12px;
   font-size: 13.5px;
   line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
 }
+
+.msg-bubble.user { white-space: pre-wrap; }
+
+/* Tutor replies are rendered as paragraphs, lists and readable maths. */
+.msg-bubble p { margin: 0 0 .6em; }
+.msg-bubble p:last-child, .msg-bubble ul:last-child, .msg-bubble ol:last-child { margin-bottom: 0; }
+.msg-bubble ul, .msg-bubble ol { margin: 0 0 .6em; padding-left: 1.3em; }
+.msg-bubble code { font-size: .92em; }
+.msg-bubble .math-text { white-space: pre-wrap; }
+.msg-bubble .math-complex .katex-display,
+.msg-bubble .math-complex { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
 
 .msg-bubble.assistant {
   background: #f5f5f9;
@@ -374,6 +411,7 @@
 
 .tutorial-input-wrap input {
   flex: 1;
+  min-width: 0;
   border: 1.5px solid #e7e7e8;
   border-radius: 8px;
   padding: 8px 14px;
@@ -407,6 +445,9 @@
   opacity: .5;
   cursor: not-allowed;
 }
+
+/* The floating help button sits exactly over the send button; clear it while the tutor is open. */
+body.tutorial-open .eduschool-help-container { display: none; }
 
 /* ── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 576px) {

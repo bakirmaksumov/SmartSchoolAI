@@ -83,6 +83,31 @@
             displayLabel[i] = displayLabel[parentIdx] + (char)('a' + n);
         }
     }
+
+    // One student page per top-level question: a parent and all its parts are shown together, so the shared
+    // stem and diagram appear once with every part under it. Question indexes (and so ids, drafts, grading and
+    // photo uploads) are untouched; only the grouping of panels and the navigation entries change.
+    int RootOf(int i)
+    {
+        for (var guard = 0; guard < Model.Count; guard++)
+        {
+            var gid = Model[i].GroupId;
+            if (string.IsNullOrEmpty(gid) || !idToIndex.TryGetValue(gid!, out var parent) || parent == i) break;
+            i = parent;
+        }
+        return i;
+    }
+
+    var pageOf = new int[Model.Count];
+    var pageIndices = new SortedDictionary<int, List<int>>();
+    for (int i = 0; i < Model.Count; i++)
+    {
+        pageOf[i] = RootOf(i);
+        if (!pageIndices.TryGetValue(pageOf[i], out var members)) pageIndices[pageOf[i]] = members = new List<int>();
+        members.Add(i);
+    }
+    foreach (var members in pageIndices) members.Value.Sort();   // the parent first when it is listed first, then parts in order
+    var pageLeads = pageIndices.Keys.ToList();
 }
 
 @section Styles {
@@ -193,9 +218,9 @@
   <div class="card-body py-2 px-3">
     <div class="question-nav">
       <button type="button" class="nav-btn prev-next-btn" id="prevBtn" disabled>Previous</button>
-      @for (int i = 0; i < Model.Count; i++)
+      @foreach (var lead in pageLeads)
       {
-        <button type="button" class="nav-btn @(i == 0 ? "active" : "")" data-idx="@i">@displayLabel[i]</button>
+        <button type="button" class="nav-btn @(lead == pageLeads[0] ? "active" : "")" data-idx="@lead">@displayLabel[lead]</button>
       }
       <button type="button" class="nav-btn prev-next-btn" id="nextBtn">Next</button>
     </div>
@@ -211,12 +236,15 @@
   @* Hidden inputs for all questions — synced by JS *@
   @for (int i = 0; i < Model.Count; i++)
   {
-    <input type="hidden" name="q_@i" id="hidden_q_@i" value="" />
+    <input type="hidden" name="q_@i" id="hidden_q_@i" data-header="@(isGroupHeader[i] ? "true" : "false")" value="" />
     <input type="hidden" name="work_@i" id="hidden_work_@i" value="" />
   }
 
   <!-- ── QUESTION PANELS (one per question, only active is visible) ──── -->
-  @for (int i = 0; i < Model.Count; i++)
+  @foreach (var pageLead in pageLeads)
+  {
+  <div class="question-page" data-page="@pageLead">
+  @foreach (var i in pageIndices[pageLead])
   {
     var q = Model[i];
     var isMultiChoice  = mcTypes.Contains(q.Type);
@@ -229,8 +257,12 @@
     }
     var qTypeLabel = GetTypeLabel(q.Type);
 
-    <div class="question-panel @(i == 0 ? "active" : "")"
+    <div class="question-panel @(pageOf[i] == pageLeads[0] ? "active" : "") @(pageOf[i] != i ? "question-part" : "")"
          data-qindex="@i"
+         data-page="@pageOf[i]"
+         data-header="@(isGroupHeader[i] ? "true" : "false")"
+         data-label="@displayLabel[i]"
+         data-requirework="@(q.RequireWork ? "true" : "false")"
          data-qtype="@(isMultiChoice ? "multi" : isSingleChoice ? "single" : "text")"
          data-qtitle="@q.Title">
 
@@ -295,7 +327,11 @@
           </div>
 
           <!-- Solution Area (if provided by teacher) -->
-          @if (!string.IsNullOrWhiteSpace(q.Explanation))
+          @if (isGroupHeader[i])
+          {
+            @* A shared stem has no solution box of its own: its parts follow below on this page. *@
+          }
+          else if (!string.IsNullOrWhiteSpace(q.Explanation))
           {
             <div class="solution-area mb-4 p-3 rounded" style="background:#f5f5f9; border-left: 3px solid #696cff;">
               <div class="solution-label text-primary fw-semibold mb-2" style="font-size: 0.875rem;">
@@ -314,10 +350,7 @@
 
           @if (isGroupHeader[i])
           {
-            <div class="alert alert-light border d-flex align-items-center gap-2 mb-0">
-              <i class="bx bx-info-circle text-primary"></i>
-              <span class="small text-muted">This question is answered in its parts below — @displayLabel[i]a, @displayLabel[i]b, etc.</span>
-            </div>
+            @* The parts are shown right below, on this same page. *@
           }
           else
           {
@@ -800,6 +833,8 @@
       </div>
     </div>
   }
+  </div>
+  }
 
   <!-- ── BOTTOM ACTIONS ──────────────────────────────────────────────── -->
   <div class="d-flex gap-2 mb-4">
@@ -1106,6 +1141,7 @@
   }
   <script src="~/js/waiting-game.js" asp-append-version="true"></script>
   <script src="~/js/grade-poll.js" asp-append-version="true"></script>
+  <script src="~/js/math-text.js" asp-append-version="true"></script>
   <script src="~/js/take-assignment.js" asp-append-version="true"></script>
   <script src="~/js/number-line-widget.js" asp-append-version="true"></script>
   <script src="~/js/dot-plot-widget.js" asp-append-version="true"></script>

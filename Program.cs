@@ -69,7 +69,7 @@ builder.Services.AddRateLimiter(options =>
             ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 15,
+            PermitLimit = builder.Configuration.GetValue("RateLimit:AiPermitLimit", 15),
             Window      = TimeSpan.FromMinutes(5),
             QueueLimit  = 0
         }));
@@ -108,11 +108,17 @@ if (!app.Environment.IsDevelopment())
     // to read. Since Kestrel is never reached except through that (always-HTTPS)
     // proxy, it's safe to just declare every request HTTPS outright instead of
     // depending on a header the proxy may or may not send.
-    app.Use((context, next) =>
+    // Proxy:ForceHttpsScheme (default true) can be switched off for a test setup that reaches the app over plain
+    // HTTP with no TLS proxy in front, such as the browser tests against the container in CI; otherwise sign-in
+    // redirects point at https:// and a browser cannot follow them. Production keeps the default.
+    if (builder.Configuration.GetValue("Proxy:ForceHttpsScheme", true))
     {
-        context.Request.Scheme = "https";
-        return next();
-    });
+        app.Use((context, next) =>
+        {
+            context.Request.Scheme = "https";
+            return next();
+        });
+    }
 
     app.UseExceptionHandler("/Home/Error");
     app.UseHsts();
@@ -165,7 +171,10 @@ var cspHeaderValue =
     // IT, which 'none' would also refuse. 'self' still blocks every other site
     // from framing this app (the actual clickjacking defense) while allowing this
     // one legitimate same-origin use.
-    "frame-ancestors 'self'";
+    "frame-ancestors 'self'; " +
+    // MathLive starts its speech/compute helpers in a Web Worker built from a blob: URL; without
+    // worker-src the browser falls back to script-src, which does not allow blob:, and logs a CSP error.
+    "worker-src 'self' blob:";
 
 app.Use(async (context, next) =>
 {
@@ -181,8 +190,10 @@ app.Use(async (context, next) =>
 app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
+app.UseAuthentication();   // must come before UseAuthorization and the rate limiter
+// After authentication so the "ai" policy sees the signed-in user and limits each person
+// separately; before it, every request looked anonymous and the whole school shared one IP bucket.
 app.UseRateLimiter();
-app.UseAuthentication();   // must come before UseAuthorization
 app.UseAuthorization();
 
 // Hold users flagged for a password reset on the change-password page. Runs after
@@ -192,6 +203,20 @@ app.UseMiddleware<SmartSchoolAI.Middleware.ForcePasswordChangeMiddleware>();
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
+
+// Readiness probe for containers and CI: 200 once the app is serving (startup migrations
+// below finish before Kestrel starts listening) and can reach its database, 503 otherwise.
+// Anonymous, returns no data, and does no heavy work.
+app.MapGet("/health/ready", async (AppDbContext db, CancellationToken cancellationToken) =>
+{
+    var canConnect = false;
+    try { canConnect = await db.Database.CanConnectAsync(cancellationToken); }
+    catch (Exception) { /* reported as not ready below */ }
+
+    return canConnect
+        ? Results.Ok(new { status = "ready" })
+        : Results.Json(new { status = "database unavailable" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+}).AllowAnonymous();
 
 // ── Auto-migrate on startup ───────────────────────────────────────────────────
 // A bad migration or a crash mid-Migrate() would otherwise leave no way back —

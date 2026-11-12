@@ -64,6 +64,17 @@ public class PdfImportService
         - Extract all answer options for choice questions.
         - If an answer key is present, extract the correct answer; otherwise leave answerKey blank.
         - Preserve question numbering if present.
+        - Parts of one question: when a numbered question has labelled parts — (a), (b), (c) or
+          (i), (ii) — return ONE object per part. All parts of that question share the same "number".
+          Set "part" to the part's own label without brackets ("a", "b", "i"), set "title" to ONLY
+          that part's own wording (no label and no shared text), and set "stem" to the shared text
+          that comes before the first part and applies to all of them — the setup, the given
+          information, "the curve shown below", what "A" refers to — identical in every part. Put
+          the diagram description (hasDiagram/diagramHint) on the shared question, not on one part.
+          When a question has no parts, set "part" and "stem" to null.
+        - Do NOT guess a grouping. If you cannot tell whether some text is a shared stem or a
+          separate question, or a part's siblings are missing, leave "part" and "stem" null and set
+          "validationWarning" to say so, so a teacher can decide.
         - Write ALL mathematics as LaTeX wrapped in $...$ delimiters, preserving exact
           structure: nth roots as \sqrt[n]{...}, fractions as \frac{a}{b}, powers as x^{2},
           subscripts as x_{1}, integrals as \int, and keep every "=", operator and sign
@@ -91,6 +102,8 @@ public class PdfImportService
             "options": ["option A text", "option B text", ...],
             "answerKey": "<correct answer or empty string>",
             "difficulty": "Easy|Medium|Hard",
+            "part": null,
+            "stem": null,
             "hasDiagram": false,
             "diagramHint": null,
             "validationWarning": null
@@ -329,9 +342,10 @@ public class PdfImportService
 
         try
         {
-            return JsonSerializer.Deserialize<List<ParsedQuestion>>(raw,
-                       new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                   ?? new List<ParsedQuestion>();
+            var parsed = JsonSerializer.Deserialize<List<ParsedQuestion>>(raw,
+                             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                         ?? new List<ParsedQuestion>();
+            return GroupParts(parsed);
         }
         catch (Exception ex)
         {
@@ -340,6 +354,64 @@ public class PdfImportService
             _logger.LogWarning(ex, "Failed to deserialise GPT response. Raw: {Raw}", raw);
             throw new InvalidOperationException("The AI reply could not be read. Please try again.", ex);
         }
+    }
+
+    // ── Parts of one question ────────────────────────────────────────────────
+    // The model reports each part of a numbered question with its label and the shared stem. Parts are only
+    // treated as one question when that is clear: at least two parts, consecutive in the paper, with distinct
+    // labels, one question number, and a stem. Anything else stays as listed, with a warning for the teacher,
+    // so nothing is silently regrouped.
+    private static readonly System.Text.RegularExpressions.Regex PartLabelStart =
+        new(@"^\s*\(?\s*([a-hA-H]|i{1,3}|iv|v)\s*\)", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    public static List<ParsedQuestion> GroupParts(List<ParsedQuestion> items)
+    {
+        var i = 0;
+        while (i < items.Count)
+        {
+            var q = items[i];
+            if (string.IsNullOrWhiteSpace(q.Part) || q.Number <= 0) { i++; continue; }
+
+            // The run of consecutive items that share this question number and are parts.
+            var j = i;
+            while (j + 1 < items.Count && items[j + 1].Number == q.Number && !string.IsNullOrWhiteSpace(items[j + 1].Part)) j++;
+            var run = items.GetRange(i, j - i + 1);
+
+            var distinctLabels = run.Select(p => p.Part!.Trim().ToLowerInvariant()).Distinct().Count() == run.Count;
+            var stem = run.Select(p => p.Stem).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim();
+
+            if (run.Count >= 2 && distinctLabels && stem is not null)
+            {
+                foreach (var part in run)
+                {
+                    part.GroupKey = $"q{q.Number}";
+                    part.Stem = stem;
+                    part.Part = part.Part!.Trim();
+                }
+            }
+            else
+            {
+                foreach (var part in run) FlagUngrouped(part, run.Count < 2
+                    ? "This looks like one part of a larger question, but its other parts were not found."
+                    : stem is null
+                        ? "These look like parts of one question, but the shared question text was not found."
+                        : "These look like parts of one question, but their labels repeat.");
+            }
+            i = j + 1;
+        }
+
+        // A title that opens with a part label but was not identified as a part at all.
+        foreach (var item in items.Where(x => string.IsNullOrWhiteSpace(x.GroupKey) && string.IsNullOrWhiteSpace(x.Part)
+                                              && PartLabelStart.IsMatch(x.Title ?? "")))
+            FlagUngrouped(item, "This starts like a part, e.g. \"(b)\", of a larger question. Check whether it needs its shared question text.");
+
+        return items;
+    }
+
+    private static void FlagUngrouped(ParsedQuestion q, string reason)
+    {
+        q.Stem = null;   // a stem that could not be trusted is not applied
+        q.ValidationWarning = string.IsNullOrWhiteSpace(q.ValidationWarning) ? reason : q.ValidationWarning + " " + reason;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -397,6 +469,17 @@ public class ParsedQuestion
     public string        AnswerKey  { get; set; } = string.Empty;
     [JsonConverter(typeof(LenientStringConverter))]
     public string        Difficulty { get; set; } = "Medium";
+
+    /// <summary>The part's own label ("a", "b", "i") when this is one part of a numbered question; otherwise null.</summary>
+    [JsonConverter(typeof(LenientStringConverter))]
+    public string?       Part       { get; set; }
+
+    /// <summary>The text shared by all parts of the question, set only once the grouping was judged clear.</summary>
+    [JsonConverter(typeof(LenientStringConverter))]
+    public string?       Stem       { get; set; }
+
+    /// <summary>Same value on every part of one clearly identified question; the editor turns it into a shared parent.</summary>
+    public string?       GroupKey   { get; set; }
 
     /// <summary>True when the AI believes the source material referenced a
     /// diagram/figure that plain text extraction couldn't carry over.</summary>

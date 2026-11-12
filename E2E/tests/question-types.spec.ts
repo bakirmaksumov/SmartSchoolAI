@@ -119,11 +119,10 @@ test("show your work is required, steps can be typed and the optional toggle wor
   // Type a step on question 1 and check it lands in the hidden mirror that is submitted with the form.
   await student.locator('.nav-btn[data-idx="0"]').click();
   await student.locator('.type-step-add[data-qindex="0"]').click();
-  await student.locator('.type-steps-list[data-qindex="0"] math-field').first().evaluate((el: HTMLElement & { value: string }) => {
-    el.value = "2+2=4";
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+  // Steps are plain text fields; what is typed is mirrored as written, without any $…$ wrapping.
+  await student.locator('.type-steps-list[data-qindex="0"] .type-step-input').first().fill("2+2=4");
   await expect(student.locator('.work-textarea[data-qkey="work_0"]')).toHaveValue(/2\+2=4/);
+  await expect(student.locator('.work-textarea[data-qkey="work_0"]')).not.toHaveValue(/\$/);
 
   if (aiEnabled && (await student.locator('.type-step-check[data-qindex="0"]').count()) > 0) {
     const graded = student.waitForResponse(async r => {

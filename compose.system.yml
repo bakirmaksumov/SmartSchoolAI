@@ -1,0 +1,12 @@
+# CI-only override for the whole-system browser tests (COMPOSE_FILE=compose.yml:compose.ci.yml:compose.system.yml).
+# The container uses a SQLite database that the CI job created and seeded with the three synthetic role accounts
+# (E2E/Seed), instead of a fresh empty volume, so the tests can sign in as teacher, student and admin.
+# Proxy:ForceHttpsScheme is switched off because the browser reaches the container over plain HTTP with no TLS proxy
+# in front; production keeps the default, see Program.cs.
+services:
+  web:
+    environment:
+      ConnectionStrings__Default: "Data Source=/e2e-data/smartschool-e2e.db"
+      Proxy__ForceHttpsScheme: "false"
+    volumes:
+      - ./E2E/.e2e-data:/e2e-data

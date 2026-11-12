@@ -1,0 +1,193 @@
+name: Docker CI
+
+# Builds the container and proves it works the way it will be deployed. Job "container": health, sign-in, data that
+# survives re-creating the container, and the tutor / "Solve with photo" browser scenarios. Job "system": the whole
+# application as teacher, student and admin (access matrix, page crawl, cross-role journey) against a seeded
+# database. It does not publish the image or deploy anywhere.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: smoke
+      # compose.ci.yml points the app at the mock AI and lifts the login rate limit. No real keys here.
+      COMPOSE_FILE: compose.yml:compose.ci.yml
+      OPENROUTER_API_KEY: ""
+      RECAPTCHA_SITE_KEY: ""
+      RECAPTCHA_SECRET_KEY: ""
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build the image
+        run: docker compose build
+
+      - name: Start the container (fresh volumes)
+        run: docker compose up -d
+
+      - name: Container runs as an unprivileged user
+        run: |
+          uid="$(docker compose exec -T web id -u)"
+          echo "container uid: $uid"
+          test "$uid" != "0"
+
+      - name: Smoke test, recreate the container, check data survived
+        env:
+          BASE_URL: http://localhost:8080
+          RECREATE_CMD: docker compose down && docker compose up -d
+        run: bash scripts/ci/docker-smoke.sh
+
+      - name: Container healthcheck reports healthy
+        run: |
+          for i in $(seq 1 30); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' "$(docker compose ps -q web)")"
+            echo "health: $status"
+            [ "$status" = "healthy" ] && exit 0
+            sleep 2
+          done
+          exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: E2E/package-lock.json
+
+      - name: Install the browser test tooling
+        working-directory: E2E
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # The browser talks to the running container. The mock AI is started by Playwright on the runner
+      # (0.0.0.0 so the container reaches it as host.docker.internal) and answers the tutor, OCR and grading
+      # calls with fixed text; accounts are registered through the UI in a temporary SQLite volume.
+      - name: Tutor and "Solve with photo" scenarios against the container
+        working-directory: E2E
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8080
+          E2E_MOCK_AI_HOST: 0.0.0.0
+          E2E_AI: "0"
+          E2E_SHOT_DIR: ${{ runner.temp }}/screenshots
+        run: npx playwright test --project=display
+
+      - name: Upload screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: display-evidence
+          path: |
+            ${{ runner.temp }}/screenshots
+            E2E/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color --tail=200 web
+
+      # Removes the container, network and both volumes, so nothing outlives the run.
+      - name: Clean up
+        if: always()
+        run: docker compose down -v --remove-orphans
+
+  # The whole system, as all three roles, against the running container.
+  system:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: system
+      COMPOSE_FILE: compose.yml:compose.ci.yml:compose.system.yml
+      OPENROUTER_API_KEY: ""
+      RECAPTCHA_SITE_KEY: ""
+      RECAPTCHA_SECRET_KEY: ""
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: E2E/package-lock.json
+
+      - name: Install the browser test tooling
+        working-directory: E2E
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      # Random passwords, known only to this run and masked in its log.
+      - name: Generate the synthetic account passwords
+        run: |
+          for role in TEACHER STUDENT ADMIN; do
+            value="$(openssl rand -hex 12)Aa1!"
+            echo "::add-mask::$value"
+            echo "E2E_${role}_PASSWORD=$value" >> "$GITHUB_ENV"
+          done
+
+      # A fresh SQLite file with the schema and one teacher, one student and one admin. The container opens it.
+      - name: Seed the database
+        working-directory: E2E
+        env:
+          E2E_DATA_DIR: ${{ github.workspace }}/E2E/.e2e-data
+          E2E_BUILD_DIR: ${{ runner.temp }}/seed-build
+        run: |
+          mkdir -p .e2e-data
+          dotnet run --project Seed/SmartSchoolAI.E2E.Seed.csproj -- "$PWD/.e2e-data/smartschool-e2e.db"
+          # The container runs as an unprivileged user and must be able to write the database and its journal files.
+          chmod -R a+rwX .e2e-data
+
+      - name: Build and start the container on the seeded database
+        run: |
+          docker compose build
+          docker compose up -d
+
+      - name: Wait until the application is ready
+        run: |
+          for i in $(seq 1 60); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/health/ready)" = "200" ] && exit 0
+            sleep 2
+          done
+          echo "the application did not become ready" >&2
+          exit 1
+
+      - name: Whole-system tests as teacher, student and admin
+        working-directory: E2E
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8080
+        run: npx playwright test --project=system
+
+      - name: Upload traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-traces
+          path: E2E/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color --tail=200 web
+
+      - name: Clean up
+        if: always()
+        run: docker compose down -v --remove-orphans
+

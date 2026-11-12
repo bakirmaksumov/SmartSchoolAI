@@ -1,4 +1,4 @@
-/* Tic-tac-toe shown while the server checks an answer. See waiting-game.js. */
+/* Waiting games (tic-tac-toe, rock-paper-scissors, repeat the sequence). See waiting-game.js. */
 
 .wg-board {
   display: grid;
@@ -55,3 +55,59 @@
   .wg-reveal-btn { animation: none; }
   .wg-cell { transition: none; }
 }
+
+/* ── Rock, paper, scissors ─────────────────────────────────────────────── */
+.wg-board.wg-board-rps { display: block; width: 320px; }
+.wg-rps-cpu { text-align: center; margin-bottom: 1rem; }
+.wg-rps-label { display: block; margin-bottom: .25rem; font-size: .8rem; color: var(--bs-secondary-color, #a1acb8); }
+.wg-rps-pick {
+  display: inline-flex;
+  min-width: 150px;
+  justify-content: center;
+  padding: .55rem 1rem;
+  border: 2px dashed var(--bs-border-color, #d9dee3);
+  border-radius: .5rem;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--bs-secondary-color, #a1acb8);
+}
+.wg-rps-pick.wg-revealed { border-style: solid; border-color: #ff3e1d; color: #ff3e1d; }
+.wg-rps-choices { display: flex; gap: 8px; }
+.wg-rps-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: .5rem .25rem;
+  border: 2px solid var(--bs-border-color, #d9dee3);
+  border-radius: .5rem;
+  background: var(--bs-body-bg, #fff);
+  color: var(--bs-body-color, #566a7f);
+  cursor: pointer;
+}
+.wg-rps-btn:hover:not(:disabled) { background: rgba(105, 108, 255, .08); }
+.wg-rps-btn:disabled { cursor: default; opacity: .65; }
+.wg-rps-btn.wg-chosen { border-color: #696cff; opacity: 1; }
+.wg-rps-icon { font-size: 1.8rem; line-height: 1.1; }
+.wg-rps-name { font-size: .8rem; font-weight: 600; }
+
+/* ── Repeat the sequence ───────────────────────────────────────────────── */
+.wg-board.wg-board-sequence { grid-template-columns: repeat(2, 1fr); width: 210px; }
+.wg-pad {
+  aspect-ratio: 1 / 1;
+  border: 0;
+  border-radius: .75rem;
+  opacity: .35;
+  transition: opacity .12s ease, transform .06s ease;
+}
+.wg-pad:not(:disabled) { opacity: .75; cursor: pointer; }
+.wg-pad:not(:disabled):hover { opacity: .9; }
+.wg-pad:disabled { cursor: default; }
+.wg-pad.wg-lit { opacity: 1; transform: scale(1.05); box-shadow: 0 0 0 3px rgba(255, 255, 255, .8) inset; }
+.wg-pad-red    { background: #ff3e1d; }
+.wg-pad-blue   { background: #696cff; }
+.wg-pad-green  { background: #71dd37; }
+.wg-pad-yellow { background: #ffab00; }
+
+@media (prefers-reduced-motion: reduce) { .wg-pad { transition: none; } }
