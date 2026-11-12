@@ -8,7 +8,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, feat/waiting-games-text-steps] # TEMP: feature branch removed before merge
+    branches: [main, feat/waiting-games-text-steps, test/system-e2e] # TEMP: feature branches removed before merge
   workflow_dispatch:
 
 permissions:
