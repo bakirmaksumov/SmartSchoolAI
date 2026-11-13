@@ -9,7 +9,10 @@
 
   <ItemGroup>
     <Compile Remove="E2E\**\*.cs" />
-    <Compile Remove="scripts\ImportStudents\**\*.cs" />
+    <Compile Remove="scripts\ImportStudents\**" />
+    <Content Remove="scripts\ImportStudents\**" />
+    <None Remove="scripts\ImportStudents\**" />
+    <EmbeddedResource Remove="scripts\ImportStudents\**" />
     <Content Remove="E2E\**\*" />
     <None Remove="E2E\**\*" />
   </ItemGroup>
