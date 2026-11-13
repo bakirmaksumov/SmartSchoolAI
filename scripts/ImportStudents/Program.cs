@@ -9,12 +9,14 @@ using SmartSchoolAI.Services;
 // Adds student accounts straight to a SmartSchoolAI SQLite database, each with a random password.
 //
 //   dotnet run --project scripts/ImportStudents -- --db <path to .db> --list <students.csv> --out <credentials.csv>
-//                                                  [--class-code <INVITE>] [--dry-run]
+//                                                  [--class-code <INVITE>] [--passwords <credentials.csv>] [--dry-run]
 //
 // students.csv has a header "name,email" and one student per line. The accounts are created exactly like the
 // teacher's "reset password" does it: a random password, and the student must pick their own at first sign-in.
 // Emails that already have an account are skipped and reported, never changed. --class-code also enrols every new
-// student in that class. The credentials file holds the plain passwords: hand it out, then delete it.
+// student in that class. --passwords reuses passwords already handed out (a credentials file from an earlier run,
+// matched by email) instead of generating new ones, so a second database gets the same logins. The credentials
+// file holds the plain passwords: hand it out, then delete it.
 
 string? Option(string name)
 {
@@ -26,6 +28,7 @@ var dbPath = Option("--db") ?? throw new ArgumentException("--db <database path>
 var listPath = Option("--list") ?? throw new ArgumentException("--list <students.csv> is required.");
 var outPath = Option("--out") ?? throw new ArgumentException("--out <credentials.csv> is required.");
 var classCode = Option("--class-code")?.Trim().ToUpperInvariant();
+var passwordsPath = Option("--passwords");
 var dryRun = args.Contains("--dry-run");
 
 dbPath = Path.GetFullPath(dbPath);
@@ -72,6 +75,19 @@ string NewPassword()
     }
 }
 
+var reused = new Dictionary<string, string>();
+if (passwordsPath != null)
+{
+    foreach (var raw in File.ReadLines(passwordsPath).Skip(1))
+    {
+        var parts = raw.Trim().Split(',');
+        if (parts.Length >= 3) reused[parts[^2].Trim().ToLowerInvariant()] = parts[^1].Trim();
+    }
+    var missing = wanted.Where(w => !reused.ContainsKey(w.Email)).Select(w => w.Email).ToList();
+    if (missing.Count > 0)
+        throw new InvalidOperationException($"--passwords has no password for: {string.Join(", ", missing)}. Nothing was written.");
+}
+
 var options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={dbPath}").Options;
 await using var db = new AppDbContext(options);
 
@@ -92,7 +108,7 @@ foreach (var (name, email) in wanted)
 {
     if (existing.Contains(email)) { Console.WriteLine($"SKIP    {email} already has an account"); continue; }
 
-    var password = NewPassword();
+    var password = reused.TryGetValue(email, out var given) ? given : NewPassword();
     var user = new User
     {
         Email = email,
