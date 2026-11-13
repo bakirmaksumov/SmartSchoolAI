@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <Compile Remove="E2E\**\*.cs" />
+    <Compile Remove="scripts\ImportStudents\**\*.cs" />
     <Content Remove="E2E\**\*" />
     <None Remove="E2E\**\*" />
   </ItemGroup>
