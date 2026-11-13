@@ -96,10 +96,14 @@ if (args.Contains("--account"))
     {
         if (found.DeletedAt != null) throw new InvalidOperationException($"{accEmail} belongs to a deleted account; not touching it.");
         if (!found.IsActive) throw new InvalidOperationException($"{accEmail} is switched off; not touching it.");
-        if (found.Role.Name != accRole) throw new InvalidOperationException($"{accEmail} is a {found.Role.Name}, not a {accRole}; nothing was changed.");
-        action = $"RESET {accRole.ToLowerInvariant()} password";
+        // The one allowed role change: a teacher becomes an admin, and only when --convert-to-admin says so.
+        var convert = args.Contains("--convert-to-admin") && accRole == Role.Admin && found.Role.Name == Role.Teacher;
+        if (found.Role.Name != accRole && !convert)
+            throw new InvalidOperationException($"{accEmail} is a {found.Role.Name}, not a {accRole}; nothing was changed.");
+        action = convert ? "CONVERT teacher to admin + new password" : $"RESET {accRole.ToLowerInvariant()} password";
         if (!accDry)
         {
+            if (convert) found.RoleId = role.Id;
             found.PasswordHash = PasswordHasher.Hash(password);
             found.MustChangePassword = true;
             found.UpdatedAt = DateTime.UtcNow;
