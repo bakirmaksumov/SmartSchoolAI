@@ -24,6 +24,97 @@ string? Option(string name)
     return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
 }
 
+// ── Account mode: --account <email> --role Admin|Teacher ─────────────────────────────────────────────────────────
+// Sets a new random password on ONE existing account (it must pick its own at next sign-in), and with --create makes
+// the account when it does not exist (Admin only). It never changes anyone else's password, never changes an
+// existing account's role, and refuses accounts that are deleted or switched off.
+//
+//   dotnet ImportStudents.dll --db <.db> --account <email> --role Admin --create --name "Full Name" --out <file.csv>
+//   dotnet ImportStudents.dll --db <.db> --account <email> --role Teacher --out <file.csv>      (add --dry-run to preview)
+//   add --password-file <file> to set the password written in that file instead of generating one
+if (args.Contains("--account"))
+{
+    var accEmail = Option("--account")!.Trim().ToLowerInvariant();
+    var accRoleText = Option("--role") ?? throw new ArgumentException("--role Admin|Teacher is required.");
+    var accRole = accRoleText.Equals("Admin", StringComparison.OrdinalIgnoreCase) ? Role.Admin
+                : accRoleText.Equals("Teacher", StringComparison.OrdinalIgnoreCase) ? Role.Teacher
+                : throw new ArgumentException("--role must be Admin or Teacher.");
+    var accName = Option("--name")?.Trim();
+    var accCreate = args.Contains("--create");
+    var accDry = args.Contains("--dry-run");
+    var accOut = Option("--out") ?? throw new ArgumentException("--out <file.csv> is required.");
+    var accDb = Path.GetFullPath(Option("--db") ?? throw new ArgumentException("--db <database path> is required."));
+
+    if (!File.Exists(accDb)) throw new FileNotFoundException("Database not found (it is never created here).", accDb);
+    if (!Regex.IsMatch(accEmail, @"^[^@\s,;]+@[^@\s,;]+\.[^@\s,;]+$")) throw new ArgumentException($"'{accEmail}' is not a valid email.");
+    if (File.Exists(accOut) && !accDry) throw new InvalidOperationException($"{accOut} already exists; refusing to overwrite credentials.");
+
+    // 16 readable characters (no 0/O, 1/l/I) with at least one of each kind.
+    string Strong()
+    {
+        const string lower = "abcdefghijkmnopqrstuvwxyz", upper = "ABCDEFGHJKLMNPQRSTUVWXYZ", digit = "23456789", sym = "!@#$%*-_";
+        var all = lower + upper + digit + sym;
+        while (true)
+        {
+            var text = new string(Enumerable.Range(0, 16).Select(_ => all[RandomNumberGenerator.GetInt32(all.Length)]).ToArray());
+            if (text.Any(lower.Contains) && text.Any(upper.Contains) && text.Any(digit.Contains) && text.Any(sym.Contains)) return text;
+        }
+    }
+
+    var accOptions = new DbContextOptionsBuilder<AppDbContext>().UseSqlite($"Data Source={accDb}").Options;
+    await using var accountDb = new AppDbContext(accOptions);
+
+    var role = await accountDb.Roles.FirstOrDefaultAsync(r => r.Name == accRole)
+        ?? throw new InvalidOperationException($"Role {accRole} not found; is this the right database?");
+    var found = await accountDb.Users.IgnoreQueryFilters().Include(u => u.Role).FirstOrDefaultAsync(u => u.Email == accEmail);
+    // --password-file <file>: use the password written there (first line) instead of a freshly generated one, so it
+    // can be handed over before the tool runs on the server.
+    var passwordFile = Option("--password-file");
+    var password = passwordFile is null ? Strong() : File.ReadLines(passwordFile).FirstOrDefault()?.Trim() ?? "";
+    if (password.Length < 12) throw new InvalidOperationException("The password must be at least 12 characters.");
+    string action;
+
+    if (found is null)
+    {
+        if (!accCreate) throw new InvalidOperationException($"No account {accEmail} exists. Nothing was written (use --create to make it).");
+        if (accRole != Role.Admin) throw new InvalidOperationException("Only Admin accounts can be created with this tool.");
+        action = "CREATE admin";
+        if (!accDry)
+        {
+            accountDb.Users.Add(new User
+            {
+                Email = accEmail,
+                FullName = string.IsNullOrWhiteSpace(accName) ? "Administrator" : accName,
+                PasswordHash = PasswordHasher.Hash(password),
+                RoleId = role.Id,
+                MustChangePassword = true,
+                IsActive = true
+            });
+        }
+    }
+    else
+    {
+        if (found.DeletedAt != null) throw new InvalidOperationException($"{accEmail} belongs to a deleted account; not touching it.");
+        if (!found.IsActive) throw new InvalidOperationException($"{accEmail} is switched off; not touching it.");
+        if (found.Role.Name != accRole) throw new InvalidOperationException($"{accEmail} is a {found.Role.Name}, not a {accRole}; nothing was changed.");
+        action = $"RESET {accRole.ToLowerInvariant()} password";
+        if (!accDry)
+        {
+            found.PasswordHash = PasswordHasher.Hash(password);
+            found.MustChangePassword = true;
+            found.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
+    if (accDry) { Console.WriteLine($"WOULD   {action}: {accEmail}"); return 0; }
+
+    await accountDb.SaveChangesAsync();
+    var shownName = found?.FullName ?? (string.IsNullOrWhiteSpace(accName) ? "Administrator" : accName);
+    await File.WriteAllTextAsync(accOut, $"role,name,email,password\n{accRole},\"{shownName.Replace("\"", "\"\"")}\",{accEmail},{password}\n", new UTF8Encoding(true));
+    Console.WriteLine($"DONE    {action}: {accEmail}. Password written to {Path.GetFullPath(accOut)}. Hand it over, then delete that file.");
+    return 0;
+}
+
 var dbPath = Option("--db") ?? throw new ArgumentException("--db <database path> is required.");
 var listPath = Option("--list") ?? throw new ArgumentException("--list <students.csv> is required.");
 var outPath = Option("--out") ?? throw new ArgumentException("--out <credentials.csv> is required.");
