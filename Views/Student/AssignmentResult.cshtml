@@ -203,6 +203,9 @@
             <div class="d-flex align-items-center gap-2">
               <span class="badge bg-label-primary fs-6 px-3 py-1">Question @LabelOf(i)</span>
               <span class="badge bg-label-@res fs-6 px-3 py-1"><i class="bx @resIcon me-1"></i>@resLbl</span>
+              <span class="badge bg-label-info fs-6 px-3 py-1">
+                @((answer?.PointsAwarded ?? 0m).ToString("0.##")) / @q.MaxPoints.ToString("0.##") @(q.MaxPoints == 1 ? "mark" : "marks")
+              </span>
             </div>
           </div>
 
@@ -235,6 +238,18 @@
               </div>
             </div>
           </div>
+
+          @if (!string.IsNullOrEmpty(answer?.SketchPath))
+          {
+            <div class="mt-3">
+              <small class="text-muted d-block mb-1 fw-semibold"><i class="bx bx-pencil me-1"></i>Your drawing:</small>
+              <img src="@answer.SketchPath" class="img-fluid rounded border shadow-sm" style="max-height:360px;" alt="Your drawing" />
+              @if (answer.NeedsReview)
+              {
+                <div class="small text-muted mt-1"><i class="bx bx-time-five me-1"></i>Your teacher will check this drawing and may change the mark.</div>
+              }
+            </div>
+          }
 
           @if (!string.IsNullOrEmpty(answer?.TeacherComment))
           {

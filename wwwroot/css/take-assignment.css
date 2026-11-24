@@ -462,3 +462,8 @@ body.tutorial-open .eduschool-help-container { display: none; }
     font-size: 13px;
   }
 }
+
+/* Sketch pad (drawing questions) */
+.sketch-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: middle; }
+.sketch-color.active { background: #e7e7ff; border-color: #696cff; }
+.sketch-tool.active  { background: #696cff; border-color: #696cff; color: #fff; }

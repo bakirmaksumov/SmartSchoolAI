@@ -264,7 +264,7 @@ public class GradingService
         ReplaceStepResults(result, questionIndex, analysis);
 
         var allQuestions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment!.Questions) ?? new();
-        RecomputeResultScore(result, CountAnswerableQuestions(allQuestions), assignment.PassThreshold);
+        RecomputeResultScore(result, allQuestions, assignment.PassThreshold);
 
         await _db.SaveChangesAsync();
 
@@ -310,6 +310,7 @@ public class GradingService
 
             if (answer is null || answer.TeacherOverridden)        continue;
             if (!string.IsNullOrEmpty(answer.ImagePath))           continue; // photo — already AI-graded
+            if (!string.IsNullOrEmpty(answer.SketchPath))          continue; // drawing — graded from the picture
             if (string.IsNullOrWhiteSpace(answer.AnswerValue))     continue; // no answer given
             if (answer.IsCorrect == true)                          continue; // already matched the key
 
@@ -318,7 +319,8 @@ public class GradingService
 
             items.Add(new AnswerGradingService.ItemToGrade(
                 i, q.Title, answer.AnswerValue,
-                string.IsNullOrWhiteSpace(q.AnswerKey) ? null : q.AnswerKey));
+                string.IsNullOrWhiteSpace(q.AnswerKey) ? null : q.AnswerKey,
+                q.MaxPoints));
         }
 
         if (items.Count == 0) return;
@@ -333,7 +335,7 @@ public class GradingService
 
                 var answer = result.StudentAnswers.First(a => a.QuestionIndex == item.Index);
                 answer.IsCorrect     = verdict.Correct;
-                answer.PointsAwarded = verdict.Correct ? 1m : 0m;
+                answer.PointsAwarded = PointsFor(verdict.Correct, verdict.Marks, item.MaxMarks);
                 answer.AiSummary     = verdict.Feedback;
                 answer.UpdatedAt     = DateTime.UtcNow;
             }
@@ -341,6 +343,59 @@ public class GradingService
         catch
         {
             // Leave these answers ungraded (shown as N/A); the teacher can grade manually.
+        }
+    }
+
+    /// <summary>A drawn answer waiting to be marked: the saved picture and the question it answers.</summary>
+    public sealed record SketchToGrade(StudentAnswer Answer, QuestionDto Question, string QuestionText, byte[] Png);
+
+    /// <summary>
+    /// Marks drawn answers from the picture with a vision model. Judging a freehand sketch is far
+    /// less reliable than checking a typed answer, so the AI's mark is only a first guess: every
+    /// drawing stays flagged for the teacher to confirm. An AI failure leaves the answer unmarked.
+    /// </summary>
+    public async Task GradeSketchesAsync(IReadOnlyList<SketchToGrade> items)
+    {
+        if (items.Count == 0) return;
+
+        // The AI calls run side by side; only the results below touch the tracked entities.
+        var verdicts = await Task.WhenAll(items.Select(async item =>
+        {
+            try
+            {
+                return await _handwriting.GradeSketchAsync(
+                    item.QuestionText, item.Question.AnswerKey, item.Question.MaxPoints, item.Png, item.Answer.AnswerValue);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Sketch grading failed for question index {Index}", item.Answer.QuestionIndex);
+                return null;
+            }
+        }));
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var answer  = items[i].Answer;
+            var verdict = verdicts[i];
+            if (answer.TeacherOverridden) continue;
+
+            answer.NeedsReview = true;
+            answer.UpdatedAt   = DateTime.UtcNow;
+
+            if (verdict is null)
+            {
+                answer.IsCorrect     = null;
+                answer.PointsAwarded = null;
+                answer.AiConfidence  = null;
+                answer.ReviewNote    = "Drawn answer: the AI could not mark this drawing. Please mark it yourself.";
+                continue;
+            }
+
+            answer.IsCorrect     = verdict.Correct;
+            answer.PointsAwarded = PointsFor(verdict.Correct, verdict.Marks, items[i].Question.MaxPoints);
+            answer.AiSummary     = verdict.Feedback;
+            answer.AiConfidence  = verdict.Confidence;
+            answer.ReviewNote    = "Drawn answer: the AI's mark is only a first guess. Please look at the drawing and confirm the marks.";
         }
     }
 
@@ -395,9 +450,45 @@ public class GradingService
         result.AiSummary = $"{correctCount} of {totalQuestions} questions correct.";
     }
 
+    /// <summary>
+    /// Recomputes the score as marks gained out of marks available, so a 4-mark question
+    /// weighs four times a 1-mark one. The summary names the marks once any question is
+    /// worth more than one.
+    /// </summary>
+    public void RecomputeResultScore(StudentResult result, List<QuestionDto> questions, int passThreshold)
+    {
+        var totalQuestions = CountAnswerableQuestions(questions);
+        var totalMarks     = TotalMarks(questions);
+        var correctCount   = result.StudentAnswers.Count(a => a.IsCorrect == true);
+
+        result.RecomputeScore(totalQuestions, passThreshold, totalMarks);
+        result.AiSummary = totalMarks == totalQuestions
+            ? $"{correctCount} of {totalQuestions} questions correct."
+            : $"{correctCount} of {totalQuestions} questions correct · " +
+              $"{FormatMarks(result.StudentAnswers.Sum(a => a.PointsAwarded ?? 0m))} of {FormatMarks(totalMarks)} marks.";
+    }
+
     /// <summary>Count of questions a student can actually answer — excludes group headers.</summary>
     public int CountAnswerableQuestions(List<QuestionDto> questions)
         => questions.Count(q => !IsGroupHeader(questions, q));
+
+    /// <summary>Marks available across the questions a student can answer; a shared stem carries none.</summary>
+    public static decimal TotalMarks(List<QuestionDto> questions)
+        => questions.Where(q => string.IsNullOrEmpty(q.Id) || !questions.Any(x => x.GroupId == q.Id))
+                    .Sum(q => q.MaxPoints);
+
+    /// <summary>
+    /// Points for an AI verdict: the marks the AI gave when it gave some, otherwise all or nothing,
+    /// never outside 0..max. A verdict of "correct" always earns full marks.
+    /// </summary>
+    public static decimal PointsFor(bool correct, decimal? marks, decimal maxMarks)
+    {
+        if (correct) return maxMarks;
+        return marks is { } m ? Math.Clamp(Math.Round(m * 2, MidpointRounding.AwayFromZero) / 2, 0m, maxMarks) : 0m;
+    }
+
+    private static string FormatMarks(decimal value)
+        => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// A question referenced by another question's GroupId (e.g. the "Q2" stem
@@ -446,7 +537,7 @@ public class GradingService
         if (!answer.TeacherOverridden)
         {
             answer.IsCorrect     = questionCorrect;
-            answer.PointsAwarded = questionCorrect ? 1m : 0m;
+            answer.PointsAwarded = questionCorrect ? question.MaxPoints : 0m;
         }
     }
 

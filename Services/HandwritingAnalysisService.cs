@@ -326,6 +326,90 @@ public class HandwritingAnalysisService
         }
     }
 
+    // ── 4. Drawn answers (sketch on a diagram) ───────────────────────────────
+
+    private const string SketchSystemPrompt = """
+        You are an experienced maths examiner marking a student's sketch.
+        The image shows the question's diagram (if it had one) with the student's own pen
+        strokes drawn on top. Strokes may be black, blue or red; printed parts of the
+        diagram were there before the student drew.
+
+        Mark it the way an exam mark scheme marks sketches:
+        - Judge the essential features: the right general shape, the right position and
+          orientation, symmetry where required (e.g. an inverse function is the reflection
+          in y = x), intercepts, turning points and asymptotes the question needs, and the
+          right domain (where the curve starts and stops).
+        - A hand-drawn sketch is never exact. Do not take marks off for wobbly lines,
+          imperfect scale or small inaccuracies that a fair examiner would accept.
+        - If the student drew nothing meaningful, or drew something unrelated, give 0.
+        - Award whole marks from 0 to the marks available. "correct" is true only when
+          the sketch earns full marks.
+        - If the drawing is hard to read, or you are not sure, say so with a LOW confidence.
+        - Write the feedback in one or two short, simple English sentences for the student.
+
+        Return ONLY valid JSON — no markdown fences, no explanation:
+        { "correct": true, "marks": 1, "confidence": 0.0, "feedback": "<short feedback>" }
+        """;
+
+    /// <summary>
+    /// Marks a drawn answer from the picture (the diagram with the student's strokes).
+    /// Throws when the AI call fails; returns the model's verdict otherwise.
+    /// </summary>
+    public async Task<SketchVerdictDto> GradeSketchAsync(
+        string questionText, string? answerKey, decimal maxMarks, byte[] png, string? writtenAnswer)
+    {
+        var (apiKey, baseUrl, _) = GetConfig();
+
+        var userText =
+            $"Question:\n{questionText}\n\n" +
+            $"Marks available: {maxMarks:0.##}\n" +
+            $"Expected answer / mark scheme: {(string.IsNullOrWhiteSpace(answerKey) ? "(not provided — work out what the sketch should show)" : answerKey)}\n" +
+            (string.IsNullOrWhiteSpace(writtenAnswer) ? "" : $"The student also wrote: {writtenAnswer}\n") +
+            "\nThe image is the student's drawing.";
+
+        var payload = new Dictionary<string, object>
+        {
+            ["model"]       = GetVisionModel(),
+            ["temperature"] = 0.1,
+            ["messages"]    = new object[]
+            {
+                new { role = "system", content = SketchSystemPrompt },
+                new
+                {
+                    role    = "user",
+                    content = new object[]
+                    {
+                        new { type = "image_url", image_url = new { url = $"data:image/png;base64,{Convert.ToBase64String(png)}", detail = "high" } },
+                        new { type = "text", text = userText }
+                    }
+                }
+            }
+        };
+
+        using var http = _httpFactory.CreateClient();
+        http.Timeout = TimeSpan.FromMinutes(3);
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+
+        var response = await http.PostAsync($"{baseUrl.TrimEnd('/')}/chat/completions",
+            new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json"));
+        var body = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new Exception($"AI service returned {(int)response.StatusCode}. {TryExtractErrorMessage(body)}");
+
+        using var doc = JsonDocument.Parse(body);
+        var raw = doc.RootElement.GetProperty("choices")[0]
+                     .GetProperty("message").GetProperty("content").GetString() ?? "{}";
+
+        raw = raw.Trim();
+        if (raw.StartsWith("```")) raw = raw[(raw.IndexOf('\n') + 1)..];
+        if (raw.EndsWith("```"))   raw = raw[..raw.LastIndexOf("```")];
+        raw = JsonSanitizer.FixInvalidBackslashes(raw.Trim());
+
+        return JsonSerializer.Deserialize<SketchVerdictDto>(raw,
+                   new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+               ?? throw new Exception("The AI reply for the drawing was empty.");
+    }
+
     // ── Shared HTTP call ─────────────────────────────────────────────────────
     private async Task<HandwritingAnalysisDto> CallOpenRouterAsync(
         string apiKey, string baseUrl, object payload)
@@ -406,4 +490,16 @@ public class HandwritingAnalysisService
         catch { }
         return "";
     }
+}
+
+/// <summary>The AI's mark for a drawn answer.</summary>
+public class SketchVerdictDto
+{
+    [System.Text.Json.Serialization.JsonConverter(typeof(LenientBoolConverter))]
+    public bool     Correct    { get; set; }
+    [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)]
+    public decimal? Marks      { get; set; }
+    [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)]
+    public double   Confidence { get; set; }
+    public string   Feedback   { get; set; } = string.Empty;
 }

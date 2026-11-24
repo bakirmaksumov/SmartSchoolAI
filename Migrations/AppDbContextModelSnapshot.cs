@@ -698,6 +698,9 @@ namespace SmartSchoolAI.Migrations
                     b.Property<string>("ReviewNote")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SketchPath")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("StudentResultId")
                         .HasColumnType("TEXT");
 

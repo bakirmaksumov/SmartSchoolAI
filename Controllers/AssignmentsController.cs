@@ -379,7 +379,17 @@ public class AssignmentsController : Controller
     // edit drawer), so it only ever needs to flip one field, not resend everything.
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> ToggleRequireWork(Guid id, int index)
+    public Task<IActionResult> ToggleRequireWork(Guid id, int index)
+        => ToggleQuestionFlagAsync(id, index, "requireWork");
+
+    // POST: /Assignments/ToggleRequireDrawing/id — flips whether the student answers this
+    // question by drawing on a sketch pad (e.g. "sketch the graph on this diagram").
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public Task<IActionResult> ToggleRequireDrawing(Guid id, int index)
+        => ToggleQuestionFlagAsync(id, index, "requireDrawing");
+
+    private async Task<IActionResult> ToggleQuestionFlagAsync(Guid id, int index, string flag)
     {
         var assignment = await FindEditableAssignmentAsync(id);
         if (assignment is null) return NotFound();
@@ -390,8 +400,9 @@ public class AssignmentsController : Controller
         if (index >= 0 && index < list.Count)
         {
             var node = System.Text.Json.Nodes.JsonNode.Parse(list[index].GetRawText())!.AsObject();
-            var current = node.TryGetPropertyValue("requireWork", out var rw) && rw is not null && rw.GetValue<bool>();
-            node["requireWork"] = !current;
+            var current = node.TryGetPropertyValue(flag, out var rw) && rw is not null
+                          && rw.GetValueKind() == JsonValueKind.True;
+            node[flag] = !current;
             list[index] = JsonDocument.Parse(node.ToJsonString()).RootElement.Clone();
 
             assignment.Questions = JsonSerializer.Serialize(list);
@@ -484,6 +495,35 @@ public class AssignmentsController : Controller
             await _db.SaveChangesAsync();
         }
 
+        return RedirectToAction(nameof(Edit), new { id });
+    }
+
+    // POST: /Assignments/AddQuestionWithParts/id — adds a question with parts (a), (b), …
+    // in one step: a parent with no text yet and the given number of empty parts.
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> AddQuestionWithParts(Guid id, int parts = 2)
+    {
+        var assignment = await FindEditableAssignmentAsync(id);
+        if (assignment is null) return NotFound();
+
+        var list = JsonSerializer.Deserialize<List<JsonElement>>(assignment.Questions ?? "[]")
+                   ?? new List<JsonElement>();
+
+        // The parent holds the shared text, which may stay empty: many exam questions go straight into "(a)".
+        var parentId = Guid.NewGuid().ToString();
+        list.Add(JsonSerializer.SerializeToElement(new { id = parentId, title = "", type = "0", answerKey = "" }));
+        for (var p = 0; p < Math.Clamp(parts, 2, 8); p++)
+            list.Add(JsonSerializer.SerializeToElement(new
+            {
+                id = Guid.NewGuid().ToString(), title = "", type = "0", answerKey = "", marks = 1, groupId = parentId
+            }));
+
+        assignment.Questions = JsonSerializer.Serialize(list);
+        assignment.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        TempData["Success"] = "Question with parts added. Click Edit on each part to write it and set its marks.";
         return RedirectToAction(nameof(Edit), new { id });
     }
 
@@ -1516,6 +1556,9 @@ public class AssignmentsController : Controller
                             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                         ?? new();
 
+        var allQuestions = JsonSerializer.Deserialize<List<SmartSchoolAI.Models.Dtos.QuestionDto>>(
+                               result.Assignment.Questions) ?? new();
+
         foreach (var ov in overrides)
         {
             var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == ov.QuestionIndex);
@@ -1532,8 +1575,12 @@ public class AssignmentsController : Controller
                 _db.StudentAnswers.Add(answer);
             }
 
+            // Marks stay within what the question is worth; extra credit goes through the bonus below.
+            var maxPoints = ov.QuestionIndex >= 0 && ov.QuestionIndex < allQuestions.Count
+                ? allQuestions[ov.QuestionIndex].MaxPoints : 1m;
+
             answer.IsCorrect         = ov.IsCorrect;
-            answer.PointsAwarded     = ov.Points;
+            answer.PointsAwarded     = Math.Clamp(ov.Points, 0m, maxPoints);
             answer.TeacherComment    = string.IsNullOrWhiteSpace(ov.Comment) ? null : ov.Comment.Trim();
             answer.TeacherOverridden = true;
             answer.UpdatedAt         = DateTime.UtcNow;
@@ -1551,11 +1598,9 @@ public class AssignmentsController : Controller
 
         // Only questions a student can answer count: a stem that other questions point to
         // through GroupId has no answer box and is excluded, exactly as when the work was first graded.
-        var allQuestions = JsonSerializer.Deserialize<List<SmartSchoolAI.Models.Dtos.QuestionDto>>(
-                               result.Assignment.Questions) ?? new();
         var totalQuestions = allQuestions.Count(q =>
             string.IsNullOrEmpty(q.Id) || !allQuestions.Any(x => x.GroupId == q.Id));
-        result.RecomputeScore(totalQuestions, result.Assignment.PassThreshold);
+        result.RecomputeScore(totalQuestions, result.Assignment.PassThreshold, GradingService.TotalMarks(allQuestions));
 
         await _db.SaveChangesAsync();
 

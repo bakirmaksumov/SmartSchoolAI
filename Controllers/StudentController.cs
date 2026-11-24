@@ -338,7 +338,7 @@ public class StudentController : Controller
                 existing.QuestionId    = q.Id ?? $"q{i}";
                 existing.AnswerValue   = answerValue;
                 existing.IsCorrect     = isCorrect;
-                existing.PointsAwarded = isCorrect == true ? 1m : 0m;
+                existing.PointsAwarded = isCorrect == true ? q.MaxPoints : 0m;
             }
 
             // "Show your work" is never auto-graded — it's kept for the teacher.
@@ -348,19 +348,75 @@ public class StudentController : Controller
             existing.UpdatedAt = DateTime.UtcNow;
         }
 
+        // Drawn answers: saved as a picture and marked from it, not from the typed text.
+        var sketches = await SaveSketchesAsync(formData, questions, result, studentId);
+
         // AI-grade the answers that exact matching couldn't decide
         // (no answer key, or a text answer written in an equivalent form).
         await _grader.GradeUngradedAnswersAsync(result, questions);
+        await _grader.GradeSketchesAsync(sketches);
 
         // Finalise: mark submitted and score it. AttemptNumber was assigned when
         // the in-progress result was created (kept unique per assignment/student).
         result.IsSubmitted = true;
         result.SubmittedAt = DateTime.UtcNow;
-        _grader.RecomputeResultScore(result, _grader.CountAnswerableQuestions(questions), assignment.PassThreshold);
+        _grader.RecomputeResultScore(result, questions, assignment.PassThreshold);
 
         await _db.SaveChangesAsync();
 
         return RedirectToAction(nameof(AssignmentResult), new { assignmentId, resultId = result.Id });
+    }
+
+    /// <summary>Largest drawing accepted from the sketch pad (decoded bytes).</summary>
+    private const int MaxSketchBytes = 3 * 1024 * 1024;
+
+    /// <summary>
+    /// Stores the picture from each drawing question's sketch pad (posted as a PNG data URL in
+    /// "sketchpng_{i}") on the student's answer, and returns the drawings to mark. Only questions
+    /// the teacher marked as drawing questions are read, and only real PNG data is kept.
+    /// </summary>
+    private async Task<List<GradingService.SketchToGrade>> SaveSketchesAsync(
+        Dictionary<string, string> formData, List<QuestionDto> questions, StudentResult result, Guid studentId)
+    {
+        var toGrade = new List<GradingService.SketchToGrade>();
+        const string prefix = "data:image/png;base64,";
+
+        for (int i = 0; i < questions.Count; i++)
+        {
+            var q = questions[i];
+            if (!q.RequireDrawing || _grader.IsGroupHeader(questions, q)) continue;
+            if (!formData.TryGetValue($"sketchpng_{i}", out var dataUrl) ||
+                string.IsNullOrEmpty(dataUrl) || !dataUrl.StartsWith(prefix, StringComparison.Ordinal))
+                continue;
+
+            byte[] png;
+            try { png = Convert.FromBase64String(dataUrl[prefix.Length..]); }
+            catch (FormatException) { continue; }
+            if (png.Length == 0 || png.Length > MaxSketchBytes || !FileSignature.IsSupportedImage(png) || png[0] != 0x89)
+                continue;
+
+            var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == i);
+            if (answer is null)
+            {
+                answer = new StudentAnswer { StudentResultId = result.Id, QuestionIndex = i, QuestionId = q.Id ?? $"q{i}" };
+                result.StudentAnswers.Add(answer);
+                _db.StudentAnswers.Add(answer);
+            }
+
+            answer.SketchPath = await SubmissionStorage.SaveAsync(_env, png, ".png", studentId);
+            answer.UpdatedAt  = DateTime.UtcNow;
+
+            // A teacher's grade stands, and a photographed solution was already marked on its own.
+            if (answer.TeacherOverridden || !string.IsNullOrEmpty(answer.ImagePath)) continue;
+
+            var parent = string.IsNullOrEmpty(q.GroupId) ? null : questions.FirstOrDefault(x => x.Id == q.GroupId);
+            var questionText = parent is null || string.IsNullOrWhiteSpace(parent.Title)
+                ? q.Title
+                : $"{parent.Title}\n{q.Title}";
+            toGrade.Add(new GradingService.SketchToGrade(answer, q, questionText, png));
+        }
+
+        return toGrade;
     }
 
     // ── INSTANT FEEDBACK ─────────────────────────────────────────────────────────

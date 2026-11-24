@@ -763,6 +763,18 @@
     btn.classList.toggle('correct', parts.every(function (i) { return pillResult[i] === 'correct'; }));
   }
 
+  // For widgets that keep their own answer data (the sketch pad): the value goes into the same
+  // answers{} the draft is saved from, so it survives a reload and is cleared on submit like the rest.
+  window.QuizAnswers = {
+    get: function (key) { return answers[key] || ''; },
+    set: function (key, value) {
+      if (value) answers[key] = value; else delete answers[key];
+      dirty = true;
+      syncHiddenInput(key);
+      saveDraft();
+    }
+  };
+
   window.QuizPills = {
     setAnswered: function (idx, on) { pillAnswered[idx] = !!on; refreshPill(idx); },
     setResult:   function (idx, result) {
@@ -851,6 +863,8 @@
       for (var i = 0; i < totalQuestions; i++) {
         var h = document.getElementById('hidden_q_' + i);
         if (h && h.dataset.header === 'true') continue;   // a shared stem has nothing to answer
+        var sketch = document.getElementById('sketchpng_' + i);
+        if (sketch && sketch.value) continue;             // answered by drawing
         if (!h || (h.value || '').trim() === '') unanswered++;
       }
       var warnEl = document.getElementById('submitWarnText');

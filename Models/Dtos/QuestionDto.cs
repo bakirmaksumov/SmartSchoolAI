@@ -47,6 +47,25 @@ public class QuestionDto
     public bool RequireWork { get; set; }
 
     /// <summary>
+    /// Marks the question is worth, as printed on exam papers ("[4]"). Null or
+    /// missing means 1, so assignments saved before marks existed score as before.
+    /// </summary>
+    [JsonPropertyName("marks")]
+    [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
+    public int? Marks { get; set; }
+
+    /// <summary>The most this question can score: its marks, kept between 1 and 100.</summary>
+    [JsonIgnore]
+    public decimal MaxPoints => Marks is > 0 ? Math.Min(Marks.Value, 100) : 1;
+
+    /// <summary>
+    /// Teacher-set per question: the student answers by drawing (e.g. "sketch the
+    /// graph of y = f⁻¹(x) on this diagram") on a sketch pad over the question's diagram.
+    /// </summary>
+    [JsonPropertyName("requireDrawing")]
+    public bool RequireDrawing { get; set; }
+
+    /// <summary>
     /// When set, this question is a subpoint (e.g. "2a") nested under the
     /// question whose Id matches this value — rendered indented under that
     /// parent and numbered relative to it ("2a", "2b", ...), but otherwise a
