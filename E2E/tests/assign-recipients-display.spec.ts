@@ -79,10 +79,14 @@ async function sees(student: string, key: string): Promise<boolean> {
   return (await page.getByText(title(key), { exact: true }).count()) > 0;
 }
 
+/**
+ * Whether the student is let into the assignment by its direct link. The answer itself is read (200 = the page;
+ * a redirect away or 403 = refused) without following redirects: in Production the app treats every request as
+ * HTTPS (it runs behind a TLS proxy), so a refusal's redirect points at https:// and can't be followed here.
+ */
 async function canOpen(student: string, key: string): Promise<boolean> {
-  const page = students[student];
-  const response = await page.goto(`/Student/TakeAssignment?assignmentId=${ids[key]}`);
-  return response?.status() === 200 && /TakeAssignment/i.test(page.url());
+  const response = await students[student].request.get(`/Student/TakeAssignment?assignmentId=${ids[key]}`, { maxRedirects: 0 });
+  return response.status() === 200;
 }
 
 async function teacherToken(): Promise<string> {
