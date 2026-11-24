@@ -69,10 +69,10 @@ public class StudentController : Controller
             .Select(cs => cs.ClassId)
             .ToListAsync();
 
-        var assignedAssignmentIds = await _db.AssignmentStudents
+        var myEnrollments = await _db.AssignmentStudents
             .Where(asn => asn.StudentId == studentId)
-            .Select(asn => asn.AssignmentId)
             .ToListAsync();
+        var assignedAssignmentIds = myEnrollments.Select(asn => asn.AssignmentId).ToList();
 
         var classes = await _db.Classes
             .Where(c => enrolledClassIds.Contains(c.Id) && !c.IsArchived)
@@ -90,6 +90,8 @@ public class StudentController : Controller
             .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.AttemptNumber).First());
 
         ViewBag.SubmittedResults = latestResults;
+        var myDue = MyDueDates(classes.SelectMany(c => c.Assignments), myEnrollments);
+        ViewBag.MyDue = myDue;
 
         var averageScore = latestResults.Values.Any() 
             ? (int)Math.Round(latestResults.Values.Average(r => r.Score)) 
@@ -99,7 +101,7 @@ public class StudentController : Controller
         var allActiveAssignments = classes
             .SelectMany(c => c.Assignments)
             .Where(a => !latestResults.ContainsKey(a.Id))
-            .OrderBy(a => a.Deadline ?? DateTime.MaxValue)
+            .OrderBy(a => myDue[a.Id] ?? DateTime.MaxValue)
             .Take(5)
             .ToList();
         ViewBag.UpcomingDeadlines = allActiveAssignments;
@@ -142,6 +144,15 @@ public class StudentController : Controller
         return View(classes);
     }
 
+    /// <summary>Each assignment's due date for this student: their personal one if the teacher set it.</summary>
+    private static Dictionary<Guid, DateTime?> MyDueDates(IEnumerable<Assignment> assignments, List<AssignmentStudent> mine)
+    {
+        var overrides = mine.ToDictionary(x => x.AssignmentId, x => x.DueDateOverride);
+        return assignments.DistinctBy(a => a.Id).ToDictionary(
+            a => a.Id,
+            a => overrides.TryGetValue(a.Id, out var personal) && personal.HasValue ? personal : a.Deadline);
+    }
+
     // ── JOIN CLASS ─────────────────────────────────────────────────────────────
 
     // Same abuse case as StudentRegister's invite-code check: an unthrottled guesser
@@ -182,10 +193,10 @@ public class StudentController : Controller
         if (cls is null) return NotFound();
 
         // Only show assignments this student is explicitly assigned to
-        var assignedIds = await _db.AssignmentStudents
+        var myEnrollments = await _db.AssignmentStudents
             .Where(asn => asn.StudentId == studentId)
-            .Select(asn => asn.AssignmentId)
             .ToListAsync();
+        var assignedIds = myEnrollments.Select(asn => asn.AssignmentId).ToList();
 
         var assignments = await _db.Assignments
             .Where(a => a.ClassId == classId
@@ -201,6 +212,7 @@ public class StudentController : Controller
             .ToListAsync();
 
         ViewBag.Class   = cls;
+        ViewBag.MyDue   = MyDueDates(assignments, myEnrollments);
         // One entry per assignment — prefer the submitted result, else the latest in-progress.
         ViewBag.Results = myResults
             .GroupBy(r => r.AssignmentId)
@@ -263,6 +275,7 @@ public class StudentController : Controller
 
         ViewBag.Assignment    = assignment;
         ViewBag.AttemptNumber = submittedCount + 1;
+        ViewBag.MyDue         = enrollment.DueDateOverride ?? assignment.Deadline;
 
         return View(questions);
     }

@@ -79,7 +79,7 @@ export async function createDraftAssignment(page: Page, title: string, className
   await page.locator('textarea[name="description"]').fill("Created by the E2E suite.");
   await page.locator("#classSelect").selectOption({ label: className });
   await page.locator("#typeSelect").selectOption("0");
-  await page.getByRole("button", { name: "Save as Draft" }).click();
+  await page.getByRole("button", { name: "Save and add questions" }).click();
   await expect(page).toHaveURL(/\/Assignments\/Edit\/[0-9a-f-]+/i);
   await page.waitForLoadState("load");
   return page.url().match(/\/Assignments\/Edit\/([0-9a-f-]+)/i)![1];
@@ -138,12 +138,56 @@ export async function addQuestion(page: Page, q: QuestionSpec): Promise<void> {
   await page.waitForLoadState("load");
 }
 
-export async function publishAndAssignAll(page: Page, assignmentId: string): Promise<void> {
-  page.once("dialog", dialog => dialog.accept());
-  await page.getByRole("button", { name: /^Assign/ }).click();
+export interface AssignOptions {
+  /** Whole class (default) or only these students, by full name. */
+  students?: string[];
+  /** For the whole class: what happens to students who join later. Default: the suggestion for the type. */
+  lateJoin?: "auto" | "approval";
+  /** For a draft: when students may start / the due date, as datetime-local values ("2099-01-01T10:00"). */
+  opens?: string;
+  due?: string;
+}
+
+/**
+ * The teacher's single "Assign to N students" action from the assignment editor (or the assignment page for
+ * an active one). Returns the success message, e.g. "Assigned to 3 students from Year 12 IT."
+ */
+export async function assignTo(page: Page, assignmentId: string, options: AssignOptions = {}): Promise<string> {
+  if (!new RegExp(`/Assignments/(Edit|Details)/${assignmentId}`, "i").test(page.url())) {
+    await page.goto(`/Assignments/Edit/${assignmentId}`);
+  }
+  await page.locator("#openAssignBtn").click();
+  const modal = page.locator("#assignModal");
+  await expect(modal).toBeVisible();
+
+  if (options.students) {
+    await modal.locator("#audSelected").check();
+    for (const name of options.students) {
+      await modal.locator(".assign-student", { hasText: name }).locator('input[type="checkbox"]').check();
+    }
+  } else {
+    await modal.locator("#audEntire").check();
+    if (options.lateJoin === "auto") await modal.locator("#lateAuto").check();
+    if (options.lateJoin === "approval") await modal.locator("#lateApproval").check();
+  }
+  if (options.opens !== undefined) await modal.locator("#assignOpens").fill(options.opens);
+  if (options.due !== undefined) await modal.locator("#assignDue").fill(options.due);
+
+  await modal.locator("#assignSubmit").click();
   await expect(page).toHaveURL(new RegExp(`/Assignments/Details/${assignmentId}`, "i"));
-  await page.getByRole("button", { name: "Assign All" }).click();
-  await expect(page.getByRole("heading", { name: /Assigned Students \(\d+\)/ })).toBeVisible();
+  const success = page.locator(".alert-success").first();
+  await expect(success).toContainText(/(Assigned to|Added|No one new)/);
+  return (await success.innerText()).trim();
+}
+
+/**
+ * Assigns a draft to the whole class in one action (formerly Assign, then Assign All). Like Assign All, it gives
+ * the work to the students in the class now; students who join later only get a request for the teacher, never
+ * the work itself, so tests that add a student afterwards still see an unassigned student.
+ */
+export async function publishAndAssignAll(page: Page, assignmentId: string): Promise<void> {
+  await assignTo(page, assignmentId, { lateJoin: "approval" });
+  await expect(page.locator("#submittedSummary")).toBeVisible();
 }
 
 export async function submitAssignment(page: Page): Promise<void> {

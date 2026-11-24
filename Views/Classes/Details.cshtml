@@ -57,8 +57,12 @@
     </a>
   </li>
   <li class="nav-item">
-    <a class="@TabClass("students")" href="/Classes/Details/@cls.Id?tab=students">
+    <a class="@TabClass("students")" href="/Classes/Details/@cls.Id?tab=students@(Model.ReturnUrl is null ? "" : "&returnUrl=" + Uri.EscapeDataString(Model.ReturnUrl))">
       <i class="bx bx-group me-1"></i>Students <span class="badge bg-label-secondary ms-1">@cls.ClassStudents.Count</span>
+      @if (Model.PendingRequests.Any())
+      {
+        <span class="badge bg-warning ms-1" title="Waiting for your decision">@Model.PendingRequests.Count</span>
+      }
     </a>
   </li>
   <li class="nav-item">
@@ -73,7 +77,7 @@
     <div class="card mb-4">
       <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Assignments (@cls.Assignments.Count)</h5>
-        <a href="/Assignments/Create" class="btn btn-primary btn-sm">
+        <a href="/Assignments/Create?classId=@cls.Id" class="btn btn-primary btn-sm" id="newAssignmentForClass">
           <i class="bx bx-plus me-1"></i> New
         </a>
       </div>
@@ -94,7 +98,7 @@
               <tr>
                 <td colspan="5" class="text-center py-4 text-muted">
                   No assignments yet.
-                  <a href="/Assignments/Create">Create one!</a>
+                  <a href="/Assignments/Create?classId=@cls.Id">Create one!</a>
                 </td>
               </tr>
             }
@@ -116,7 +120,7 @@
                       @a.Status
                     </span>
                   </td>
-                  <td>@(a.Deadline?.ToString("dd MMM") ?? "—")</td>
+                  <td>@SmartSchoolAI.Services.SchoolTime.Show(a.Deadline, "dd MMM")</td>
                   <td>
                     <a href="/Assignments/Details/@a.Id" class="btn btn-sm btn-icon btn-outline-primary">
                       <i class="bx bx-show"></i>
@@ -226,10 +230,101 @@
 
 <!-- ══ TAB: STUDENTS ══════════════════════════════════════════════════════ -->
 <div class="@PaneClass("students")">
+    @if (Model.ReturnUrl is not null)
+    {
+      <div class="alert alert-primary d-flex flex-wrap align-items-center justify-content-between gap-2" id="returnToDraft">
+        <span>
+          <i class="bx bx-key me-1"></i>Share the class code <strong class="fs-5 mx-1" id="inviteCodeValue">@cls.InviteCode</strong>
+          with your students. They join at <strong>Join a Class</strong> (or when they sign up).
+        </span>
+        <a href="@Model.ReturnUrl" class="btn btn-sm btn-primary" id="backToDraftLink">
+          <i class="bx bx-arrow-back me-1"></i>Back to your assignment
+        </a>
+      </div>
+    }
+
+    @if (Model.PendingRequests.Any())
+    {
+      var pending = Model.PendingRequests;
+      <div class="card mb-4 border border-warning" id="pendingRequests">
+        <div class="card-header">
+          <h5 class="mb-0"><i class="bx bx-time-five me-2 text-warning"></i>Waiting for your decision</h5>
+          <small class="text-muted">
+            @{ var newStudents = pending.Select(r => r.StudentId).Distinct().Count(); }
+            @(newStudents == 1 ? "1 new student" : $"{newStudents} new students") joined after work was given to the whole class.
+            Choose who gets which assignment.
+          </small>
+        </div>
+        <form method="post" asp-controller="Classes" asp-action="DecideRequests" id="decideForm">
+          @Html.AntiForgeryToken()
+          <input type="hidden" name="classId" value="@cls.Id" />
+          <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th style="width:2.5rem;">
+                    <input class="form-check-input" type="checkbox" id="pendingAll" checked aria-label="Select all" />
+                  </th>
+                  <th>Student</th>
+                  <th>Assignment</th>
+                  <th>Due date <span class="text-muted fw-normal text-lowercase small">· @SmartSchoolAI.Services.SchoolTime.Label</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @foreach (var r in pending.OrderBy(r => r.Student.FullName).ThenBy(r => r.Assignment.Title))
+                {
+                  var deadline = r.Assignment.Deadline;
+                  <tr class="pending-row">
+                    <td>
+                      <input class="form-check-input pending-check" type="checkbox" name="requestIds" value="@r.Id" checked
+                             data-student="@r.StudentId" data-assignment="@r.AssignmentId"
+                             aria-label="@r.Student.FullName — @r.Assignment.Title" />
+                    </td>
+                    <td>
+                      <a class="fw-semibold" href="/Classes/StudentWork?studentId=@r.StudentId&classId=@cls.Id&returnUrl=@Uri.EscapeDataString($"/Classes/Details/{cls.Id}?tab=students")">@r.Student.FullName</a>
+                      <small class="d-block text-muted">joined @SmartSchoolAI.Services.SchoolTime.Show(r.RequestedAt, "dd MMM HH:mm")</small>
+                    </td>
+                    <td>
+                      <a href="/Assignments/Details/@r.AssignmentId">@r.Assignment.Title</a>
+                      <small class="d-block text-muted">@r.Assignment.Type</small>
+                    </td>
+                    <td>
+                      <div class="d-flex align-items-center gap-2 pending-due">
+                        <span class="pending-due-text">@SmartSchoolAI.Services.SchoolTime.Show(deadline, "dd MMM HH:mm", "No due date")</span>
+                        <input type="datetime-local" name="due_@r.Id" class="form-control form-control-sm d-none pending-due-input"
+                               style="max-width:200px;" disabled
+                               value="@SmartSchoolAI.Services.SchoolTime.Input(deadline)" aria-label="Personal due date for @r.Student.FullName" />
+                        <button type="button" class="btn btn-sm btn-icon btn-outline-primary pending-due-edit"
+                                title="Give @r.Student.FullName a personal due date">
+                          <i class="bx bx-edit"></i>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          <div class="card-body border-top">
+            <div class="small text-muted mb-2" id="pendingSummary"></div>
+            <div class="d-flex flex-wrap gap-2">
+              <button type="submit" name="decision" value="approve" class="btn btn-primary" id="pendingApprove">Approve</button>
+              <button type="button" class="btn btn-outline-secondary" id="pendingLater"
+                      title="Keep these requests waiting and decide another time">Decide later</button>
+              <button type="submit" name="decision" value="decline" class="btn btn-outline-danger ms-auto" id="pendingDecline"
+                      formnovalidate onclick="return confirm('Decline the selected requests? These students will not get those assignments.')">
+                Decline selected
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    }
+
     <div class="card" id="students">
       <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="bx bx-group me-2"></i>Enrolled Students (@cls.ClassStudents.Count)</h5>
-        <small class="text-muted">Use the ⋯ menu to edit, reset a password or remove</small>
+        <small class="text-muted">Click a name to see their work · ⋯ to edit, reset a password or remove</small>
       </div>
       <div class="table-responsive table-has-dropdown">
         <table class="table table-hover mb-0">
@@ -268,7 +363,8 @@
                         </span>
                       </div>
                       <div>
-                        <strong class="d-block">@cs.Student.FullName</strong>
+                        <a class="fw-semibold d-block student-link"
+                           href="/Classes/StudentWork?studentId=@cs.StudentId&classId=@cls.Id&returnUrl=@Uri.EscapeDataString($"/Classes/Details/{cls.Id}?tab=students")">@cs.Student.FullName</a>
                         <small class="text-muted">@cs.Student.Email</small>
                       </div>
                     </div>
@@ -573,3 +669,65 @@
     </div>
   </div>
 </div>
+
+@section Scripts {
+<script>
+  // Waiting requests: the button says exactly what will happen to the chosen (student, assignment) pairs.
+  (function () {
+    const form = document.getElementById('decideForm');
+    if (!form) return;
+    const checks   = () => Array.from(form.querySelectorAll('.pending-check'));
+    const all      = document.getElementById('pendingAll');
+    const approve  = document.getElementById('pendingApprove');
+    const decline  = document.getElementById('pendingDecline');
+    const summary  = document.getElementById('pendingSummary');
+    const plural   = (n, one, many) => n === 1 ? '1 ' + one : n + ' ' + many;
+
+    function refresh() {
+      const chosen      = checks().filter(c => c.checked);
+      const students    = new Set(chosen.map(c => c.dataset.student)).size;
+      const assignments = new Set(chosen.map(c => c.dataset.assignment)).size;
+      const pairs       = chosen.length;
+
+      approve.disabled = decline.disabled = pairs === 0;
+      if (pairs === 0) {
+        approve.textContent = 'Approve';
+        summary.textContent = 'Nothing selected.';
+      } else if (assignments === 1) {
+        approve.textContent = 'Assign to ' + plural(students, 'student', 'students');
+        summary.textContent = plural(students, 'student', 'students') + ' · 1 assignment';
+      } else {
+        // Several assignments: the unit is a (student, assignment) request, so N counts the chosen pairs.
+        approve.textContent = 'Approve ' + plural(pairs, 'request', 'requests');
+        summary.textContent = plural(students, 'student', 'students') + ' · ' +
+                              plural(assignments, 'assignment', 'assignments') + ' · ' +
+                              plural(pairs, 'request', 'requests');
+      }
+      all.checked = pairs === checks().length;
+      all.indeterminate = pairs > 0 && pairs < checks().length;
+    }
+
+    all.addEventListener('change', () => { checks().forEach(c => c.checked = all.checked); refresh(); });
+    form.addEventListener('change', e => { if (e.target.classList.contains('pending-check')) refresh(); });
+
+    // A personal due date only for the row the teacher edits; the others keep the assignment's own date.
+    form.querySelectorAll('.pending-due-edit').forEach(btn => btn.addEventListener('click', () => {
+      const cell  = btn.closest('.pending-due');
+      const input = cell.querySelector('.pending-due-input');
+      input.disabled = false;
+      input.classList.remove('d-none');
+      cell.querySelector('.pending-due-text').classList.add('d-none');
+      btn.classList.add('d-none');
+      input.focus();
+    }));
+
+    // "Decide later": nothing is sent; every request stays in the queue.
+    document.getElementById('pendingLater').addEventListener('click', () => {
+      document.getElementById('pendingRequests').classList.add('d-none');
+    });
+
+    form.addEventListener('submit', () => setTimeout(() => { approve.disabled = decline.disabled = true; }, 0));
+    refresh();
+  })();
+</script>
+}

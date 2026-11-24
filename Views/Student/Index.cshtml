@@ -125,11 +125,12 @@
                   </div>
                 </div>
                 <div class="text-end flex-shrink-0">
-                  @if (task.Deadline.HasValue)
+                  @{ var taskDue = (ViewBag.MyDue as Dictionary<Guid, DateTime?>)?.GetValueOrDefault((Guid)task.Id) ?? (DateTime?)task.Deadline; }
+                  @if (taskDue.HasValue)
                   {
-                    var isOverdue = task.Deadline.Value < DateTime.UtcNow;
-                    <span class="badge bg-label-@(isOverdue ? "danger" : "warning") d-block mb-1">
-                      <i class="bx bx-calendar me-1"></i>@task.Deadline.Value.ToString("dd MMM HH:mm")
+                    var isOverdue = taskDue.Value < DateTime.UtcNow;
+                    <span class="badge bg-label-@(isOverdue ? "danger" : "warning") d-block mb-1" title="@SmartSchoolAI.Services.SchoolTime.Label">
+                      <i class="bx bx-calendar me-1"></i>@SmartSchoolAI.Services.SchoolTime.Show(taskDue, "dd MMM HH:mm")
                     </span>
                   }
                   <a asp-action="TakeAssignment" asp-route-assignmentId="@task.Id" class="btn btn-xs btn-primary">

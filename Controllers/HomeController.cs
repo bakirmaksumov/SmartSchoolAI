@@ -59,6 +59,9 @@ public class HomeController : Controller
 
         ViewBag.AverageScore = scores.Count > 0 ? (int)scores.Average() : 0;
 
+        // Same query as the list it links to (Assignments/Review), so the number and the list always agree.
+        ViewBag.NeedsReview = await AssignmentsController.ReviewQueueQuery(_db, teacherId).CountAsync();
+
         ViewBag.RecentAssignments = await _db.Assignments
             .Include(a => a.Class)
             .Include(a => a.StudentResults)
@@ -73,8 +76,9 @@ public class HomeController : Controller
                 Type             = a.Type.ToString(),
                 Status           = a.Status.ToString().ToLower(),
                 a.Deadline,
-                SubmissionsCount = a.StudentResults.Count(r => r.IsSubmitted),
-                TotalStudents    = a.Class.ClassStudents.Count
+                // Recipients who handed in at least once, out of everyone the work was given to.
+                SubmissionsCount = a.AssignmentStudents.Count(x => a.StudentResults.Any(r => r.IsSubmitted && r.StudentId == x.StudentId)),
+                TotalStudents    = a.AssignmentStudents.Count
             })
             .ToListAsync();
 

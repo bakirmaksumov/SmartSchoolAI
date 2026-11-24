@@ -116,7 +116,7 @@ test("the teacher creates a class and a published assignment", async () => {
   await teacher.locator('textarea[name="description"]').fill("Created by the system journey.");
   await teacher.locator("#classSelect").selectOption({ label: className });
   await teacher.locator("#typeSelect").selectOption("0");
-  await teacher.getByRole("button", { name: "Save as Draft" }).click();
+  await teacher.getByRole("button", { name: "Save and add questions" }).click();
   await expect(teacher).toHaveURL(/\/Assignments\/Edit\/[0-9a-f-]+/i);
   await teacher.waitForLoadState("load");
   assignmentId = teacher.url().match(/\/Assignments\/Edit\/([0-9a-f-]{36})/i)![1];
@@ -194,7 +194,7 @@ test("after the change every page agrees on 100%: student, teacher, CSV and anal
   expect(csv).not.toContain(",50,");
 
   await teacher.goto(`/Classes/Details/${classId}?tab=students`);
-  await expect(teacher.locator("strong.d-block", { hasText: studentName })).toBeVisible();
+  await expect(teacher.locator("#students a.student-link", { hasText: studentName })).toBeVisible();
 
   await teacher.goto(`/Analytics?classId=${classId}`);
   await expect(teacher.locator("#classSelector")).toBeVisible();

@@ -26,6 +26,7 @@ jobs:
       COMPOSE_PROJECT_NAME: smoke
       # compose.ci.yml points the app at the mock AI and lifts the login rate limit. No real keys here.
       COMPOSE_FILE: compose.yml:compose.ci.yml
+      GIT_SHA: ${{ github.sha }}
       OPENROUTER_API_KEY: ""
       RECAPTCHA_SITE_KEY: ""
       RECAPTCHA_SECRET_KEY: ""
@@ -37,6 +38,11 @@ jobs:
 
       - name: Start the container (fresh volumes)
         run: docker compose up -d
+
+      # Proves the container runs this commit's code, not a cached or older image: the revision label is this
+      # commit, and the newest database migration in this checkout is compiled into the running app.
+      - name: The image is built from this commit
+        run: bash scripts/ci/check-image-revision.sh
 
       - name: Container runs as an unprivileged user
         run: |
@@ -111,6 +117,7 @@ jobs:
     env:
       COMPOSE_PROJECT_NAME: system
       COMPOSE_FILE: compose.yml:compose.ci.yml:compose.system.yml
+      GIT_SHA: ${{ github.sha }}
       OPENROUTER_API_KEY: ""
       RECAPTCHA_SITE_KEY: ""
       RECAPTCHA_SECRET_KEY: ""
@@ -158,6 +165,9 @@ jobs:
         run: |
           docker compose build
           docker compose up -d
+
+      - name: The image is built from this commit
+        run: bash scripts/ci/check-image-revision.sh
 
       - name: Wait until the application is ready
         run: |

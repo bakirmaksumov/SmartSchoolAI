@@ -103,7 +103,9 @@
                     <span class="avatar-initial rounded-circle bg-label-primary">@row.FullName[0]</span>
                   </div>
                   <div>
-                    <strong class="d-block">@row.FullName</strong>
+                    @* Back to this very list, with its class filter and search kept. *@
+                    <a class="fw-semibold d-block student-link"
+                       href="/Classes/StudentWork?studentId=@row.StudentId&classId=@row.ClassId&returnUrl=@Uri.EscapeDataString(Context.Request.Path + Context.Request.QueryString)">@row.FullName</a>
                     <small class="text-muted">@row.Email</small>
                   </div>
                 </div>

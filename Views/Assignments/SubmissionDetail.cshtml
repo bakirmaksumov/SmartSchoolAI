@@ -20,8 +20,9 @@
     </h4>
   </div>
   <div class="col-auto d-flex align-items-center">
-    <a href="/Assignments/Details/@result.AssignmentId" class="btn btn-outline-secondary btn-sm">
-      <i class="bx bx-arrow-back me-1"></i> Back to Assignment
+    @{ var backUrl = ViewBag.ReturnUrl as string; }
+    <a href="@(backUrl ?? $"/Assignments/Details/{result.AssignmentId}")" class="btn btn-outline-secondary btn-sm" id="submissionBack">
+      <i class="bx bx-arrow-back me-1"></i> @(backUrl is null ? "Back to Assignment" : "Back")
     </a>
   </div>
 </div>
@@ -65,7 +66,7 @@
       <div class="card-body py-4">
         <i class="bx bx-calendar text-info mb-2" style="font-size:2rem;"></i>
         <h6 class="mb-1">Submitted</h6>
-        <small class="text-muted">@result.SubmittedAt.ToString("dd MMM yyyy HH:mm")</small>
+        <small class="text-muted">@SmartSchoolAI.Services.SchoolTime.Show(result.SubmittedAt)</small>
       </div>
     </div>
   </div>
@@ -104,6 +105,7 @@
 <form method="post" asp-action="GradeSubmission" id="gradeForm">
   @Html.AntiForgeryToken()
   <input type="hidden" name="resultId" value="@result.Id" />
+  <input type="hidden" name="returnUrl" value="@(ViewBag.ReturnUrl as string)" />
   <input type="hidden" name="assignmentId" value="@result.AssignmentId" />
   <input type="hidden" name="gradesJson" id="gradesJson" />
 

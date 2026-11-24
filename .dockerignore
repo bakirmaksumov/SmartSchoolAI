@@ -9,6 +9,7 @@
 
 # Tests and docs that don't belong in the image
 E2E/
+SmartSchoolAI.Tests/
 *.md
 *.pdf
 

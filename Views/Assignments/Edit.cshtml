@@ -30,13 +30,16 @@
         </button>
         @if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft)
         {
-            <form method="post" asp-action="Publish" asp-route-id="@a.Id" class="d-inline"
-                  onsubmit="return confirm('Assign this to your students? They can start straight away. You can still fix questions until someone submits — after the first submission the questions are locked.')">
-                @Html.AntiForgeryToken()
-                <button type="submit" class="btn btn-sm btn-primary">
-                    Assign <i class="bx bx-right-arrow-alt ms-1"></i>
-                </button>
-            </form>
+            <button type="button" class="btn btn-sm btn-primary" id="openAssignBtn"
+                    data-bs-toggle="modal" data-bs-target="#assignModal">
+                Assign <i class="bx bx-right-arrow-alt ms-1"></i>
+            </button>
+        }
+        else
+        {
+            <a href="/Assignments/Details/@a.Id" class="btn btn-sm btn-outline-primary">
+                <i class="bx bx-group me-1"></i>Students &amp; results
+            </a>
         }
     </div>
 </div>
@@ -459,10 +462,19 @@
                         </div>
 
                         <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-semibold" for="settingsOpensInput">Opens <span class="text-muted small fw-normal">(optional)</span></label>
+                                <input type="datetime-local" class="form-control" name="availableFrom" id="settingsOpensInput"
+                                       value="@SmartSchoolAI.Services.SchoolTime.Input(a.AvailableFrom)" />
+                                <div class="form-text">Students can't start before this. Empty = straight away. Times are @SmartSchoolAI.Services.SchoolTime.Label.</div>
+                            </div>
+                        </div>
+
+                        <div class="row">
                             <div class="col-md-6 mb-3" id="settingsDeadlineGroup">
                                 <label class="form-label fw-semibold">Deadline <span class="text-danger" id="settingsDeadlineReq">*</span></label>
                                 <input type="datetime-local" class="form-control" name="deadline"
-                                       value="@(a.Deadline.HasValue ? a.Deadline.Value.ToString("yyyy-MM-ddTHH:mm") : "")"
+                                       value="@SmartSchoolAI.Services.SchoolTime.Input(a.Deadline)"
                                        id="settingsDeadlineInput" />
                             </div>
                             <div class="col-md-6 mb-3 d-flex align-items-end pb-1">
@@ -1032,6 +1044,40 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+@if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft)
+{
+    <!-- ══ ASSIGN MODAL ══════════════════════════════════════════════════════ -->
+    <div class="modal fade" id="assignModal" tabindex="-1" aria-labelledby="assignModalTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold" id="assignModalTitle">
+                        @(a.Type == SmartSchoolAI.Models.AssignmentType.Homework ? "Assign homework" : "Assign practice")
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!questions.Any())
+                    {
+                        <div class="alert alert-warning py-2 small mb-3">
+                            <i class="bx bx-info-circle me-1"></i>Add at least one question before assigning.
+                        </div>
+                    }
+                    @await Html.PartialAsync("_AssignPanel", Model.AssignPanel)
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+      // Back from a failed attempt or from inviting students: show the panel again straight away.
+      document.addEventListener('DOMContentLoaded', function () {
+        if (new URLSearchParams(location.search).get('assign') === 'open' || document.getElementById('assignError')) {
+          bootstrap.Modal.getOrCreateInstance(document.getElementById('assignModal')).show();
+        }
+      });
+    </script>
+}
+
 <script>
 // ── Keep the scroll position across this page's own reloads ─────────────────
 // Every action on a question card (the switches, Dismiss, move, duplicate, remove, add subpoint, saving in

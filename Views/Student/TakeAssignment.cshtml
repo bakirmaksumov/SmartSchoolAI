@@ -207,9 +207,10 @@
   {
     <span>Attempt @attemptNum of @assignment?.MaxAttempts</span>
   }
-  @if (assignment?.Deadline.HasValue == true)
+  @{ var myDue = ViewBag.MyDue as DateTime? ?? assignment?.Deadline; }
+  @if (myDue.HasValue)
   {
-    <span class="ms-2">· Due: @assignment.Deadline.Value.ToString("dd MMM yyyy HH:mm")</span>
+    <span class="ms-2" id="myDue">· Due: @SmartSchoolAI.Services.SchoolTime.Show(myDue) <span class="text-muted">(@SmartSchoolAI.Services.SchoolTime.Label)</span></span>
   }
 </p>
 

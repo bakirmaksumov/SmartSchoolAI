@@ -1,0 +1,65 @@
+@model SmartSchoolAI.ViewModels.ReviewQueueViewModel
+@{
+    ViewData["Title"] = "Needs review";
+    var self = Context.Request.Path + Context.Request.QueryString;
+}
+
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">SmartSchool AI / <a href="/">Dashboard</a> /</span> Needs review
+    </h4>
+    <p class="text-muted mb-0">
+      Submitted work with at least one answer the AI could not confirm (drawn answers always need a look).
+      Saving your grades for a submission takes it off this list.
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <h5 class="mb-0"><i class="bx bx-error-circle me-2 text-warning"></i>Waiting for you (<span id="reviewCount">@Model.Results.Count</span>)</h5>
+  </div>
+  @if (!Model.Results.Any())
+  {
+    <div class="card-body text-center text-muted py-5">
+      <i class="bx bx-check-double fs-1 text-success"></i>
+      <p class="mt-2 mb-0">Nothing to review. Well done!</p>
+    </div>
+  }
+  else
+  {
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle" id="reviewTable">
+        <thead class="table-light">
+          <tr>
+            <th>Student</th>
+            <th>Assignment</th>
+            <th>Class</th>
+            <th>Submitted</th>
+            <th>To check</th>
+            <th class="text-end"></th>
+          </tr>
+        </thead>
+        <tbody>
+          @foreach (var r in Model.Results)
+          {
+            var flagged = r.StudentAnswers.Count(x => x.NeedsReview);
+            <tr>
+              <td>
+                <a class="fw-semibold" href="/Classes/StudentWork?studentId=@r.StudentId&classId=@r.Assignment.ClassId&returnUrl=@Uri.EscapeDataString(self)">@r.Student.FullName</a>
+              </td>
+              <td><a href="/Assignments/Details/@r.AssignmentId?filter=needs-review" class="text-body">@r.Assignment.Title</a> <small class="text-muted">· attempt @r.AttemptNumber</small></td>
+              <td>@r.Assignment.Class.Name</td>
+              <td class="small">@SmartSchoolAI.Services.SchoolTime.Show(r.SubmittedAt, "dd MMM HH:mm")</td>
+              <td><span class="badge bg-warning">@(flagged == 1 ? "1 answer" : $"{flagged} answers")</span></td>
+              <td class="text-end">
+                <a href="/Assignments/SubmissionDetail?resultId=@r.Id&returnUrl=@Uri.EscapeDataString(self)" class="btn btn-sm btn-warning">Review work</a>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</div>

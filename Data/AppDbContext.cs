@@ -28,6 +28,7 @@ public class AppDbContext : DbContext
     public DbSet<Question>       Questions       { get; set; }
     public DbSet<StudentAnswer>       StudentAnswers       { get; set; }
     public DbSet<AssignmentStudent>   AssignmentStudents   { get; set; }
+    public DbSet<LateJoinRequest>     LateJoinRequests     { get; set; }
     public DbSet<QuestionReport>      QuestionReports      { get; set; }
     public DbSet<SupportTicket>       SupportTickets       { get; set; }
 
@@ -50,6 +51,7 @@ public class AppDbContext : DbContext
         ConfigureQuestion(modelBuilder);
         ConfigureStudentAnswer(modelBuilder);
         ConfigureAssignmentStudent(modelBuilder);
+        ConfigureLateJoinRequest(modelBuilder);
         ConfigureQuestionReport(modelBuilder);
 
         SeedRoles(modelBuilder);
@@ -156,6 +158,8 @@ public class AppDbContext : DbContext
             e.Property(a => a.Type).HasConversion<string>();
             e.Property(a => a.Status).HasConversion<string>();
             e.Property(a => a.GradingType).HasConversion<string>();
+            e.Property(a => a.Audience).HasConversion<string>().HasMaxLength(32);
+            e.Property(a => a.LateJoinPolicy).HasConversion<string>().HasMaxLength(32);
             e.HasIndex(a => a.ClassId);
             e.HasIndex(a => a.TeacherId);
             e.HasIndex(a => a.Status);
@@ -283,6 +287,33 @@ public class AppDbContext : DbContext
              .WithMany()
              .HasForeignKey(x => x.StudentId)
              .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    private static void ConfigureLateJoinRequest(ModelBuilder mb)
+    {
+        mb.Entity<LateJoinRequest>(e =>
+        {
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Status).HasConversion<string>().HasMaxLength(16);
+
+            // One request per (assignment, student): a repeated join, a double click or two processes
+            // racing can never queue the same student twice for the same work.
+            e.HasIndex(r => new { r.AssignmentId, r.StudentId }).IsUnique();
+            e.HasIndex(r => r.Status);
+
+            e.HasOne(r => r.Assignment)
+             .WithMany()
+             .HasForeignKey(r => r.AssignmentId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(r => r.Student)
+             .WithMany()
+             .HasForeignKey(r => r.StudentId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // A deleted assignment's requests are not shown or acted on.
+            e.HasQueryFilter(r => r.Assignment.DeletedAt == null);
         });
     }
 

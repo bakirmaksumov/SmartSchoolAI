@@ -35,6 +35,11 @@ namespace SmartSchoolAI.Migrations
                     b.Property<bool>("AntiCopyPaste")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Audience")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("AvailableFrom")
                         .HasColumnType("TEXT");
 
@@ -58,6 +63,11 @@ namespace SmartSchoolAI.Migrations
 
                     b.Property<string>("GradingType")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LateJoinPolicy")
+                        .IsRequired()
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("MaxAttempts")
@@ -359,6 +369,44 @@ namespace SmartSchoolAI.Migrations
                     b.HasIndex("CreatedById");
 
                     b.ToTable("ContentItems");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.LateJoinRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DecidedById")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("StudentId");
+
+                    b.HasIndex("AssignmentId", "StudentId")
+                        .IsUnique();
+
+                    b.ToTable("LateJoinRequests");
                 });
 
             modelBuilder.Entity("SmartSchoolAI.Models.Question", b =>
@@ -1004,6 +1052,25 @@ namespace SmartSchoolAI.Migrations
                         .IsRequired();
 
                     b.Navigation("CreatedBy");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.LateJoinRequest", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.Assignment", "Assignment")
+                        .WithMany()
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmartSchoolAI.Models.User", "Student")
+                        .WithMany()
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Assignment");
+
+                    b.Navigation("Student");
                 });
 
             modelBuilder.Entity("SmartSchoolAI.Models.QuestionReport", b =>

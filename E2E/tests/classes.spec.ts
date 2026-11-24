@@ -86,7 +86,7 @@ test("teacher manages a student: roster, edit, reset password, student forced to
     await expect(student).toHaveURL(/\/Auth\/Login/);
 
     await teacher.goto(`/Classes/Details/${classId}?tab=students`);
-    await expect(teacher.locator("strong.d-block", { hasText: "Roster Student" })).toBeVisible();
+    await expect(teacher.locator("#students a.student-link", { hasText: "Roster Student" })).toBeVisible();
 
     await teacher.goto("/Classes/Students");
     await teacher.locator('input[name="search"]').fill("Roster");
@@ -98,7 +98,7 @@ test("teacher manages a student: roster, edit, reset password, student forced to
     await teacher.getByRole("button", { name: /Edit student/ }).click();
     await teacher.locator("#editStudentName").fill("Roster Student Renamed");
     await teacher.locator("#editStudentModal").getByRole("button", { name: /Save changes/ }).click();
-    await expect(teacher.locator("strong.d-block", { hasText: "Roster Student Renamed" })).toBeVisible();
+    await expect(teacher.locator("#students a.student-link", { hasText: "Roster Student Renamed" })).toBeVisible();
 
     await teacher.locator("tr", { hasText: "Roster Student Renamed" }).locator('[data-bs-toggle="dropdown"]').click();
     await teacher.getByRole("button", { name: /Reset password/ }).first().click();
@@ -120,7 +120,7 @@ test("teacher manages a student: roster, edit, reset password, student forced to
     teacher.once("dialog", d => d.accept());
     await teacher.locator("tr", { hasText: "Roster Student Renamed" }).locator('[data-bs-toggle="dropdown"]').click();
     await teacher.getByRole("button", { name: /Remove student/ }).click();
-    await expect(teacher.locator("strong.d-block", { hasText: "Roster Student Renamed" })).toHaveCount(0);
+    await expect(teacher.locator("#students a.student-link", { hasText: "Roster Student Renamed" })).toHaveCount(0);
   } finally {
     await Promise.all([teacher.context().close(), student.context().close()]);
   }

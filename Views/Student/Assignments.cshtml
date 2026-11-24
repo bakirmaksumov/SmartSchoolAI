@@ -62,10 +62,11 @@ else
               <span class="badge bg-label-@(a.Type == SmartSchoolAI.Models.AssignmentType.Homework ? "primary" : "info") me-1">
                 @a.Type
               </span>
-              @if (a.Deadline.HasValue)
+              @{ var myDue = (ViewBag.MyDue as Dictionary<Guid, DateTime?>)?.GetValueOrDefault(a.Id) ?? a.Deadline; }
+              @if (myDue.HasValue)
               {
-                <span class="badge bg-label-@(a.Deadline.Value < DateTime.UtcNow ? "danger" : "secondary")">
-                  <i class="bx bx-time me-1"></i>@a.Deadline.Value.ToString("dd MMM yyyy")
+                <span class="badge bg-label-@(myDue.Value < DateTime.UtcNow ? "danger" : "secondary") my-due" title="@SmartSchoolAI.Services.SchoolTime.Label">
+                  <i class="bx bx-time me-1"></i>Due @SmartSchoolAI.Services.SchoolTime.Show(myDue, "dd MMM yyyy HH:mm")
                 </span>
               }
             </div>

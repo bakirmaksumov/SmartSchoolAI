@@ -30,6 +30,26 @@ public class AssignmentDetailsViewModel
 
     /// <summary>False once a student has submitted — questions are frozen from then on.</summary>
     public bool CanEditQuestions { get; set; }
+
+    /// <summary>One row per current recipient, filtered by <see cref="Filter"/>.</summary>
+    public List<RecipientRow> Recipients { get; set; } = new();
+
+    /// <summary>all | not-submitted | submitted | needs-review.</summary>
+    public string Filter { get; set; } = "all";
+
+    /// <summary>Current recipients with at least one submitted attempt.</summary>
+    public int SubmittedStudents { get; set; }
+
+    /// <summary>Submitted attempts by current recipients.</summary>
+    public int SubmittedAttempts { get; set; }
+
+    /// <summary>Current recipients whose submitted work needs the teacher's review.</summary>
+    public int NeedsReviewStudents { get; set; }
+
+    /// <summary>Requests from late joiners still waiting for a decision.</summary>
+    public int PendingRequests { get; set; }
+
+    public AssignPanelViewModel? AssignPanel { get; set; }
 }
 
 /// <summary>The question editor: the assignment plus what the teacher may still change.</summary>
@@ -38,6 +58,7 @@ public class AssignmentEditViewModel
     public Assignment  Assignment       { get; set; } = null!;
     public List<Class> Classes          { get; set; } = new();
     public bool        CanEditQuestions { get; set; }
+    public AssignPanelViewModel AssignPanel { get; set; } = null!;
 }
 
 /// <summary>One student's submission as the teacher reviews and grades it.</summary>
@@ -62,4 +83,90 @@ public class StudentStatsViewModel
     /// <summary>Per-question correctness for the latest submitted attempt only —
     /// pooling across attempts would double-count questions on retakes.</summary>
     public List<QuestionStatDto> QuestionStats { get; set; } = new();
+}
+
+/// <summary>
+/// The one "who gets this" panel, shown in the editor (before the first assignment) and on the
+/// assignment page (to add students). Both post to <c>Assignments/Assign</c>.
+/// </summary>
+public class AssignPanelViewModel
+{
+    public Assignment         Assignment    { get; set; } = null!;
+
+    /// <summary>Everyone currently in the assignment's class, by name.</summary>
+    public List<User>         Members       { get; set; } = new();
+
+    /// <summary>Students who already have the assignment.</summary>
+    public HashSet<Guid>      AssignedIds   { get; set; } = new();
+
+    // What the form starts with: the saved choice, a sensible suggestion, or the teacher's last attempt.
+    public AssignmentAudience Audience      { get; set; }
+    public HashSet<Guid>      SelectedIds   { get; set; } = new();
+    public LateJoinPolicy     LateJoin      { get; set; }
+    public DateTime?          AvailableFrom { get; set; }
+    public DateTime?          Deadline      { get; set; }
+
+    /// <summary>"edit" or "details": where the teacher comes back to on an error.</summary>
+    public string             ReturnTo      { get; set; } = "edit";
+
+    /// <summary>Why the last attempt failed; the form is shown again with the teacher's choices.</summary>
+    public string?            Error         { get; set; }
+
+    public bool IsDraft => Assignment.Status == AssignmentStatus.Draft;
+}
+
+/// <summary>The teacher's last assign attempt, kept across the redirect when it failed.</summary>
+public class AssignAttemptDto
+{
+    public AssignmentAudience Audience      { get; set; }
+    public List<Guid>         StudentIds    { get; set; } = new();
+    public LateJoinPolicy     LateJoin      { get; set; }
+    public DateTime?          AvailableFrom { get; set; }
+    public DateTime?          Deadline      { get; set; }
+}
+
+/// <summary>One recipient of an assignment with every attempt they made.</summary>
+public class RecipientRow
+{
+    public User                Student     { get; set; } = null!;
+    public AssignmentStudent   Enrollment  { get; set; } = null!;
+
+    /// <summary>All attempts, newest first, including one still in progress.</summary>
+    public List<StudentResult> Attempts    { get; set; } = new();
+
+    public List<StudentResult> Submitted   => Attempts.Where(r => r.IsSubmitted).ToList();
+    public StudentResult?      Latest      => Attempts.FirstOrDefault(r => r.IsSubmitted);
+    public bool                HasSubmitted => Attempts.Any(r => r.IsSubmitted);
+    public bool                InProgress  => Attempts.Any(r => !r.IsSubmitted);
+    public bool                NeedsReview { get; set; }
+}
+
+/// <summary>Submissions waiting for the teacher, across every assignment they can see.</summary>
+public class ReviewQueueViewModel
+{
+    public List<StudentResult> Results { get; set; } = new();
+}
+
+/// <summary>One student's work across the teacher's classes.</summary>
+public class StudentWorkViewModel
+{
+    public User                  Student   { get; set; } = null!;
+    public List<StudentWorkRow>  Rows      { get; set; } = new();
+    public List<Class>           Classes   { get; set; } = new();
+    public Guid?                 ClassId   { get; set; }
+
+    /// <summary>Local URL of the page the teacher came from (class tab or roster with its filter).</summary>
+    public string                ReturnUrl { get; set; } = "/Classes/Students";
+}
+
+public class StudentWorkRow
+{
+    public Assignment      Assignment  { get; set; } = null!;
+    public DateTime?       Due         { get; set; }
+    public bool            PersonalDue { get; set; }
+
+    /// <summary>Assigned | In progress | Submitted | Needs review | Reviewed | Overdue | Awaiting approval.</summary>
+    public string          Status      { get; set; } = "Assigned";
+    public StudentResult?  Latest      { get; set; }
+    public bool            NeedsReview { get; set; }
 }
