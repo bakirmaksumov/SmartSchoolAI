@@ -61,7 +61,8 @@ jobs:
         env:
           E2E_AI: "0"
           E2E_SHOT_DIR: ${{ runner.temp }}/screenshots
-        run: npm test
+        # "github" adds each failure as an annotation on the run, readable without downloading the log.
+        run: npm test -- --reporter=list,github
       - name: Upload screenshots and traces
         if: always()
         uses: actions/upload-artifact@v4
