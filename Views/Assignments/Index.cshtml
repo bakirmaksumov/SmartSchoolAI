@@ -114,7 +114,7 @@ else
                   @a.Status
                 </span>
               </td>
-              <td>@(a.Deadline?.ToString("dd MMM yyyy") ?? "\u2014")</td>
+              <td>@SmartSchoolAI.Services.SchoolTime.Show(a.Deadline, "dd MMM yyyy")</td>
               <td>@a.StudentResults.Count</td>
               <td>
                 <a href="/Assignments/Details/@a.Id"

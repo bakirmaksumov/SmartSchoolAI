@@ -14,6 +14,13 @@ public class StudentAnswer : BaseEntity
     public string?  ImagePath     { get; set; }                 // handwritten photo for this question (null = typed answer)
     public string?  AiSummary     { get; set; }                 // AI feedback for this question (handwritten flow)
 
+    /// <summary>
+    /// The student's drawing for a question that asks them to sketch: the question's diagram with
+    /// their strokes on top, saved as a PNG. Kept apart from <see cref="ImagePath"/>, which holds
+    /// photos of handwritten working that are graded differently.
+    /// </summary>
+    public string?  SketchPath    { get; set; }
+
     /// <summary>True when a teacher manually adjusted the AI's grade for this answer.</summary>
     public bool     TeacherOverridden { get; set; }
 

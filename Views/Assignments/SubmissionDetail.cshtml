@@ -20,8 +20,9 @@
     </h4>
   </div>
   <div class="col-auto d-flex align-items-center">
-    <a href="/Assignments/Details/@result.AssignmentId" class="btn btn-outline-secondary btn-sm">
-      <i class="bx bx-arrow-back me-1"></i> Back to Assignment
+    @{ var backUrl = ViewBag.ReturnUrl as string; }
+    <a href="@(backUrl ?? $"/Assignments/Details/{result.AssignmentId}")" class="btn btn-outline-secondary btn-sm" id="submissionBack">
+      <i class="bx bx-arrow-back me-1"></i> @(backUrl is null ? "Back to Assignment" : "Back")
     </a>
   </div>
 </div>
@@ -65,7 +66,7 @@
       <div class="card-body py-4">
         <i class="bx bx-calendar text-info mb-2" style="font-size:2rem;"></i>
         <h6 class="mb-1">Submitted</h6>
-        <small class="text-muted">@result.SubmittedAt.ToString("dd MMM yyyy HH:mm")</small>
+        <small class="text-muted">@SmartSchoolAI.Services.SchoolTime.Show(result.SubmittedAt)</small>
       </div>
     </div>
   </div>
@@ -104,6 +105,7 @@
 <form method="post" asp-action="GradeSubmission" id="gradeForm">
   @Html.AntiForgeryToken()
   <input type="hidden" name="resultId" value="@result.Id" />
+  <input type="hidden" name="returnUrl" value="@(ViewBag.ReturnUrl as string)" />
   <input type="hidden" name="assignmentId" value="@result.AssignmentId" />
   <input type="hidden" name="gradesJson" id="gradesJson" />
 
@@ -207,6 +209,24 @@
               </div>
             }
 
+            @if (!string.IsNullOrEmpty(answer?.SketchPath))
+            {
+              <div class="mb-2">
+                <small class="text-muted d-block mb-1"><i class="bx bx-pencil me-1"></i>Student's drawing:</small>
+                <a href="@answer.SketchPath" target="_blank" rel="noopener" title="Open full size">
+                  <img src="@answer.SketchPath" class="img-fluid rounded border" style="max-height:480px;" alt="Student's drawing" />
+                </a>
+                @if (!string.IsNullOrWhiteSpace(answer.AiSummary))
+                {
+                  <div class="small text-muted mt-1"><i class="bx bx-bot me-1"></i>@answer.AiSummary</div>
+                }
+              </div>
+            }
+            else if (q.RequireDrawing)
+            {
+              <div class="small text-muted mb-2"><i class="bx bx-pencil me-1"></i>No drawing was submitted.</div>
+            }
+
             @{
               var answerPhotos = SmartSchoolAI.Services.SubmissionMedia.Paths(answer?.ImagePath);
             }
@@ -250,8 +270,9 @@
             }
 
             @{
-              var gradePoints = (answer?.PointsAwarded ?? (isCorrect == true ? 1m : 0m))
-                  .ToString(System.Globalization.CultureInfo.InvariantCulture);
+              var gradePoints = (answer?.PointsAwarded ?? (isCorrect == true ? q.MaxPoints : 0m))
+                  .ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+              var maxPoints = q.MaxPoints.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
             }
             <!-- Teacher grading controls -->
             <div class="border-top mt-3 pt-3">
@@ -268,9 +289,12 @@
                   </div>
                 </div>
                 <div class="col-auto">
-                  <label class="form-label small text-muted d-block mb-1">Points</label>
-                  <input type="number" step="0.5" min="0" class="form-control form-control-sm grade-points"
-                         data-idx="@i" style="width:90px;" value="@gradePoints">
+                  <label class="form-label small text-muted d-block mb-1">Marks (out of @maxPoints)</label>
+                  <div class="input-group input-group-sm" style="width:130px;">
+                    <input type="number" step="0.5" min="0" max="@maxPoints" class="form-control grade-points"
+                           data-idx="@i" data-max="@maxPoints" value="@gradePoints">
+                    <span class="input-group-text">/ @maxPoints</span>
+                  </div>
                 </div>
                 <div class="col">
                   <label class="form-label small text-muted d-block mb-1">Comment to student</label>
@@ -350,7 +374,7 @@
       var points = document.querySelector('.grade-points[data-idx="' + radio.dataset.idx + '"]');
       if (!points || !radio.checked) return;
       var value = parseFloat(points.value) || 0;
-      if (radio.value === 'true' && value === 0) points.value = '1';
+      if (radio.value === 'true' && value === 0) points.value = points.dataset.max || '1';
       if (radio.value === 'false' && value > 0) points.value = '0';
     });
   });

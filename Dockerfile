@@ -29,4 +29,9 @@ ENV ASPNETCORE_ENVIRONMENT=Production \
     ASPNETCORE_HTTP_PORTS=8080 \
     ConnectionStrings__Default="Data Source=/app/App_Data/smartschool.db"
 EXPOSE 8080
+
+# The commit the image was built from, so CI (and anyone running it) can check which code is inside.
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.revision=$GIT_SHA
+
 ENTRYPOINT ["dotnet", "SmartSchoolAI.dll"]

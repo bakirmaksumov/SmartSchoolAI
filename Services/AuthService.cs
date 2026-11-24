@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using SmartSchoolAI.Data;
 using SmartSchoolAI.Models;
 
@@ -116,19 +117,22 @@ public class AuthService
         if (cls.InviteExpiresAt.HasValue && cls.InviteExpiresAt.Value < DateTime.UtcNow)
             return (false, "This invite code has expired. Ask your teacher for a new one.");
 
-        var currentCount = await _db.ClassStudents.CountAsync(cs => cs.ClassId == cls.Id);
-        if (currentCount >= cls.MaxStudents)
-            return (false, "This class is full. Please contact your teacher.");
-
         var studentRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == Role.Student);
         if (studentRole is null)
             return (false, "System error: Student role not found.");
+
+        // Hashing is deliberately slow; do it before taking the database write lock below.
+        var passwordHash = PasswordHasher.Hash(password);
+
+        // The account, the class membership and the class's late-join rule are one transaction:
+        // a full class or any failure leaves no half-created account behind.
+        await using var tx = await _db.Database.BeginTransactionAsync();
 
         var user = new User
         {
             Email        = normalizedEmail,
             FullName     = fullName.Trim(),
-            PasswordHash = PasswordHasher.Hash(password),
+            PasswordHash = passwordHash,
             RoleId       = studentRole.Id,
             IsActive     = true
         };
@@ -136,26 +140,14 @@ public class AuthService
         _db.Users.Add(user);
         await _db.SaveChangesAsync(); // get user.Id
 
-        _db.ClassStudents.Add(new ClassStudent
+        var (joined, error) = await AddMembershipAsync(cls, user.Id, "This class is full. Please contact your teacher.");
+        if (!joined)
         {
-            ClassId   = cls.Id,
-            StudentId = user.Id,
-            JoinedAt  = DateTime.UtcNow
-        });
-
-        await _db.SaveChangesAsync();
-
-        // The count check above and this insert aren't atomic — two students
-        // hitting the last open seat at the same moment can both pass it. This
-        // re-check after the fact closes that gap; if this join lost the race,
-        // the whole registration is rolled back rather than leaving a student
-        // account that's enrolled nowhere.
-        if (!await EnforceCapacityAsync(cls.Id, user.Id, cls.MaxStudents))
-        {
-            _db.Users.Remove(user);
-            await _db.SaveChangesAsync();
-            return (false, "This class is full. Please contact your teacher.");
+            _db.ChangeTracker.Clear();
+            return (false, error);
         }
+
+        await tx.CommitAsync();
 
         ActivityLog.Record(_env, "StudentEnrolled", "Student", user.Id, $"class={cls.Id}");
 
@@ -192,15 +184,36 @@ public class AuthService
         if (cls.InviteExpiresAt.HasValue && cls.InviteExpiresAt.Value < DateTime.UtcNow)
             return (false, "This invite code has expired.");
 
-        var alreadyJoined = await _db.ClassStudents
-            .AnyAsync(cs => cs.ClassId == cls.Id && cs.StudentId == studentId);
+        await using var tx = await _db.Database.BeginTransactionAsync();
 
-        if (alreadyJoined)
+        var (joined, error) = await AddMembershipAsync(cls, studentId, "This class is full.");
+        if (!joined)
+        {
+            _db.ChangeTracker.Clear();
+            return (false, error);
+        }
+
+        await tx.CommitAsync();
+
+        ActivityLog.Record(_env, "StudentEnrolled", "Student", studentId, $"class={cls.Id}");
+
+        return (true, string.Empty);
+    }
+
+    /// <summary>
+    /// Makes the student a member of the class and applies the class's late-join rules (assignments given
+    /// automatically, or requests for the teacher). Runs inside the caller's transaction — with SQLite a
+    /// <c>BEGIN IMMEDIATE</c> one — so the "already joined" and "class full" checks cannot race another join,
+    /// and the late-join rule cannot race the teacher assigning the same class.
+    /// </summary>
+    private async Task<(bool Joined, string Error)> AddMembershipAsync(Class cls, Guid studentId, string fullMessage)
+    {
+        if (await _db.ClassStudents.AnyAsync(cs => cs.ClassId == cls.Id && cs.StudentId == studentId))
             return (false, "You are already enrolled in this class.");
 
         var currentCount = await _db.ClassStudents.CountAsync(cs => cs.ClassId == cls.Id);
         if (currentCount >= cls.MaxStudents)
-            return (false, "This class is full.");
+            return (false, fullMessage);
 
         _db.ClassStudents.Add(new ClassStudent
         {
@@ -209,44 +222,19 @@ public class AuthService
             JoinedAt  = DateTime.UtcNow
         });
 
-        await _db.SaveChangesAsync();
-
-        // See RegisterStudentAsync's identical re-check: the count check above
-        // and this insert aren't atomic, so two students racing for the last
-        // seat can both get past it.
-        if (!await EnforceCapacityAsync(cls.Id, studentId, cls.MaxStudents))
-            return (false, "This class is full.");
-
-        ActivityLog.Record(_env, "StudentEnrolled", "Student", studentId, $"class={cls.Id}");
-
-        return (true, string.Empty);
-    }
-
-    /// <summary>
-    /// Re-checks enrollment against <paramref name="maxStudents"/> AFTER an
-    /// insert. Whichever join lands outside the first <paramref name="maxStudents"/>
-    /// slots — ordered by JoinedAt as a stable, deterministic tiebreak — is
-    /// rolled back here, so at most one side of a same-moment race keeps its seat
-    /// instead of both (or, without this check at all, letting the class overfill).
-    /// </summary>
-    private async Task<bool> EnforceCapacityAsync(Guid classId, Guid studentId, int maxStudents)
-    {
-        var enrolledIds = await _db.ClassStudents
-            .Where(cs => cs.ClassId == classId)
-            .OrderBy(cs => cs.JoinedAt).ThenBy(cs => cs.StudentId)
-            .Select(cs => cs.StudentId)
-            .ToListAsync();
-
-        if (enrolledIds.Count <= maxStudents || enrolledIds.Take(maxStudents).Contains(studentId))
-            return true;
-
-        var mine = await _db.ClassStudents
-            .FirstOrDefaultAsync(cs => cs.ClassId == classId && cs.StudentId == studentId);
-        if (mine is not null)
+        try
         {
-            _db.ClassStudents.Remove(mine);
             await _db.SaveChangesAsync();
         }
-        return false;
+        catch (DbUpdateException)
+        {
+            // The composite key (class, student) refused a second membership: the same join already happened.
+            return (false, "You are already enrolled in this class.");
+        }
+
+        await new AssignmentDistributionService(_db, NullLogger<AssignmentDistributionService>.Instance)
+            .ApplyToNewMemberAsync(cls.Id, studentId);
+
+        return (true, string.Empty);
     }
 }

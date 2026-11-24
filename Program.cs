@@ -8,6 +8,9 @@ using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Every date is typed and shown on the school's clock, whatever time zone the server runs in.
+SchoolTime.Configure(builder.Configuration["School:TimeZone"]);
+
 // ── Services ──────────────────────────────────────────────────────────────────
 
 builder.Services.AddControllersWithViews();
@@ -25,6 +28,7 @@ builder.Services.AddScoped<TranslationService>();
 builder.Services.AddScoped<GradingService>();
 builder.Services.AddScoped<AnalyticsService>();
 builder.Services.AddScoped<ClassStatisticsService>();
+builder.Services.AddScoped<AssignmentDistributionService>();
 builder.Services.AddScoped<ReCaptchaService>();
 builder.Services.AddSingleton<GenerationJobTracker>();
 builder.Services.AddHttpClient();

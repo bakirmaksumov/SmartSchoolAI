@@ -1,0 +1,231 @@
+@model SmartSchoolAI.ViewModels.AssignPanelViewModel
+@using SmartSchoolAI.Models
+@{
+    var a          = Model.Assignment;
+    var isDraft    = Model.IsDraft;
+    var members    = Model.Members;
+    var unassigned = members.Count(m => !Model.AssignedIds.Contains(m.Id));
+    var entire     = Model.Audience == AssignmentAudience.EntireClass;
+    var inviteUrl  = $"/Classes/Details/{a.ClassId}?tab=students&returnUrl={Uri.EscapeDataString(Model.ReturnTo == "details" ? $"/Assignments/Details/{a.Id}?assign=open" : $"/Assignments/Edit/{a.Id}?assign=open")}";
+    // Stored in UTC, typed and shown on the school's clock (see SchoolTime), so saving again keeps the same time.
+    string Local(DateTime? d) => SmartSchoolAI.Services.SchoolTime.Input(d);
+}
+
+<form method="post" action="/Assignments/Assign/@a.Id" id="assignForm"
+      data-draft="@(isDraft ? "true" : "false")"
+      data-members="@members.Count" data-unassigned="@unassigned">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="returnTo" value="@Model.ReturnTo" />
+
+    @if (!string.IsNullOrEmpty(Model.Error))
+    {
+        <div class="alert alert-danger py-2 small" role="alert" id="assignError">
+            <i class="bx bx-error-circle me-1"></i>@Model.Error
+            <div class="text-muted mt-1">Nothing was changed — your choices are kept below, so you can fix this and try again.</div>
+        </div>
+    }
+
+    <!-- What is being given out -->
+    <dl class="row small mb-3" id="assignSummary">
+        <dt class="col-4 text-muted fw-normal">Assignment</dt>
+        <dd class="col-8 fw-semibold mb-1">@a.Title</dd>
+        <dt class="col-4 text-muted fw-normal">Class</dt>
+        <dd class="col-8 mb-1">@a.Class.Name</dd>
+        <dt class="col-4 text-muted fw-normal">Type</dt>
+        <dd class="col-8 mb-1">@(a.Type == AssignmentType.Homework ? "Homework" : "Classroom practice")</dd>
+        @if (!isDraft)
+        {
+            <dt class="col-4 text-muted fw-normal">Opens</dt>
+            <dd class="col-8 mb-1">@(SmartSchoolAI.Services.SchoolTime.Show(a.AvailableFrom, empty: "Straight away"))</dd>
+            <dt class="col-4 text-muted fw-normal">Due</dt>
+            <dd class="col-8 mb-1">@(SmartSchoolAI.Services.SchoolTime.Show(a.Deadline, empty: "No due date"))</dd>
+            <dt class="col-4 text-muted fw-normal">Recipients</dt>
+            <dd class="col-8 mb-1">@Model.AssignedIds.Count of @members.Count in the class</dd>
+        }
+    </dl>
+
+    @if (members.Count == 0)
+    {
+        <div class="border rounded p-3 text-center mb-3" id="assignEmptyClass">
+            <i class="bx bx-user-plus fs-2 text-primary"></i>
+            <div class="fw-semibold mt-1">@a.Class.Name has no students yet</div>
+            <div class="text-muted small mb-2">Invite students with the class code first — your draft stays as it is.</div>
+            <a href="@inviteUrl" class="btn btn-primary btn-sm" id="inviteStudentsLink">
+                <i class="bx bx-envelope me-1"></i>Invite students
+            </a>
+        </div>
+    }
+    else
+    {
+        <!-- Recipients -->
+        <fieldset class="mb-3">
+            <legend class="form-label fw-semibold fs-6 mb-2">Recipients</legend>
+            <div class="form-check mb-1">
+                <input class="form-check-input" type="radio" name="audience" value="EntireClass" id="audEntire" @(entire ? "checked" : null) />
+                <label class="form-check-label" for="audEntire">Entire class (@members.Count)</label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="audience" value="SelectedStudents" id="audSelected" @(!entire ? "checked" : null) />
+                <label class="form-check-label" for="audSelected">Choose students</label>
+            </div>
+
+            <div id="assignPicker" class="mt-2 border rounded p-2 @(entire ? "d-none" : "")">
+                <input type="search" class="form-control form-control-sm mb-2" id="assignSearch"
+                       placeholder="Search by name or email" aria-label="Search students" autocomplete="off" />
+                <div class="d-flex justify-content-between align-items-center small mb-1">
+                    <span class="text-muted">Selected: <strong id="assignSelectedCount">0</strong></span>
+                    <span>
+                        <button type="button" class="btn btn-link btn-sm p-0 me-2" id="assignSelectShown">Select shown</button>
+                        <button type="button" class="btn btn-link btn-sm p-0" id="assignClear">Clear</button>
+                    </span>
+                </div>
+                <div class="list-group list-group-flush" style="max-height:240px;overflow:auto;" id="assignStudentList">
+                    @foreach (var m in members)
+                    {
+                        var has = Model.AssignedIds.Contains(m.Id);
+                        var locked = has && !isDraft;   // an active assignment is only ever added to here
+                        <label class="list-group-item d-flex align-items-center gap-2 px-1 py-1 assign-student"
+                               data-search="@($"{m.FullName} {m.Email}".ToLowerInvariant())">
+                            <input class="form-check-input m-0" type="checkbox" name="studentIds" value="@m.Id"
+                                   @(Model.SelectedIds.Contains(m.Id) || locked ? "checked" : null)
+                                   @(locked ? "disabled" : null) data-locked="@(locked ? "true" : "false")" />
+                            <span class="flex-grow-1">
+                                <span class="d-block">@m.FullName</span>
+                                <small class="text-muted">@m.Email</small>
+                            </span>
+                            @if (locked)
+                            {
+                                <span class="badge bg-label-success">Has it</span>
+                            }
+                        </label>
+                    }
+                </div>
+                <div class="small text-muted mt-1 d-none" id="assignNoMatch">No student matches the search.</div>
+            </div>
+        </fieldset>
+
+        <!-- Students who join later — only for the whole class -->
+        <fieldset class="mb-3 @(entire ? "" : "d-none")" id="assignLateJoin">
+            <legend class="form-label fw-semibold fs-6 mb-2">If a student joins the class later</legend>
+            <div class="form-check mb-1">
+                <input class="form-check-input" type="radio" name="lateJoin" value="AutoAssign" id="lateAuto"
+                       @(Model.LateJoin == LateJoinPolicy.AutoAssign ? "checked" : null) />
+                <label class="form-check-label" for="lateAuto">
+                    Assign automatically
+                    <span class="d-block small text-muted">They get this assignment as soon as they join.</span>
+                </label>
+            </div>
+            <div class="form-check">
+                <input class="form-check-input" type="radio" name="lateJoin" value="TeacherApproval" id="lateApproval"
+                       @(Model.LateJoin != LateJoinPolicy.AutoAssign ? "checked" : null) />
+                <label class="form-check-label" for="lateApproval">
+                    With teacher approval
+                    <span class="d-block small text-muted">You decide in the class's Students tab; until then they can't open it.</span>
+                </label>
+            </div>
+        </fieldset>
+    }
+
+    @if (isDraft)
+    {
+        <div class="small text-muted mb-1"><i class="bx bx-time-five me-1"></i>Times are @SmartSchoolAI.Services.SchoolTime.Label.</div>
+        <div class="row g-2 mb-3">
+            <div class="col-sm-6">
+                <label class="form-label small fw-semibold" for="assignOpens">Opens <span class="text-muted fw-normal">(optional)</span></label>
+                <input type="datetime-local" class="form-control form-control-sm" name="availableFrom" id="assignOpens" value="@Local(Model.AvailableFrom)" />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label small fw-semibold" for="assignDue">
+                    Due date @if (a.Type == AssignmentType.Homework) { <span class="text-danger">*</span> } else { <span class="text-muted fw-normal">(optional)</span> }
+                </label>
+                <input type="datetime-local" class="form-control form-control-sm" name="deadline" id="assignDue" value="@Local(Model.Deadline)"
+                       @(a.Type == AssignmentType.Homework ? "required" : null) />
+            </div>
+        </div>
+    }
+
+    @if (members.Count > 0)
+    {
+        <button type="submit" class="btn btn-primary w-100" id="assignSubmit">Assign</button>
+        <div class="form-text text-center" id="assignHint"></div>
+    }
+</form>
+
+<script>
+(function () {
+  const form = document.getElementById('assignForm');
+  if (!form || form.dataset.bound) return;
+  form.dataset.bound = '1';
+
+  const isDraft    = form.dataset.draft === 'true';
+  const members    = parseInt(form.dataset.members, 10) || 0;
+  const unassigned = parseInt(form.dataset.unassigned, 10) || 0;
+  const picker     = document.getElementById('assignPicker');
+  const lateJoin   = document.getElementById('assignLateJoin');
+  const submit     = document.getElementById('assignSubmit');
+  const hint       = document.getElementById('assignHint');
+  const countEl    = document.getElementById('assignSelectedCount');
+  const search     = document.getElementById('assignSearch');
+  if (!submit) return;
+
+  const boxes   = () => Array.from(form.querySelectorAll('input[name="studentIds"]'));
+  const entire  = () => form.querySelector('input[name="audience"]:checked')?.value === 'EntireClass';
+  const plural  = n => n === 1 ? '1 student' : n + ' students';
+
+  function refresh() {
+    const isEntire = entire();
+    picker?.classList.toggle('d-none', isEntire);
+    lateJoin?.classList.toggle('d-none', !isEntire);
+
+    const chosen  = boxes().filter(b => b.checked);
+    const newOnes = chosen.filter(b => b.dataset.locked !== 'true').length;
+    if (countEl) countEl.textContent = chosen.length;
+
+    let n, label;
+    if (isEntire) {
+      n = isDraft ? members : unassigned;
+      label = isDraft ? 'Assign to ' + plural(n)
+            : n > 0   ? 'Assign to ' + plural(n) + ' more'
+            :           'Save the rule for students who join later';
+      submit.disabled = false;
+      hint.textContent = isDraft ? 'Everyone now in the class gets it, and it becomes active.' : '';
+    } else {
+      n = isDraft ? chosen.length : newOnes;
+      label = n === 0 ? 'Choose students' : 'Assign to ' + plural(n) + (isDraft ? '' : ' more');
+      submit.disabled = n === 0;
+      hint.textContent = isDraft ? 'Only the chosen students get it. Students who join later do not.' : '';
+    }
+    submit.textContent = label;
+  }
+
+  form.addEventListener('change', refresh);
+
+  search?.addEventListener('input', function () {
+    const q = this.value.trim().toLowerCase();
+    let shown = 0;
+    form.querySelectorAll('.assign-student').forEach(row => {
+      const match = !q || row.dataset.search.includes(q);
+      row.classList.toggle('d-none', !match);
+      if (match) shown++;
+    });
+    document.getElementById('assignNoMatch')?.classList.toggle('d-none', shown > 0);
+  });
+
+  document.getElementById('assignSelectShown')?.addEventListener('click', () => {
+    form.querySelectorAll('.assign-student:not(.d-none) input[name="studentIds"]').forEach(b => { if (!b.disabled) b.checked = true; });
+    refresh();
+  });
+  document.getElementById('assignClear')?.addEventListener('click', () => {
+    boxes().forEach(b => { if (!b.disabled) b.checked = false; });
+    refresh();
+  });
+
+  // One click, one request: a double click must not post twice.
+  form.addEventListener('submit', () => {
+    submit.disabled = true;
+    submit.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Assigning…';
+  });
+
+  refresh();
+})();
+</script>

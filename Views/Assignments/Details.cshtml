@@ -48,15 +48,12 @@
       </a>
     }
 
-    @if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft)
+    @if (Model.AssignPanel is not null)
     {
-      <form method="post" asp-action="Publish" asp-route-id="@a.Id"
-            onsubmit="return confirm('Publish this assignment? Students can start straight away. You can still fix questions until someone submits — after the first submission the questions are locked.')">
-        @Html.AntiForgeryToken()
-        <button type="submit" class="btn btn-success btn-sm">
-          <i class="bx bx-send me-1"></i> Publish
-        </button>
-      </form>
+      <button type="button" class="btn btn-@(a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft ? "primary" : "outline-primary") btn-sm"
+              id="openAssignBtn" data-bs-toggle="modal" data-bs-target="#assignModal">
+        <i class="bx bx-send me-1"></i> @(a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft ? "Assign" : "Assign more students")
+      </button>
     }
 
     @if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Active)
@@ -108,7 +105,7 @@
           <dt class="col-5 text-muted">Status</dt>
           <dd class="col-7"><span class="badge bg-@statusBadge">@a.Status</span></dd>
           <dt class="col-5 text-muted">Deadline</dt>
-          <dd class="col-7">@(a.Deadline?.ToString("dd MMM yyyy HH:mm") ?? "—")</dd>
+          <dd class="col-7">@SmartSchoolAI.Services.SchoolTime.Show(a.Deadline)</dd>
           <dt class="col-5 text-muted">Late sub.</dt>
           <dd class="col-7">@(a.AllowLateSubmission ? "Allowed" : "Not allowed")</dd>
           <dt class="col-5 text-muted">Created</dt>
@@ -122,307 +119,331 @@
         }
       </div>
     </div>
+
+    @if (a.Status is SmartSchoolAI.Models.AssignmentStatus.Active or SmartSchoolAI.Models.AssignmentStatus.Draft)
+    {
+      var follows = a.FollowsNewClassMembers;
+      <div class="card mt-4" id="lateJoinCard">
+        <div class="card-body">
+          <h6 class="card-title mb-1"><i class="bx bx-user-plus me-1"></i>If a student joins the class later</h6>
+          <p class="small text-muted mb-2">
+            @if (!follows)
+            {
+              <span id="lateJoinCurrent">They are <strong>not</strong> given this assignment — you add them by hand.</span>
+            }
+            else if (a.LateJoinPolicy == SmartSchoolAI.Models.LateJoinPolicy.AutoAssign)
+            {
+              <span id="lateJoinCurrent">They get it <strong>automatically</strong>.</span>
+            }
+            else
+            {
+              <span id="lateJoinCurrent">They wait for <strong>your approval</strong> in the class's Students tab.</span>
+            }
+          </p>
+          @if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Active)
+          {
+            <form method="post" asp-action="SetLateJoinPolicy" asp-route-id="@a.Id" class="d-flex gap-2 align-items-center" id="lateJoinForm">
+              @Html.AntiForgeryToken()
+              <select name="policy" class="form-select form-select-sm" aria-label="Rule for students who join later">
+                <option value="Manual" selected="@(!follows)">Don't assign (manual)</option>
+                <option value="AutoAssign" selected="@(follows && a.LateJoinPolicy == SmartSchoolAI.Models.LateJoinPolicy.AutoAssign)">Assign automatically</option>
+                <option value="TeacherApproval" selected="@(follows && a.LateJoinPolicy == SmartSchoolAI.Models.LateJoinPolicy.TeacherApproval)">With my approval</option>
+              </select>
+              <button type="submit" class="btn btn-sm btn-outline-primary">Save</button>
+            </form>
+            <div class="form-text">Only affects students who join from now on. Nobody already in the class is added.</div>
+          }
+          else
+          {
+            <div class="form-text">You choose this when you assign the work.</div>
+          }
+        </div>
+      </div>
+    }
   </div>
 
   <!-- Student results & assignment management -->
   <div class="col-md-8 mb-4">
+    @{
+      var classHasNoStudents = !a.Class.ClassStudents.Any();
+      var recipients = Model.TotalAssigned;
+      string FilterLink(string f) => f == "all" ? $"/Assignments/Details/{a.Id}" : $"/Assignments/Details/{a.Id}?filter={f}";
+      var filters = new[]
+      {
+        ("all",           "All",           recipients),
+        ("not-submitted", "Not submitted", recipients - Model.SubmittedStudents),
+        ("submitted",     "Submitted",     Model.SubmittedStudents),
+        ("needs-review",  "Needs review",  Model.NeedsReviewStudents)
+      };
+    }
 
-    <!-- Assigned Students management -->
-    <div class="card mb-4">
-      @{
-        // Two different empty states hide behind the same "nothing to pick
-        // from" symptom: the class this assignment belongs to may simply
-        // have no enrolled students at all, or every enrolled student may
-        // already be assigned. Only the second case is something "Assign
-        // All" or the per-student dropdown can do anything about — showing
-        // both controls regardless left a teacher staring at an assignment
-        // with 0 assigned students and no way to tell why the dropdown
-        // never appeared.
-        var classHasNoStudents = !a.Class.ClassStudents.Any();
-      }
-      <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="bx bx-user-check me-2"></i>Assigned Students (@a.AssignmentStudents.Count)</h5>
-        @if (!classHasNoStudents && Model.AvailableStudents.Any())
+    <div class="card mb-4" id="recipients">
+      <div class="card-header">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div>
+            <h5 class="mb-0"><i class="bx bx-user-check me-2"></i>Students</h5>
+            <div class="small text-muted mt-1" id="submittedSummary">
+              Submitted <strong>@Model.SubmittedStudents of @recipients</strong>
+              · @Model.SubmittedAttempts @(Model.SubmittedAttempts == 1 ? "submission attempt" : "submission attempts")
+              @if (Model.PendingRequests > 0)
+              {
+                <span>
+                  · <a href="/Classes/Details/@a.ClassId?tab=students#pendingRequests" class="text-warning fw-semibold">@Model.PendingRequests waiting for approval</a>
+                </span>
+              }
+            </div>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            @if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Active)
+            {
+              <span class="badge bg-label-danger d-flex align-items-center gap-1" id="liveBadge"
+                    data-bs-toggle="tooltip" title="This board refreshes automatically as students submit">
+                <span class="spinner-grow spinner-grow-sm" style="width:.5rem;height:.5rem;"></span>Live
+              </span>
+            }
+            @if (a.StudentResults.Any())
+            {
+              <div class="form-check form-switch mb-0 me-1" data-bs-toggle="tooltip" title="Hide names to grade without bias">
+                <input class="form-check-input" type="checkbox" id="anonToggle" onchange="toggleAnon(this.checked)">
+                <label class="form-check-label small" for="anonToggle">Anonymous</label>
+              </div>
+              <a href="/Assignments/ExportGrades/@a.Id" class="btn btn-outline-secondary btn-sm"
+                 data-bs-toggle="tooltip" title="Download grades as CSV for your gradebook">
+                <i class="bx bx-download me-1"></i>Export CSV
+              </a>
+            }
+          </div>
+        </div>
+        @if (recipients > 0)
         {
-          <form method="post" asp-action="AssignAllClassStudents" class="d-inline">
-            @Html.AntiForgeryToken()
-            <input type="hidden" name="assignmentId" value="@a.Id" />
-            <button type="submit" class="btn btn-outline-primary btn-sm"
-                    data-bs-toggle="tooltip" title="Assign all enrolled class students to this task">
-              <i class="bx bx-group me-1"></i> Assign All
-            </button>
-          </form>
+          <ul class="nav nav-pills nav-sm mt-3 gap-1" id="recipientFilters">
+            @foreach (var (key, label, count) in filters)
+            {
+              <li class="nav-item">
+                <a class="nav-link py-1 px-2 small @(Model.Filter == key ? "active" : "")" href="@FilterLink(key)"
+                   data-filter="@key" @(Model.Filter == key ? "aria-current=page" : null)>
+                  @label <span class="badge rounded-pill @(Model.Filter == key ? "bg-white text-primary" : "bg-label-secondary") ms-1">@count</span>
+                </a>
+              </li>
+            }
+          </ul>
         }
       </div>
-      <div class="card-body">
-        @{
-          var availableStudents = Model.AvailableStudents;
-        }
-        @if (classHasNoStudents)
-        {
-          <p class="text-muted text-center py-3 mb-0">
-            The class <strong>@a.Class.Name</strong> has no enrolled students yet — there is no one to assign.
-            <br />
-            <a asp-controller="Classes" asp-action="Details" asp-route-id="@a.ClassId">Add students to @a.Class.Name</a> first.
-          </p>
-        }
-        else if (availableStudents.Any())
-        {
-          <!-- Add student dropdown -->
-          <div class="mb-3">
-            <form method="post" asp-action="AssignStudent" class="row g-2 align-items-end">
-              @Html.AntiForgeryToken()
-              <input type="hidden" name="assignmentId" value="@a.Id" />
-              <div class="col">
-                <label class="form-label small text-muted mb-1">Add student to this task</label>
-                <select name="studentId" class="form-select form-select-sm" required>
-                  <option value="">— Select a student —</option>
-                  @foreach (var s in availableStudents.OrderBy(s => s.FullName))
-                  {
-                    <option value="@s.Id">@s.FullName (@s.Email)</option>
-                  }
-                </select>
-              </div>
-              <div class="col-auto">
-                <label class="form-label small text-muted mb-1">Start date (optional)</label>
-                <input type="datetime-local" name="startDate" class="form-control form-control-sm" />
-              </div>
-              <div class="col-auto">
-                <label class="form-label small text-muted mb-1">Due date (optional)</label>
-                <input type="datetime-local" name="dueDate" class="form-control form-control-sm" />
-              </div>
-              <div class="col-auto">
-                <button type="submit" class="btn btn-primary btn-sm">
-                  <i class="bx bx-plus me-1"></i> Add
-                </button>
-              </div>
-            </form>
-            <div class="form-text">Leave the dates blank to use this task's own start/due date — set them only to give this student a custom schedule.</div>
-          </div>
-          <hr class="my-2" />
-        }
 
-        @if (!a.AssignmentStudents.Any())
-        {
-          @if (!classHasNoStudents)
+      @if (classHasNoStudents && recipients == 0)
+      {
+        <div class="card-body text-center text-muted py-4">
+          The class <strong>@a.Class.Name</strong> has no students yet.
+          <div class="mt-2">
+            <a class="btn btn-sm btn-primary" href="/Classes/Details/@a.ClassId?tab=students&returnUrl=@Uri.EscapeDataString($"/Assignments/Details/{a.Id}")">
+              <i class="bx bx-envelope me-1"></i>Invite students
+            </a>
+          </div>
+        </div>
+      }
+      else if (recipients == 0)
+      {
+        <div class="card-body text-center text-muted py-4">
+          Nobody has this assignment yet.
+          @if (Model.AssignPanel is not null)
           {
-            <p class="text-muted text-center py-3 mb-0">
-              No students assigned yet. Use the dropdown above or click <strong>Assign All</strong> to add students.
-            </p>
+            <div class="mt-2">
+              <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#assignModal">Choose students</button>
+            </div>
           }
-        }
-        else
-        {
-          <div class="table-responsive">
-            <table class="table table-sm table-hover mb-0">
-              <thead class="table-light">
-                <tr>
-                  <th>Student</th>
-                  <th>Email</th>
-                  <th>Assigned</th>
-                  <th>Schedule</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                @foreach (var asn in a.AssignmentStudents.OrderBy(a => a.Student.FullName))
-                {
-                  var rowId = "dates-" + asn.StudentId;
-                  var hasCustom = asn.StartDateOverride.HasValue || asn.DueDateOverride.HasValue;
-                  <tr>
-                    <td>
-                      <div class="d-flex align-items-center">
-                        <div class="avatar avatar-xs me-2">
-                          <span class="avatar-initial rounded-circle bg-label-primary">@asn.Student.FullName[0]</span>
-                        </div>
-                        <strong>@asn.Student.FullName</strong>
-                      </div>
-                    </td>
-                    <td class="text-muted small">@asn.Student.Email</td>
-                    <td class="small">@asn.AssignedAt.ToString("dd MMM yyyy")</td>
-                    <td class="small">
-                      @if (hasCustom)
+        </div>
+      }
+      else
+      {
+        <div class="table-responsive">
+          <table class="table table-hover mb-0 align-middle" id="recipientTable">
+            <thead class="table-light">
+              <tr>
+                <th>Student</th>
+                <th>Due</th>
+                <th>Status</th>
+                <th>Score</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @if (!Model.Recipients.Any())
+              {
+                <tr><td colspan="5" class="text-center text-muted py-4">No students in this list.</td></tr>
+              }
+              @foreach (var row in Model.Recipients)
+              {
+                var asn       = row.Enrollment;
+                var latest    = row.Latest;
+                var due       = asn.DueDateOverride ?? a.Deadline;
+                var attempts  = row.Submitted;
+                var rowId     = "attempts-" + asn.StudentId;
+                var datesId   = "dates-" + asn.StudentId;
+                var hasCustom = asn.StartDateOverride.HasValue || asn.DueDateOverride.HasValue;
+                var workUrl   = $"/Classes/StudentWork?studentId={asn.StudentId}&classId={a.ClassId}&returnUrl={Uri.EscapeDataString($"/Assignments/Details/{a.Id}" + (Model.Filter == "all" ? "" : $"?filter={Model.Filter}"))}";
+                <tr data-student="@asn.StudentId">
+                  <td>
+                    <a href="@workUrl" class="fw-semibold js-anon student-link">@row.Student.FullName</a>
+                    <small class="d-block text-muted js-anon">@row.Student.Email</small>
+                  </td>
+                  <td class="small">
+                    @SmartSchoolAI.Services.SchoolTime.Show(due, "dd MMM HH:mm")
+                    @if (hasCustom)
+                    {
+                      <span class="badge bg-label-info ms-1" data-bs-toggle="tooltip"
+                            title="Start: @SmartSchoolAI.Services.SchoolTime.Show(asn.StartDateOverride, empty: "task default") · Due: @SmartSchoolAI.Services.SchoolTime.Show(asn.DueDateOverride, empty: "task default")">Personal</span>
+                    }
+                  </td>
+                  <td>
+                    @if (row.NeedsReview)
+                    {
+                      <span class="badge bg-warning"><i class="bx bx-error me-1"></i>Needs review</span>
+                    }
+                    else if (latest?.TeacherReviewedAt != null)
+                    {
+                      <span class="badge bg-label-success">Reviewed</span>
+                    }
+                    else if (latest is not null)
+                    {
+                      <span class="badge bg-label-info">Submitted</span>
+                    }
+                    else if (row.InProgress)
+                    {
+                      <span class="badge bg-label-secondary">In progress</span>
+                    }
+                    else
+                    {
+                      <span class="badge bg-label-warning">Not submitted</span>
+                    }
+                    @if (attempts.Count > 1)
+                    {
+                      <button type="button" class="btn btn-link btn-sm p-0 ms-1 small" data-bs-toggle="collapse" data-bs-target="#@rowId"
+                              aria-expanded="false" aria-controls="@rowId">@attempts.Count attempts</button>
+                    }
+                  </td>
+                  <td>
+                    @if (latest is not null)
+                    {
+                      <span class="fw-semibold @(a.IsPass(latest.Score) ? "text-success" : latest.Score >= a.PassThreshold / 2 ? "text-warning" : "text-danger")">@latest.Score%</span>
+                    }
+                    else
+                    {
+                      <span class="text-muted">—</span>
+                    }
+                  </td>
+                  <td class="text-end">
+                    <div class="d-inline-flex gap-1">
+                      @if (latest is not null)
                       {
-                        <span class="badge bg-label-info" data-bs-toggle="tooltip"
-                              title="Start: @(asn.StartDateOverride?.ToString("dd MMM yyyy HH:mm") ?? "task default") · Due: @(asn.DueDateOverride?.ToString("dd MMM yyyy HH:mm") ?? "task default")">
-                          <i class="bx bx-calendar-edit me-1"></i>Custom schedule
-                        </span>
-                      }
-                      else
-                      {
-                        <span class="text-muted">Uses task's dates</span>
-                      }
-                      <button type="button" class="btn btn-sm btn-link p-0 ms-1" data-bs-toggle="collapse" data-bs-target="#@rowId">
-                        Edit
-                      </button>
-                    </td>
-                    <td>
-                      <div class="d-flex gap-1">
-                        <a href="/Assignments/StudentStats?assignmentId=@a.Id&studentId=@asn.StudentId"
-                           class="btn btn-sm btn-icon btn-outline-primary"
-                           data-bs-toggle="tooltip" title="View this student's statistics">
-                          <i class="bx bx-line-chart"></i>
+                        <a href="/Assignments/SubmissionDetail?resultId=@latest.Id"
+                           class="btn btn-sm @(row.NeedsReview ? "btn-warning" : "btn-outline-primary")">
+                          @(row.NeedsReview ? "Review work" : "Open attempt")
                         </a>
-                        <form method="post" asp-action="UnassignStudent" class="d-inline"
-                              onsubmit="return confirm('Remove @asn.Student.FullName from this task?')">
+                      }
+                      <a href="/Assignments/StudentStats?assignmentId=@a.Id&studentId=@asn.StudentId"
+                         class="btn btn-sm btn-icon btn-outline-primary" data-bs-toggle="tooltip" title="This student's statistics">
+                        <i class="bx bx-line-chart"></i>
+                      </a>
+                      <button type="button" class="btn btn-sm btn-icon btn-outline-secondary" data-bs-toggle="collapse"
+                              data-bs-target="#@datesId" title="Personal start and due dates">
+                        <i class="bx bx-calendar-edit"></i>
+                      </button>
+                      @if (latest is not null)
+                      {
+                        <form method="post" asp-action="ResetStudentResult" class="d-inline"
+                              onsubmit="return confirm('Reset @row.Student.FullName\'s latest result? This will delete that submission and allow them to retake the assignment.')">
                           @Html.AntiForgeryToken()
+                          <input type="hidden" name="resultId" value="@latest.Id" />
                           <input type="hidden" name="assignmentId" value="@a.Id" />
-                          <input type="hidden" name="studentId" value="@asn.StudentId" />
-                          <button type="submit" class="btn btn-sm btn-icon btn-outline-danger"
-                                  data-bs-toggle="tooltip" title="Remove from task">
-                            <i class="bx bx-user-minus"></i>
+                          <button type="submit" class="btn btn-sm btn-icon btn-outline-danger" data-bs-toggle="tooltip" title="Reset latest attempt &amp; allow retake">
+                            <i class="bx bx-reset"></i>
                           </button>
                         </form>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr class="collapse" id="@rowId">
-                    <td colspan="5" class="bg-light">
-                      <form method="post" asp-action="UpdateStudentDates" class="row g-2 align-items-end py-2">
+                      }
+                      <form method="post" asp-action="UnassignStudent" class="d-inline"
+                            onsubmit="return confirm('Remove @row.Student.FullName from this task?')">
                         @Html.AntiForgeryToken()
                         <input type="hidden" name="assignmentId" value="@a.Id" />
                         <input type="hidden" name="studentId" value="@asn.StudentId" />
-                        <div class="col-auto">
-                          <label class="form-label small text-muted mb-1">Start date</label>
-                          <input type="datetime-local" name="startDate" class="form-control form-control-sm"
-                                 value="@(asn.StartDateOverride?.ToString("yyyy-MM-ddTHH:mm"))" />
-                        </div>
-                        <div class="col-auto">
-                          <label class="form-label small text-muted mb-1">Due date</label>
-                          <input type="datetime-local" name="dueDate" class="form-control form-control-sm"
-                                 value="@(asn.DueDateOverride?.ToString("yyyy-MM-ddTHH:mm"))" />
-                        </div>
-                        <div class="col-auto">
-                          <button type="submit" class="btn btn-sm btn-primary">Save</button>
-                        </div>
-                        @if (hasCustom)
-                        {
-                          <div class="col-auto">
-                            <button type="submit" formnovalidate class="btn btn-sm btn-outline-secondary"
-                                    onclick="this.closest('form').querySelectorAll('input[type=datetime-local]').forEach(i => i.value = '')">
-                              Remove custom dates
-                            </button>
-                          </div>
-                        }
-                      </form>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
-      </div>
-    </div>
-
-    <!-- Submissions -->
-    <div class="card mb-4">
-      <div class="card-header d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="bx bx-check-double me-2"></i>Submissions (@a.StudentResults.Count / @Model.TotalAssigned)</h5>
-        <div class="d-flex align-items-center gap-2">
-          @if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Active)
-          {
-            <span class="badge bg-label-danger d-flex align-items-center gap-1" id="liveBadge"
-                  data-bs-toggle="tooltip" title="This board refreshes automatically as students submit">
-              <span class="spinner-grow spinner-grow-sm" style="width:.5rem;height:.5rem;"></span>Live
-            </span>
-          }
-          @if (a.StudentResults.Any())
-          {
-            <div class="form-check form-switch mb-0 me-1" data-bs-toggle="tooltip"
-                 title="Hide names to grade without bias">
-              <input class="form-check-input" type="checkbox" id="anonToggle" onchange="toggleAnon(this.checked)">
-              <label class="form-check-label small" for="anonToggle">Anonymous</label>
-            </div>
-            <a href="/Assignments/ExportGrades/@a.Id" class="btn btn-outline-secondary btn-sm"
-               data-bs-toggle="tooltip" title="Download grades as CSV for your gradebook">
-              <i class="bx bx-download me-1"></i>Export CSV
-            </a>
-          }
-        </div>
-      </div>
-      <div class="table-responsive">
-        <table class="table table-hover mb-0">
-          <thead class="table-light">
-            <tr>
-              <th>Student</th>
-              <th>Email</th>
-              <th>Submitted</th>
-              <th>Attempt</th>
-              <th>Score</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            @if (!a.StudentResults.Any())
-            {
-              <tr>
-                <td colspan="7" class="text-center py-4 text-muted">
-                  No submissions yet.
-                </td>
-              </tr>
-            }
-            else
-            {
-              @foreach (var result in a.StudentResults.OrderByDescending(r => r.SubmittedAt))
-              {
-                <tr>
-                  <td><strong class="js-anon">@result.Student.FullName</strong></td>
-                  <td class="text-muted small js-anon">@result.Student.Email</td>
-                  <td>@result.SubmittedAt.ToString("dd MMM HH:mm")</td>
-                  <td>@result.AttemptNumber</td>
-                  <td>
-                    <span class="fw-semibold @(result.Score >= 70 ? "text-success" : result.Score >= 50 ? "text-warning" : "text-danger")">
-                      @result.Score%
-                    </span>
-                  </td>
-                  <td>
-                    <span class="badge bg-label-@(result.OverallStatus == SmartSchoolAI.Models.ResultStatus.Correct ? "success" :
-                                                   result.OverallStatus == SmartSchoolAI.Models.ResultStatus.Partial  ? "warning" : "danger")">
-                      @result.OverallStatus
-                    </span>
-                    @{
-                      var flagged = result.StudentAnswers.Count(a => a.NeedsReview);
-                    }
-                    @if (flagged > 0)
-                    {
-                      <span class="badge bg-warning ms-1" data-bs-toggle="tooltip"
-                            title="The AI could not confirm @flagged answer(s) — please check them">
-                        <i class="bx bx-error me-1"></i>@flagged to review
-                      </span>
-                    }
-                  </td>
-                  <td>
-                    <div class="d-flex gap-1">
-                      <a href="/Assignments/SubmissionDetail?resultId=@result.Id"
-                         class="btn btn-sm btn-icon btn-outline-primary"
-                         data-bs-toggle="tooltip" title="View Answers">
-                        <i class="bx bx-show"></i>
-                      </a>
-                      <a href="/Assignments/StudentStats?assignmentId=@a.Id&studentId=@result.StudentId"
-                         class="btn btn-sm btn-icon btn-outline-primary"
-                         data-bs-toggle="tooltip" title="View this student's statistics">
-                        <i class="bx bx-line-chart"></i>
-                      </a>
-                      <form method="post" asp-action="ResetStudentResult" class="d-inline"
-                            onsubmit="return confirm('Reset @result.Student.FullName\'s result? This will delete their submission and allow them to retake the assignment.')">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="resultId" value="@result.Id" />
-                        <input type="hidden" name="assignmentId" value="@a.Id" />
-                        <button type="submit" class="btn btn-sm btn-icon btn-outline-danger"
-                                data-bs-toggle="tooltip" title="Reset & allow retake">
-                          <i class="bx bx-reset"></i>
+                        <button type="submit" class="btn btn-sm btn-icon btn-outline-danger" data-bs-toggle="tooltip" title="Remove from task">
+                          <i class="bx bx-user-minus"></i>
                         </button>
                       </form>
                     </div>
                   </td>
                 </tr>
+                @if (attempts.Count > 1)
+                {
+                  <tr class="collapse" id="@rowId">
+                    <td colspan="5" class="bg-light py-2">
+                      <div class="small fw-semibold mb-1">All attempts</div>
+                      <table class="table table-sm mb-0 bg-transparent">
+                        <tbody>
+                          @foreach (var r in attempts)
+                          {
+                            <tr>
+                              <td>Attempt @r.AttemptNumber</td>
+                              <td>@SmartSchoolAI.Services.SchoolTime.Show(r.SubmittedAt, "dd MMM HH:mm")</td>
+                              <td>@r.Score%</td>
+                              <td>
+                                @if (SmartSchoolAI.Services.ReviewRules.Needs(r))
+                                {
+                                  <span class="badge bg-warning">Needs review</span>
+                                }
+                              </td>
+                              <td class="text-end">
+                                <a href="/Assignments/SubmissionDetail?resultId=@r.Id" class="btn btn-sm btn-outline-primary py-0">Open attempt</a>
+                                <form method="post" asp-action="ResetStudentResult" class="d-inline"
+                                      onsubmit="return confirm('Reset this attempt? It is deleted and the student may take the assignment again.')">
+                                  @Html.AntiForgeryToken()
+                                  <input type="hidden" name="resultId" value="@r.Id" />
+                                  <input type="hidden" name="assignmentId" value="@a.Id" />
+                                  <button type="submit" class="btn btn-sm btn-icon btn-outline-danger py-0" title="Reset & allow retake"><i class="bx bx-reset"></i></button>
+                                </form>
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </td>
+                  </tr>
+                }
+                <tr class="collapse" id="@datesId">
+                  <td colspan="5" class="bg-light">
+                    <form method="post" asp-action="UpdateStudentDates" class="row g-2 align-items-end py-2">
+                      @Html.AntiForgeryToken()
+                      <input type="hidden" name="assignmentId" value="@a.Id" />
+                      <input type="hidden" name="studentId" value="@asn.StudentId" />
+                      <div class="col-auto">
+                        <label class="form-label small text-muted mb-1">Start date</label>
+                        <input type="datetime-local" name="startDate" class="form-control form-control-sm"
+                               value="@SmartSchoolAI.Services.SchoolTime.Input(asn.StartDateOverride)" />
+                      </div>
+                      <div class="col-auto">
+                        <label class="form-label small text-muted mb-1">Due date</label>
+                        <input type="datetime-local" name="dueDate" class="form-control form-control-sm"
+                               value="@SmartSchoolAI.Services.SchoolTime.Input(asn.DueDateOverride)" />
+                      </div>
+                      <div class="col-auto">
+                        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                      </div>
+                      @if (hasCustom)
+                      {
+                        <div class="col-auto">
+                          <button type="submit" formnovalidate class="btn btn-sm btn-outline-secondary"
+                                  onclick="this.closest('form').querySelectorAll('input[type=datetime-local]').forEach(i => i.value = '')">
+                            Remove custom dates
+                          </button>
+                        </div>
+                      }
+                    </form>
+                  </td>
+                </tr>
               }
-            }
-          </tbody>
-        </table>
-      </div>
+            </tbody>
+          </table>
+        </div>
+      }
     </div>
 
     <!-- Question performance -->
@@ -471,43 +492,37 @@
       </div>
     }
 
-    <!-- Students who haven't submitted -->
-    @{
-      var notSubmitted = Model.NotSubmitted;
-    }
-    @if (notSubmitted.Any())
-    {
-      <div class="card">
-        <div class="card-header">
-          <h5 class="mb-0"><i class="bx bx-time-five me-2 text-warning"></i>Not Submitted (@notSubmitted.Count)</h5>
-        </div>
-        <div class="table-responsive">
-          <table class="table table-hover mb-0">
-            <thead class="table-light">
-              <tr>
-                <th>Student</th>
-                <th>Email</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              @foreach (var student in notSubmitted.OrderBy(s => s.FullName))
-              {
-                <tr>
-                  <td class="js-anon">@student.FullName</td>
-                  <td class="text-muted small js-anon">@student.Email</td>
-                  <td><span class="badge bg-label-warning">Pending</span></td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
-      </div>
-    }
   </div>
 </div>
 
 @section Scripts {
+  @if (Model.AssignPanel is not null)
+  {
+    <div class="modal fade" id="assignModal" tabindex="-1" aria-labelledby="assignModalTitle" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title fw-bold" id="assignModalTitle">
+              @(a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft
+                  ? (a.Type == SmartSchoolAI.Models.AssignmentType.Homework ? "Assign homework" : "Assign practice")
+                  : "Assign more students")
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            @await Html.PartialAsync("_AssignPanel", Model.AssignPanel)
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        if (new URLSearchParams(location.search).get('assign') === 'open' || document.getElementById('assignError')) {
+          bootstrap.Modal.getOrCreateInstance(document.getElementById('assignModal')).show();
+        }
+      });
+    </script>
+  }
   <style>
     .anon-on .js-anon { filter: blur(5px); user-select: none; cursor: default; }
   </style>
@@ -524,12 +539,7 @@
       // Live classroom board: poll for changes and refresh when a new submission
       // arrives or a grade changes. Compares against the signature at page load.
       (function () {
-        @{
-          var liveLastTick = a.StudentResults.Any()
-              ? a.StudentResults.Max(r => (r.UpdatedAt ?? r.SubmittedAt).Ticks)
-              : 0L;
-        }
-        const initialSignature = '@($"{a.StudentResults.Count}:{liveLastTick}")';
+        const initialSignature = '@SmartSchoolAI.Controllers.AssignmentsController.LiveSignature(a)';
         const url = '/Assignments/LiveStatus/@a.Id';
         const POLL_MS = 12000;
 

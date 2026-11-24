@@ -11,7 +11,7 @@
 //   GET  /health             readiness probe
 //
 // Request kinds: tutor (streamed), ocr, eval (step grading), verify (second opinion),
-// answer (typed-answer / choice grading), import (question import), other.
+// answer (typed-answer / choice grading), sketch (marking a drawn answer), import (question import), other.
 //
 // Environment: E2E_MOCK_AI_PORT (default 5199), E2E_MOCK_AI_HOST (default 127.0.0.1; CI uses 0.0.0.0
 // so a container can reach it through host.docker.internal).
@@ -30,6 +30,7 @@ const defaults = () => ({
   evalReply: null,    // { steps: [{ number, text?, status, explanation }], overall, expectedAnswer, summary }
   verifyReply: null,  // { overall, agrees, confidence, notes, steps?: [{ number, status, explanation }] }
   answerReply: null,  // { correct, feedback } — or an array, one entry per call (the last repeats)
+  sketchReply: null,  // { correct, marks, confidence, feedback } for a drawn answer
   importReply: null   // the question list an import (PDF / photo) returns, as an array
 });
 
@@ -64,6 +65,7 @@ function describe(body) {
   let kind = "other";
   if (body.stream === true) kind = "tutor";
   else if (hasImage && system.includes("OCR engine")) kind = "ocr";
+  else if (hasImage && system.includes("marking a student's sketch")) kind = "sketch";
   else if (system.includes("expert math teacher")) kind = "eval";
   else if (system.includes("exam moderator")) kind = "verify";
   else if (system.includes("grading students' typed answers")) kind = "answer";
@@ -121,6 +123,11 @@ async function chatCompletions(req, res) {
     const replies = Array.isArray(script.answerReply) ? script.answerReply : [script.answerReply ?? { correct: true, feedback: "That is right." }];
     const reply = replies[Math.min(answerCalls++, replies.length - 1)];
     return json(res, 200, completion(JSON.stringify([{ index, ...reply }])));
+  }
+
+  if (seen.kind === "sketch") {
+    const reply = script.sketchReply ?? { correct: true, marks: 1, confidence: 0.9, feedback: "The sketch shows the right shape." };
+    return json(res, 200, completion(JSON.stringify(reply)));
   }
 
   if (seen.kind === "import") return json(res, 200, completion(JSON.stringify(script.importReply ?? [])));

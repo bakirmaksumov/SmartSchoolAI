@@ -42,18 +42,27 @@ public class AnswerGradingService
           linear, the endpoints of an interval. A statement that holds in every case is true.
         - Write the feedback in simple, clear English — many students are still
           learning English. Use short sentences and avoid idioms and slang.
+        - Every item says how many marks it is worth. Give "marks" as a whole number from 0
+          to that number, the way an exam mark scheme would: method marks for a correct
+          method even when the final answer is wrong, accuracy marks only for correct
+          results. "correct" is true only when the answer earns full marks.
         Return ONLY valid JSON — no markdown fences, no explanation:
-        [ { "index": 1, "correct": true, "feedback": "<one short sentence for the student>" } ]
+        [ { "index": 1, "correct": true, "marks": 1, "feedback": "<one short sentence for the student>" } ]
         """;
 
     /// <summary>One typed answer to grade. Index is the 0-based question index.</summary>
-    public sealed record ItemToGrade(int Index, string Question, string StudentAnswer, string? ExpectedAnswer);
+    public sealed record ItemToGrade(int Index, string Question, string StudentAnswer, string? ExpectedAnswer, decimal MaxMarks = 1);
 
     /// <summary>The model's verdict for one item.</summary>
     public sealed class GradedItem
     {
         public int    Index    { get; set; }
         public bool   Correct  { get; set; }
+
+        /// <summary>Marks the model awarded, out of the item's marks; null when it gave none.</summary>
+        [System.Text.Json.Serialization.JsonNumberHandling(System.Text.Json.Serialization.JsonNumberHandling.AllowReadingFromString)]
+        public decimal? Marks { get; set; }
+
         public string Feedback { get; set; } = string.Empty;
     }
 
@@ -73,6 +82,7 @@ public class AnswerGradingService
         {
             sb.AppendLine($"Item {item.Index}:");
             sb.AppendLine($"Question: {item.Question}");
+            sb.AppendLine($"Marks available: {item.MaxMarks:0.##}");
             sb.AppendLine($"Expected answer: {(string.IsNullOrWhiteSpace(item.ExpectedAnswer) ? "(not provided)" : item.ExpectedAnswer)}");
             sb.AppendLine($"Student's answer: {item.StudentAnswer}");
             sb.AppendLine();

@@ -25,8 +25,8 @@
         <i class="bx bx-calendar-edit"></i>
         <span class="small">
             This student has a custom schedule —
-            Start: <strong>@(Model.Enrollment.StartDateOverride?.ToString("dd MMM yyyy HH:mm") ?? "task default")</strong>,
-            Due: <strong>@(Model.Enrollment.DueDateOverride?.ToString("dd MMM yyyy HH:mm") ?? "task default")</strong>
+            Start: <strong>@SmartSchoolAI.Services.SchoolTime.Show(Model.Enrollment.StartDateOverride, empty: "task default")</strong>,
+            Due: <strong>@SmartSchoolAI.Services.SchoolTime.Show(Model.Enrollment.DueDateOverride, empty: "task default")</strong>
         </span>
     </div>
 }
@@ -116,7 +116,7 @@ else
                                 }
                             </td>
                             <td>@(attempt.IsSubmitted ? attempt.Score + "%" : "—")</td>
-                            <td class="small text-muted">@(attempt.IsSubmitted ? attempt.SubmittedAt.ToString("dd MMM yyyy HH:mm") : "—")</td>
+                            <td class="small text-muted">@(attempt.IsSubmitted ? SmartSchoolAI.Services.SchoolTime.Show(attempt.SubmittedAt) : "—")</td>
                             <td>
                                 @if (attempt.IsSubmitted)
                                 {

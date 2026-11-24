@@ -1,0 +1,145 @@
+@model SmartSchoolAI.ViewModels.StudentWorkViewModel
+@{
+    var s = Model.Student;
+    ViewData["Title"] = s.FullName;
+    var current = Model.ClassId is { } cid ? Model.Classes.FirstOrDefault(c => c.Id == cid) : null;
+    string Badge(string status) => status switch
+    {
+        "Needs review"      => "bg-warning",
+        "Reviewed"          => "bg-label-success",
+        "Submitted"         => "bg-label-info",
+        "In progress"       => "bg-label-secondary",
+        "Overdue"           => "bg-label-danger",
+        "Awaiting approval" => "bg-label-warning",
+        "Closed"            => "bg-label-dark",
+        "Not open yet"      => "bg-label-secondary",
+        _                   => "bg-label-primary"
+    };
+    var self = Context.Request.Path + Context.Request.QueryString;
+}
+
+<div class="row mb-3">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0">
+      <span class="text-muted fw-light">
+        SmartSchool AI /
+        @if (current is not null)
+        {
+          <a href="/Classes/Details/@current.Id?tab=students">@current.Name</a> <text>/</text>
+        }
+        else
+        {
+          <a href="/Classes/Students">Students</a> <text>/</text>
+        }
+      </span>
+      @s.FullName
+    </h4>
+  </div>
+</div>
+
+<div class="d-flex align-items-center gap-3 mb-4">
+  <a href="@Model.ReturnUrl" class="btn btn-outline-secondary btn-icon" id="studentWorkBack" title="Back" aria-label="Back">
+    <i class="bx bx-arrow-back"></i>
+  </a>
+  <div class="avatar avatar-md">
+    <span class="avatar-initial rounded-circle bg-label-primary fs-5">@s.FullName[0]</span>
+  </div>
+  <div>
+    <h3 class="mb-0 fw-bold">@s.FullName</h3>
+    <small class="text-muted">@s.Email</small>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+    <h5 class="mb-0">Student work</h5>
+    @if (Model.Classes.Count > 1)
+    {
+      <form method="get" class="d-flex gap-2 align-items-center">
+        <input type="hidden" name="studentId" value="@s.Id" />
+        <input type="hidden" name="returnUrl" value="@Model.ReturnUrl" />
+        <label class="small text-muted" for="workClassFilter">Class</label>
+        <select class="form-select form-select-sm" name="classId" id="workClassFilter" onchange="this.form.submit()">
+          <option value="" selected="@(Model.ClassId is null)">All classes</option>
+          @foreach (var c in Model.Classes)
+          {
+            <option value="@c.Id" selected="@(Model.ClassId == c.Id)">@c.Name</option>
+          }
+        </select>
+      </form>
+    }
+  </div>
+
+  @if (!Model.Rows.Any())
+  {
+    <div class="card-body text-center text-muted py-5" id="studentWorkEmpty">
+      <i class="bx bx-task fs-1"></i>
+      <p class="mt-2 mb-0">No assignments for @s.FullName@(current is null ? "" : $" in {current.Name}") yet.</p>
+    </div>
+  }
+  else
+  {
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle" id="studentWorkTable">
+        <thead class="table-light">
+          <tr>
+            <th>Assignment</th>
+            <th>Class</th>
+            <th>Due</th>
+            <th>Status</th>
+            <th>Score</th>
+            <th class="text-end"></th>
+          </tr>
+        </thead>
+        <tbody>
+          @foreach (var r in Model.Rows)
+          {
+            <tr data-assignment="@r.Assignment.Id">
+              <td>
+                <i class="bx bx-file me-1 text-muted"></i>
+                <a href="/Assignments/Details/@r.Assignment.Id" class="fw-semibold text-body">@r.Assignment.Title</a>
+                @if (r.Assignment.Status != SmartSchoolAI.Models.AssignmentStatus.Active)
+                {
+                  <span class="badge bg-label-secondary ms-1">@r.Assignment.Status</span>
+                }
+              </td>
+              <td>@r.Assignment.Class.Name</td>
+              <td class="small">
+                @SmartSchoolAI.Services.SchoolTime.Show(r.Due)
+                @if (r.PersonalDue)
+                {
+                  <span class="badge bg-label-info ms-1">Personal</span>
+                }
+              </td>
+              <td><span class="badge @Badge(r.Status)">@r.Status</span></td>
+              <td>
+                @if (r.Latest is not null)
+                {
+                  <span class="fw-semibold">@r.Latest.Score%</span>
+                }
+                else
+                {
+                  <span class="text-muted">—</span>
+                }
+              </td>
+              <td class="text-end">
+                @if (r.Latest is not null && r.NeedsReview)
+                {
+                  <a href="/Assignments/SubmissionDetail?resultId=@r.Latest.Id&returnUrl=@Uri.EscapeDataString(self)" class="btn btn-sm btn-warning">Review work</a>
+                }
+                else if (r.Latest is not null)
+                {
+                  <a href="/Assignments/SubmissionDetail?resultId=@r.Latest.Id&returnUrl=@Uri.EscapeDataString(self)" class="btn btn-sm btn-outline-primary">Open attempt</a>
+                }
+                else if (r.Status == "Awaiting approval")
+                {
+                  <a href="/Classes/Details/@r.Assignment.ClassId?tab=students#pendingRequests" class="btn btn-sm btn-outline-warning">Decide</a>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</div>
