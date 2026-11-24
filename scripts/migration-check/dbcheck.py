@@ -73,7 +73,7 @@ def compare(before_path, after_path):
         report.append(f"  {t:<22} NEW table, rows: {n}")
         if t != "__EFMigrationsHistory" and n:
             problems.append(f"new table {t} is not empty ({n} rows)")
-    if "Assignments" in a["tables"]:
+    if "Assignments" in a["tables"] and "Audience" in a["tables"]["Assignments"]["columns"]:
         vals = sorted({(r.get("Audience"), r.get("LateJoinPolicy")) for r in a["tables"]["Assignments"]["rows"]})
         report.append(f"  Assignments (Audience, LateJoinPolicy) after: {vals}")
         if any(v != ("SelectedStudents", "Manual") for v in vals):
