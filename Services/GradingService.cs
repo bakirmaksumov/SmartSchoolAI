@@ -325,24 +325,34 @@ public class GradingService
 
         if (items.Count == 0) return;
 
+        Dictionary<int, AnswerGradingService.GradedItem> graded;
         try
         {
-            var graded = await _grading.GradeAsync(items);
+            graded = await _grading.GradeAsync(items);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI marking of {Count} answer(s) failed for result {ResultId}", items.Count, result.Id);
+            graded = new();
+        }
 
-            foreach (var item in items)
+        foreach (var item in items)
+        {
+            var answer = result.StudentAnswers.First(a => a.QuestionIndex == item.Index);
+            answer.UpdatedAt = DateTime.UtcNow;
+
+            if (graded.TryGetValue(item.Index, out var verdict))
             {
-                if (!graded.TryGetValue(item.Index, out var verdict)) continue;
-
-                var answer = result.StudentAnswers.First(a => a.QuestionIndex == item.Index);
                 answer.IsCorrect     = verdict.Correct;
                 answer.PointsAwarded = PointsFor(verdict.Correct, verdict.Marks, item.MaxMarks);
                 answer.AiSummary     = verdict.Feedback;
-                answer.UpdatedAt     = DateTime.UtcNow;
+                continue;
             }
-        }
-        catch
-        {
-            // Leave these answers ungraded (shown as N/A); the teacher can grade manually.
+
+            // The AI failed or gave no verdict for this answer. The hand-in stands; the answer waits for the teacher
+            // in the review queue instead of silently staying unmarked.
+            answer.NeedsReview = true;
+            answer.ReviewNote  = "The AI could not mark this answer. Please mark it yourself.";
         }
     }
 
@@ -669,7 +679,7 @@ public class GradingService
     }
 
     /// <summary>True for multiple/single choice questions (answered by option letter).</summary>
-    private static bool IsChoiceQuestion(QuestionDto q)
+    public static bool IsChoiceQuestion(QuestionDto q)
         => q.Type is "1" or "MultipleChoice" or "4" or "SingleChoice";
 
     /// <summary>Reads a question's options, which are stored as a JSON array.</summary>

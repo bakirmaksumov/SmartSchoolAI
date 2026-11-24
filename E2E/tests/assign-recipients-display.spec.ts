@@ -2,7 +2,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { assignTo, createClass, signIn, submitAssignment, unique } from "./helpers";
+import { assignTo, createClass, signIn, submitAssignment, unique, expandStudent } from "./helpers";
 
 // Giving work to students in one action, what happens to students who join the class later, batch approval in
 // the class, and one student's work. Teacher and students are real accounts made for this run; no AI is needed.
@@ -89,6 +89,16 @@ async function canOpen(student: string, key: string): Promise<boolean> {
   return response.status() === 200;
 }
 
+const counter = (key: string) => teacher.locator(`[data-counter="${key}"] .counter-value`);
+const studentRow = (name: string) => teacher.locator("#recipientTable tbody.recipient", { hasText: name }).first();
+const visibleRows = () => teacher.locator("#recipientTable tbody.recipient:not(.d-none)");
+
+/** Close is in the page's "More" menu. */
+async function closeFromMenu(): Promise<void> {
+  await teacher.locator("#moreMenu").click();
+  await teacher.locator('.dropdown-menu.show form[action*="/Close/"] button').click();
+}
+
 async function teacherToken(): Promise<string> {
   return teacher.locator('input[name="__RequestVerificationToken"]').first().inputValue();
 }
@@ -150,7 +160,8 @@ test("three students join; the whole class gets the practice in one click", asyn
 
   await modal.locator("#assignSubmit").click();
   await expect(teacher.locator(".alert-success")).toContainText(`Assigned to 3 students from ${className}.`);
-  await expect(teacher.locator("#submittedSummary")).toContainText("Submitted 0 of 3");
+  await expect(counter("all")).toHaveText("3");
+  await expect(counter("submitted")).toHaveText("0");
   await expect(teacher.locator(".badge", { hasText: "Active" }).first()).toBeVisible();
 
   for (const name of ["Amira", "Yusuf", "Lena"]) expect(await sees(name, "Practice A"), name).toBe(true);
@@ -215,7 +226,7 @@ test("students who join later: automatic, with approval, not for hand-picked or 
   }
   await draft("Practice E");
   await assignTo(teacher, ids["Practice E"], { lateJoin: "auto" });
-  await teacher.locator('form[action*="/Close/"] button').click();
+  await closeFromMenu();
   await expect(teacher.locator(".alert-success")).toContainText("Closed");
 
   for (const name of ["Omar", "Zara"]) await registerStudent(name);
@@ -284,9 +295,10 @@ test("batch approval in the class: chosen pairs, a personal due date, decide lat
   expect(await sees("Zara", "Homework D")).toBe(false);
 
   await teacher.goto(`/Assignments/Details/${ids["Homework C"]}`);
-  const omarRow = teacher.locator("#recipientTable tbody tr", { hasText: fullName("Omar") }).first();
-  await expect(omarRow).toContainText("Personal");
-  await expect(omarRow).toContainText("Jun");
+  await expandStudent(teacher, fullName("Omar"));
+  const omarPanel = studentRow(fullName("Omar")).locator(".collapse.show");
+  await expect(omarPanel).toContainText("Personal");
+  await expect(omarPanel).toContainText("Jun");
 });
 
 test("an approval is re-checked when it is made: a closed assignment is not given out", async () => {
@@ -295,7 +307,7 @@ test("an approval is re-checked when it is made: a closed assignment is not give
   await assignTo(teacher, ids["Homework F"], { lateJoin: "approval" });
   await registerStudent("Kian");
   await teacher.goto(`/Assignments/Details/${ids["Homework F"]}`);
-  await teacher.locator('form[action*="/Close/"] button').click();
+  await closeFromMenu();
 
   await teacher.goto(`/Classes/Details/${classId}?tab=students`);
   const kianRow = teacher.locator("#pendingRequests .pending-row", { hasText: fullName("Kian") }).filter({ hasText: title("Homework F") });
@@ -336,13 +348,14 @@ test("submitted X of Y counts students, not attempts; one student's work opens f
 
   await teacher.goto(`/Assignments/Details/${ids["Practice A"]}`);
   // Practice A: the first 3 students plus Bob, Omar, Zara and Kian, who joined later and got it automatically.
-  await expect(teacher.locator("#submittedSummary")).toContainText("Submitted 1 of 7");
-  await expect(teacher.locator("#submittedSummary")).toContainText("2 submission attempts");
-  await teacher.locator('#recipientFilters [data-filter="submitted"]').click();
-  await expect(teacher.locator("#recipientTable tbody tr[data-student]")).toHaveCount(1);
-  await expect(teacher.locator("#recipientTable")).toContainText("2 attempts");
-  await teacher.locator('#recipientFilters [data-filter="not-submitted"]').click();
-  await expect(teacher.locator("#recipientTable tbody tr[data-student]")).toHaveCount(6);
+  await expect(counter("all")).toHaveText("7");
+  await expect(counter("submitted")).toHaveText("1");
+  await expect(teacher.locator('[data-counter="submitted"] .counter-note')).toContainText("2 submitted attempts");
+  await teacher.locator('#liveCounters [data-filter="submitted"]').click();
+  await expect(visibleRows()).toHaveCount(1);
+  await expect(visibleRows().first()).toContainText("2 attempts");
+  await teacher.locator('#liveCounters [data-filter="not-submitted"]').click();
+  await expect(visibleRows()).toHaveCount(6);
 
   // From the class roster: the name opens the student's work, and the attempt opens from there.
   await teacher.goto(`/Classes/Details/${classId}?tab=students`);
@@ -395,8 +408,8 @@ test("the dashboard's 'needs review' count opens the same list", async () => {
   await expect(mine).toContainText(fullName("Yusuf"));
 
   await teacher.goto(`/Assignments/Details/${ids["Drawing H"]}?filter=needs-review`);
-  await expect(teacher.locator("#recipientTable tbody tr[data-student]")).toHaveCount(1);
-  await expect(teacher.locator("#recipientTable")).toContainText("Review work");
+  await expect(visibleRows()).toHaveCount(1);
+  await expect(visibleRows().first()).toContainText("Review work");
 });
 
 test("defaults left as they are: practice goes to newcomers automatically, homework only after approval", async () => {
@@ -469,11 +482,13 @@ test("17:00 Tashkent stays 17:00: created, saved again, a personal due date, and
   await expect(teacher.locator(".alert-success")).toContainText("Assigned to 1 student.");
 
   await teacher.goto(`/Assignments/Details/${id}`);
-  const timurRow = teacher.locator("#recipientTable tbody tr", { hasText: fullName("Timur") }).first();
-  await expect(timurRow).toContainText("28 Nov 17:00");
-  await expect(teacher.locator("#recipientTable tbody tr", { hasText: fullName("Amira") }).first()).toContainText("27 Nov 17:00");
+  await expandStudent(teacher, fullName("Timur"));
+  const timurPanel = studentRow(fullName("Timur")).locator(".collapse.show");
+  await expect(timurPanel).toContainText("28 Nov 2099 17:00");
+  await expandStudent(teacher, fullName("Amira"));
+  await expect(studentRow(fullName("Amira")).locator(".collapse.show")).toContainText("27 Nov 2099 17:00");
   // The personal-dates form shows the same time, so saving it unchanged keeps it.
-  await expect(timurRow.locator("xpath=following-sibling::tr[contains(@id,'dates-')][1]").locator('input[name="dueDate"]')).toHaveValue("2099-11-28T17:00");
+  await expect(timurPanel.locator('input[name="dueDate"]')).toHaveValue("2099-11-28T17:00");
 
   // The student sees their own time, on the same clock.
   const timur = students["Timur"];

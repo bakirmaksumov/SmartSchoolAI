@@ -10,7 +10,8 @@ import {
   signIn,
   signInAs,
   submitAssignment,
-  unique
+  unique,
+  expandStudent
 } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
@@ -136,7 +137,8 @@ test("a second student who was not assigned cannot open the assignment or the fi
 
 test("teacher sees one student's history and the submission detail", async () => {
   await teacher.goto(`/Assignments/Details/${assignmentId}`);
-  await teacher.locator('a[href*="/Assignments/StudentStats"]').first().click();
+  await expandStudent(teacher);
+  await teacher.locator('.collapse.show a[href*="/Assignments/StudentStats"]').first().click();
   await expect(teacher).toHaveURL(/\/Assignments\/StudentStats/i);
   await expect(teacher.locator("body")).toContainText("E2E Student");
   await expect(teacher.locator("body")).toContainText("100");

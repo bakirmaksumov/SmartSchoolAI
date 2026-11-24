@@ -12,44 +12,33 @@ public class AssignmentListViewModel
     public string?          SelectedStatus  { get; set; }
 }
 
-/// <summary>The assignment page: who it went to, who answered, and how each question fared.</summary>
+/// <summary>The assignment page: who it went to, who handed in, and how each question fared.</summary>
 public class AssignmentDetailsViewModel
 {
-    public Assignment Assignment { get; set; } = null!;
+    public Assignment          Assignment { get; set; } = null!;
 
-    /// <summary>Solve rate per question, in question order.</summary>
+    /// <summary>Rows and counters, by the one set of rules (see <see cref="SmartSchoolAI.Services.AssignmentProgress"/>).</summary>
+    public SmartSchoolAI.Services.AssignmentProgress Progress { get; set; } = null!;
+
+    /// <summary>Per question: the newest submitted attempt of each current recipient (unit: students).</summary>
     public List<QuestionStatDto> QuestionStats { get; set; } = new();
 
-    /// <summary>Assigned students who have not submitted yet.</summary>
-    public List<User> NotSubmitted { get; set; } = new();
+    /// <summary>students | questions | details.</summary>
+    public string Tab    { get; set; } = "students";
 
-    /// <summary>Class members the assignment has not been given to yet.</summary>
-    public List<User> AvailableStudents { get; set; } = new();
-
-    public int TotalAssigned { get; set; }
+    /// <summary>all | submitted | not-submitted | needs-review.</summary>
+    public string Filter { get; set; } = "all";
 
     /// <summary>False once a student has submitted — questions are frozen from then on.</summary>
     public bool CanEditQuestions { get; set; }
-
-    /// <summary>One row per current recipient, filtered by <see cref="Filter"/>.</summary>
-    public List<RecipientRow> Recipients { get; set; } = new();
-
-    /// <summary>all | not-submitted | submitted | needs-review.</summary>
-    public string Filter { get; set; } = "all";
-
-    /// <summary>Current recipients with at least one submitted attempt.</summary>
-    public int SubmittedStudents { get; set; }
-
-    /// <summary>Submitted attempts by current recipients.</summary>
-    public int SubmittedAttempts { get; set; }
-
-    /// <summary>Current recipients whose submitted work needs the teacher's review.</summary>
-    public int NeedsReviewStudents { get; set; }
 
     /// <summary>Requests from late joiners still waiting for a decision.</summary>
     public int PendingRequests { get; set; }
 
     public AssignPanelViewModel? AssignPanel { get; set; }
+
+    public int QuestionCount { get; set; }
+    public decimal TotalMarks { get; set; }
 }
 
 /// <summary>The question editor: the assignment plus what the teacher may still change.</summary>

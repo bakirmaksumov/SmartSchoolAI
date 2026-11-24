@@ -233,6 +233,8 @@
       data-anti-paste="@(assignment?.AntiCopyPaste == true ? "true" : "false")">
   @Html.AntiForgeryToken()
   <input type="hidden" name="assignmentId" value="@assignment?.Id" id="assignmentId" />
+  @* One key per press of Submit: a retry with the same key gets the attempt already saved, never a new one. *@
+  <input type="hidden" name="submissionKey" value="@Guid.NewGuid()" id="submissionKey" />
 
   @* Hidden inputs for all questions — synced by JS *@
   @for (int i = 0; i < Model.Count; i++)
@@ -941,13 +943,20 @@
             help from the tutor.
           </p>
           <p class="text-danger mb-0" id="submitWarnText"></p>
+          <div class="alert alert-danger mt-3 mb-0 d-none" id="submitError" role="alert">
+            <div class="fw-semibold mb-1"><i class="bx bx-error-circle me-1"></i>Not submitted yet</div>
+            <div id="submitErrorText"></div>
+          </div>
+          <div class="text-muted small mt-3 d-none" id="submitProgress" role="status">
+            <span class="spinner-border spinner-border-sm me-1"></span>Saving your work… please keep this page open.
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
             <i class="bx bx-arrow-back me-1"></i> Keep working
           </button>
           <button type="button" class="btn btn-success" id="confirmSubmitBtn">
-            <i class="bx bx-send me-1"></i> Yes, submit
+            <i class="bx bx-send me-1"></i> <span id="confirmSubmitLabel">Yes, submit</span>
           </button>
         </div>
       </div>

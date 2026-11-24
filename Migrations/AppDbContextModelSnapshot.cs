@@ -796,6 +796,9 @@ namespace SmartSchoolAI.Migrations
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("GradingPending")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ImagePath")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -811,6 +814,9 @@ namespace SmartSchoolAI.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("StudentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SubmissionKey")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("SubmittedAt")
@@ -830,6 +836,9 @@ namespace SmartSchoolAI.Migrations
                     b.HasIndex("AssignmentId");
 
                     b.HasIndex("StudentId");
+
+                    b.HasIndex("StudentId", "SubmissionKey")
+                        .IsUnique();
 
                     b.HasIndex("AssignmentId", "StudentId", "AttemptNumber")
                         .IsUnique();

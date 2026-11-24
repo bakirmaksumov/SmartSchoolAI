@@ -30,6 +30,7 @@ const defaults = () => ({
   evalReply: null,    // { steps: [{ number, text?, status, explanation }], overall, expectedAnswer, summary }
   verifyReply: null,  // { overall, agrees, confidence, notes, steps?: [{ number, status, explanation }] }
   answerReply: null,  // { correct, feedback } — or an array, one entry per call (the last repeats)
+  answerStatus: null, // an HTTP error status for typed-answer grading (e.g. 500): the AI "fails"
   sketchReply: null,  // { correct, marks, confidence, feedback } for a drawn answer
   importReply: null   // the question list an import (PDF / photo) returns, as an array
 });
@@ -118,6 +119,7 @@ async function chatCompletions(req, res) {
   }
 
   if (seen.kind === "answer") {
+    if (script.answerStatus) return json(res, script.answerStatus, { error: { message: "mock AI failure" } });
     // "Item 2:" -> the question index the app is asking about.
     const index = Number(/Item (\d+):/.exec(seen.user)?.[1] ?? 0);
     const replies = Array.isArray(script.answerReply) ? script.answerReply : [script.answerReply ?? { correct: true, feedback: "That is right." }];

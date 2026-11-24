@@ -187,6 +187,8 @@ public class AppDbContext : DbContext
             e.HasIndex(sr => sr.AssignmentId);
             e.HasIndex(sr => sr.StudentId);
             e.HasIndex(sr => new { sr.AssignmentId, sr.StudentId, sr.AttemptNumber }).IsUnique();
+            // One attempt per press of "Submit": a retried request with the same key can never add another.
+            e.HasIndex(sr => new { sr.StudentId, sr.SubmissionKey }).IsUnique();
 
             e.HasOne(sr => sr.Assignment)
              .WithMany(a => a.StudentResults)

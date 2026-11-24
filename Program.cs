@@ -29,6 +29,9 @@ builder.Services.AddScoped<GradingService>();
 builder.Services.AddScoped<AnalyticsService>();
 builder.Services.AddScoped<ClassStatisticsService>();
 builder.Services.AddScoped<AssignmentDistributionService>();
+builder.Services.AddScoped<SubmissionService>();
+// Marks submissions whose AI marking was cut short by a restart (GradingPending still set).
+builder.Services.AddHostedService<PendingMarkingSweep>();
 builder.Services.AddScoped<ReCaptchaService>();
 builder.Services.AddSingleton<GenerationJobTracker>();
 builder.Services.AddHttpClient();
@@ -67,14 +70,28 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit  = 0
         }));
 
+    // Keyed by the account id (two students with the same name must not share a budget), else the IP.
     options.AddPolicy("ai", httpContext => RateLimitPartition.GetFixedWindowLimiter(
-        partitionKey: httpContext.User.Identity?.Name
+        partitionKey: httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
             ?? httpContext.Connection.RemoteIpAddress?.ToString()
             ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = builder.Configuration.GetValue("RateLimit:AiPermitLimit", 15),
             Window      = TimeSpan.FromMinutes(5),
+            QueueLimit  = 0
+        }));
+
+    // Handing in work is never refused because the student used the answer checker a lot: it has its own budget,
+    // generous enough for retries after a lost connection, per account.
+    options.AddPolicy("submit", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? httpContext.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = builder.Configuration.GetValue("RateLimit:SubmitPermitLimit", 30),
+            Window      = TimeSpan.FromMinutes(1),
             QueueLimit  = 0
         }));
 });

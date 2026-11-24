@@ -28,6 +28,19 @@ public class StudentResult : BaseEntity
     /// </summary>
     public bool        IsSubmitted   { get; set; }
 
+    /// <summary>
+    /// Identifies one press of "Submit" (sent by the page). A repeated request with the same key — a retry
+    /// after a lost response, a double click — finds this attempt instead of making another one.
+    /// Null for attempts submitted before the key existed and for drafts.
+    /// </summary>
+    public Guid?       SubmissionKey { get; set; }
+
+    /// <summary>
+    /// True from the moment the work is saved as submitted until the AI has finished checking the answers
+    /// that need it. The submission itself is final either way; only the marks of those answers can change.
+    /// </summary>
+    public bool        GradingPending { get; set; }
+
     /// <summary>Teacher-awarded extra points added on top of per-question points.</summary>
     public decimal     BonusPoints   { get; set; }
 

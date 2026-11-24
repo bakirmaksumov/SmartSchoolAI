@@ -7,7 +7,8 @@ import {
   publishAndAssignAll,
   signInAs,
   submitAssignment,
-  unique
+  unique,
+  expandStudent
 } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
@@ -103,7 +104,7 @@ test("teacher publishes and assigns, student sees it and answers wrongly", async
 
 test("teacher sees the submission, its details and can export grades", async () => {
   await teacher.goto(`/Assignments/Details/${assignmentId}`);
-  const row = teacher.getByRole("row").filter({ has: teacher.locator('a[href*="SubmissionDetail"]') });
+  const row = teacher.locator("#recipientTable tr.recipient-main").filter({ has: teacher.locator('a[href*="SubmissionDetail"]') });
   await expect(row.getByText("0%", { exact: true })).toBeVisible();
 
   const download = teacher.waitForEvent("download");
@@ -119,13 +120,14 @@ test("teacher sees the submission, its details and can export grades", async () 
 test("teacher resets the result and the student retakes with correct answers", async () => {
   await teacher.goto(`/Assignments/Details/${assignmentId}`);
   teacher.once("dialog", d => d.accept());
-  await teacher.locator('form[action*="ResetStudentResult"] button').first().click();
+  await expandStudent(teacher);
+  await teacher.locator('.collapse.show form[action*="ResetStudentResult"] button').first().click();
 
   await answerAll(student, questions.map(q => q.answerKey));
   await expect(student.getByText("100%", { exact: true }).first()).toBeVisible();
 
   await teacher.goto(`/Assignments/Details/${assignmentId}`);
-  await expect(teacher.getByRole("row").filter({ has: teacher.locator('a[href*="SubmissionDetail"]') }).getByText("100%", { exact: true })).toBeVisible();
+  await expect(teacher.locator("#recipientTable tr.recipient-main").filter({ has: teacher.locator('a[href*="SubmissionDetail"]') }).getByText("100%", { exact: true })).toBeVisible();
 });
 
 test("class results and analytics reflect the score", async () => {
@@ -141,22 +143,26 @@ test("class results and analytics reflect the score", async () => {
 });
 
   test("closing the assignment blocks submissions; reopening restores them; then it can be deleted", async () => {
-    const action = (name: string) => teacher.locator(`form[action*="/Assignments/${name}/"] button[type="submit"]`);
+    // Close, Reopen and Delete live in the assignment page's "More" menu.
+    const action = async (name: string) => {
+      if ((await teacher.locator(".dropdown-menu.show").count()) === 0) await teacher.locator("#moreMenu").click();
+      return teacher.locator(`.dropdown-menu.show form[action*="/Assignments/${name}/"] button[type="submit"]`);
+    };
 
     await teacher.goto(`/Assignments/Details/${assignmentId}`);
     teacher.once("dialog", d => d.accept());
-    await action("Close").click();
-    await expect(action("Reopen")).toBeVisible();
+    await (await action("Close")).click();
+    await expect(await action("Reopen")).toBeVisible();
 
-    await action("Reopen").click();
-    await expect(action("Close")).toBeVisible();
-
-    teacher.once("dialog", d => d.accept());
-    await action("Close").click();
-    await expect(action("Delete")).toBeVisible();
+    await (await action("Reopen")).click();
+    await expect(await action("Close")).toBeVisible();
 
     teacher.once("dialog", d => d.accept());
-    await action("Delete").click();
+    await (await action("Close")).click();
+    await expect(await action("Delete")).toBeVisible();
+
+    teacher.once("dialog", d => d.accept());
+    await (await action("Delete")).click();
     await expect(teacher).toHaveURL(/\/Assignments\/?(\?.*)?$/);
     await expect(teacher.locator(".alert-danger")).toBeVisible();
     await expect(teacher.locator(`a[href*="/Assignments/Details/${assignmentId}"]`).first()).toBeVisible();
@@ -165,7 +171,7 @@ test("class results and analytics reflect the score", async () => {
     const draftId = await createDraftAssignment(teacher, draftTitle, className);
     await teacher.goto(`/Assignments/Details/${draftId}`);
     teacher.once("dialog", d => d.accept());
-    await action("Delete").click();
+    await (await action("Delete")).click();
     await expect(teacher.locator(`a[href*="/Assignments/Details/${draftId}"]`)).toHaveCount(0);
   });
 

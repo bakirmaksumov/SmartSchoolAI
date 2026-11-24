@@ -1,0 +1,8 @@
+@model SmartSchoolAI.ViewModels.AssignmentDetailsViewModel
+@* What the live board swaps in place: the counters and every student's row. Nothing else on the page changes,
+   so the open tab, filter, search, focus, scroll and expanded rows stay as the teacher left them. *@
+<div id="liveFragment" data-signature="@Model.Progress.Signature">
+  <div id="liveCounters">@await Html.PartialAsync("_DetailsCounters", Model)</div>
+  <table><thead></thead>@await Html.PartialAsync("_RecipientRows", Model)</table>
+  <div id="liveFormer">@await Html.PartialAsync("_FormerRows", Model)</div>
+</div>

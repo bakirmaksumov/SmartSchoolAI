@@ -877,21 +877,92 @@
       if (modalEl && window.bootstrap) {
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
       } else if (confirm('Submit and finish? You cannot come back or change your answers.')) {
-        isSubmitting = true;
-        clearDraft();   // answers are about to be saved server-side
-        form.submit();
+        sendSubmission(form, null, submitBtn);
       }
     });
 
     var confirmBtn = document.getElementById('confirmSubmitBtn');
     if (confirmBtn) {
-      confirmBtn.addEventListener('click', function () {
-        if (modalEl && window.bootstrap) bootstrap.Modal.getOrCreateInstance(modalEl).hide();
-        isSubmitting = true;
-        clearDraft();   // answers are about to be saved server-side
-        form.submit();   // native submit — bypasses the handler above, posts directly
-      });
+      confirmBtn.addEventListener('click', function () { sendSubmission(form, modalEl, confirmBtn); });
     }
+
+    // A key that was already sent but never confirmed (the page was reloaded after a lost answer) is reused,
+    // so sending again can only ever find that same attempt, never use up another one.
+    var keyInput = document.getElementById('submissionKey');
+    var storedKey = null;
+    try { storedKey = localStorage.getItem(submitKeyName()); } catch (e) { /* storage unavailable */ }
+    if (keyInput && storedKey) keyInput.value = storedKey;
+  }
+
+  function submitKeyName() {
+    var el = document.getElementById('assignmentId');
+    return 'quizSubmitKey:' + (el ? el.value : '');
+  }
+
+  // Sends the work and waits for the server to confirm it is saved. Only then are the draft and the key
+  // forgotten and the result page opened. Any failure leaves everything on the page and offers a retry
+  // with the same key, which can never create a second attempt.
+  var sending = false;
+  async function sendSubmission(form, modalEl, confirmBtn) {
+    if (sending) return;                       // a double click sends once
+    sending = true;
+
+    var errorBox  = document.getElementById('submitError');
+    var errorText = document.getElementById('submitErrorText');
+    var progress  = document.getElementById('submitProgress');
+    var label     = document.getElementById('confirmSubmitLabel');
+    var keyInput  = document.getElementById('submissionKey');
+    try { localStorage.setItem(submitKeyName(), keyInput ? keyInput.value : ''); } catch (e) { /* best effort */ }
+
+    errorBox && errorBox.classList.add('d-none');
+    progress && progress.classList.remove('d-none');
+    confirmBtn.disabled = true;
+
+    var controller = window.AbortController ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, 90000) : null;
+    var failure = null;
+
+    try {
+      var response = await fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' },
+        credentials: 'same-origin',
+        signal: controller ? controller.signal : undefined
+      });
+      var data = null;
+      try { data = await response.json(); } catch (e) { data = null; }
+
+      if (response.ok && data && data.ok && data.resultUrl) {
+        isSubmitting = true;
+        clearDraft();
+        try { localStorage.removeItem(submitKeyName()); } catch (e) { /* ignore */ }
+        window.location.assign(data.resultUrl);
+        return;
+      }
+      failure = (data && data.error) ||
+        (response.status === 429
+          ? 'Too many tries in a short time. Wait a minute, then press Try again.'
+          : 'The server could not save your work (error ' + response.status + ').');
+      if (data && data.retry === false) {
+        // Not something a retry can fix (e.g. no attempts left); the key is not needed any more.
+        try { localStorage.removeItem(submitKeyName()); } catch (e) { /* ignore */ }
+      }
+    } catch (e) {
+      failure = e && e.name === 'AbortError'
+        ? 'The server took too long to answer. Your work may still have been saved — press Try again: it will not use another attempt.'
+        : 'No connection to the server. Check your internet, then press Try again.';
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+
+    sending = false;
+    progress && progress.classList.add('d-none');
+    if (errorText) errorText.textContent = failure + ' Your answers are still on this page.';
+    errorBox && errorBox.classList.remove('d-none');
+    if (label) label.textContent = 'Try again';
+    confirmBtn.disabled = false;
+    if (modalEl && window.bootstrap) bootstrap.Modal.getOrCreateInstance(modalEl).show();
   }
 
   // ── KaTeX rendering ──────────────────────────────────────────────────────

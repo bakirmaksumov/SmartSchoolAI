@@ -27,6 +27,7 @@ public class StudentController : Controller
     private readonly IWebHostEnvironment        _env;
     private readonly ILogger<StudentController> _logger;
     private readonly TranslationService         _translator;
+    private readonly SubmissionService          _submissions;
 
     public StudentController(
         AppDbContext               db,
@@ -39,8 +40,10 @@ public class StudentController : Controller
         IServiceScopeFactory       scopeFactory,
         IWebHostEnvironment        env,
         ILogger<StudentController> logger,
-        TranslationService         translator)
+        TranslationService         translator,
+        SubmissionService          submissions)
     {
+        _submissions  = submissions;
         _db           = db;
         _authService  = authService;
         _config       = config;
@@ -282,154 +285,82 @@ public class StudentController : Controller
 
     // ── SUBMIT ASSIGNMENT ──────────────────────────────────────────────────────
 
-    /// <summary>Receives student answers, evaluates via AI, stores StudentResult.</summary>
+    /// <summary>
+    /// Hands in the student's work. The attempt is saved as submitted first (see <see cref="SubmissionService"/>);
+    /// the AI marks what it needs to afterwards, in the background, so a slow or failing AI can never lose or delay
+    /// the submission. The page sends a key per press of Submit: a retry with the same key gets the same attempt.
+    /// The page posts with fetch and gets JSON; a plain form post (no script) is redirected as before.
+    /// Not under the "ai" rate limit: handing in work must never be refused because the student used the
+    /// answer checker a lot. It has its own, generous per-student limit.
+    /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [EnableRateLimiting("ai")]
+    [EnableRateLimiting("submit")]
     public async Task<IActionResult> SubmitAssignment([FromForm] Dictionary<string, string> formData)
     {
         var studentId = CurrentStudentId;
+        var wantsJson = Request.Headers["X-Requested-With"] == "fetch";
 
-        // Extract assignmentId from form data
-        if (!formData.TryGetValue("assignmentId", out var assignmentIdStr) ||
-            !Guid.TryParse(assignmentIdStr, out var assignmentId))
+        if (!formData.TryGetValue("assignmentId", out var assignmentIdStr) || !Guid.TryParse(assignmentIdStr, out var assignmentId))
+            return wantsJson ? BadRequest(new { ok = false, error = "Invalid assignment." }) : BadRequest("Invalid assignment ID.");
+
+        // A page from before the key existed (or without script) still submits, with a key made here.
+        var key = formData.TryGetValue("submissionKey", out var k) && Guid.TryParse(k, out var parsed) ? parsed : Guid.NewGuid();
+
+        ActivityLog.Record(_env, "SubmitStarted", "Student", studentId, $"assignment={assignmentId} key={key}");
+
+        SubmissionService.SubmitOutcome outcome;
+        try
         {
-            return BadRequest("Invalid assignment ID.");
+            outcome = await _submissions.SubmitAsync(studentId, assignmentId, key, formData);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Submission failed for assignment {AssignmentId}, student {StudentId}", assignmentId, studentId);
+            ActivityLog.Record(_env, "SubmitFailed", "Student", studentId, $"assignment={assignmentId} key={key} error={ex.GetType().Name}");
+            const string message = "Your work could not be saved. Nothing was handed in yet — your answers are still on this page. Please try again.";
+            if (wantsJson) return StatusCode(StatusCodes.Status500InternalServerError, new { ok = false, retry = true, error = message });
+            TempData["Error"] = message;
+            return RedirectToAction(nameof(TakeAssignment), new { assignmentId });
         }
 
-        var assignment = await _db.Assignments
-            .Include(a => a.Class)
-            .FirstOrDefaultAsync(a => a.Id == assignmentId && a.Status == AssignmentStatus.Active);
-
-        if (assignment is null) return NotFound();
-
-        var isAssigned = await _db.AssignmentStudents
-            .AnyAsync(asn => asn.AssignmentId == assignmentId && asn.StudentId == studentId);
-
-        if (!isAssigned) return Forbid();
-
-        var submittedCount = await _db.StudentResults
-            .CountAsync(r => r.AssignmentId == assignmentId && r.StudentId == studentId && r.IsSubmitted);
-
-        if (!assignment.AllowsUnlimitedAttempts && submittedCount >= assignment.MaxAttempts)
+        if (!outcome.IsSaved)
         {
-            TempData["Error"] = "No attempts remaining.";
-            return RedirectToAction(nameof(Assignments), new { classId = assignment.ClassId });
+            ActivityLog.Record(_env, "SubmitRejected", "Student", studentId, $"assignment={assignmentId} key={key} reason={outcome.Status}");
+            if (wantsJson) return StatusCode(StatusCodes.Status409Conflict, new { ok = false, retry = false, error = outcome.Message });
+            TempData["Error"] = outcome.Message;
+            return outcome.Status == SubmissionService.SubmitStatus.NotFound
+                ? RedirectToAction(nameof(Index))
+                : RedirectToAction(nameof(Assignments), new { classId = outcome.ClassId });
         }
 
-        var questions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment.Questions)
-                        ?? new List<QuestionDto>();
+        ActivityLog.Record(_env, outcome.Status == SubmissionService.SubmitStatus.Saved ? "SubmitSaved" : "SubmitAlreadySaved",
+            "Student", studentId, $"assignment={assignmentId} key={key} result={outcome.ResultId} gradingPending={outcome.GradingPending}");
 
-        // Merge typed answers into the in-progress result so per-question photo
-        // solutions the student already submitted are preserved, not overwritten.
-        var result = await _grader.GetOrCreateResultAsync(assignmentId, studentId);
+        if (outcome.Status == SubmissionService.SubmitStatus.Saved && outcome.GradingPending)
+            StartGradingAfterSubmit(outcome.ResultId);
 
-        for (int i = 0; i < questions.Count; i++)
-        {
-            var q = questions[i];
-            if (_grader.IsGroupHeader(questions, q)) continue; // stem-only "Q2" above 2a/2b — no answer of its own
-
-            var existing = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == i);
-
-            // Keep an existing photo/handwritten answer (already graded by AI).
-            if (existing != null && !string.IsNullOrEmpty(existing.ImagePath))
-                continue;
-
-            var answerValue = formData.TryGetValue($"q_{i}", out var v) ? (v ?? string.Empty) : string.Empty;
-            var isCorrect   = _grader.EvaluateTypedAnswer(q, answerValue);
-
-            if (existing is null)
-            {
-                existing = new StudentAnswer { StudentResultId = result.Id, QuestionIndex = i };
-                result.StudentAnswers.Add(existing);
-                _db.StudentAnswers.Add(existing);
-            }
-
-            // Never overwrite a teacher's manual grade.
-            if (!existing.TeacherOverridden)
-            {
-                existing.QuestionId    = q.Id ?? $"q{i}";
-                existing.AnswerValue   = answerValue;
-                existing.IsCorrect     = isCorrect;
-                existing.PointsAwarded = isCorrect == true ? q.MaxPoints : 0m;
-            }
-
-            // "Show your work" is never auto-graded — it's kept for the teacher.
-            var work = formData.TryGetValue($"work_{i}", out var w) ? w?.Trim() : null;
-            if (!string.IsNullOrWhiteSpace(work)) existing.WorkText = work;
-
-            existing.UpdatedAt = DateTime.UtcNow;
-        }
-
-        // Drawn answers: saved as a picture and marked from it, not from the typed text.
-        var sketches = await SaveSketchesAsync(formData, questions, result, studentId);
-
-        // AI-grade the answers that exact matching couldn't decide
-        // (no answer key, or a text answer written in an equivalent form).
-        await _grader.GradeUngradedAnswersAsync(result, questions);
-        await _grader.GradeSketchesAsync(sketches);
-
-        // Finalise: mark submitted and score it. AttemptNumber was assigned when
-        // the in-progress result was created (kept unique per assignment/student).
-        result.IsSubmitted = true;
-        result.SubmittedAt = DateTime.UtcNow;
-        _grader.RecomputeResultScore(result, questions, assignment.PassThreshold);
-
-        await _db.SaveChangesAsync();
-
-        return RedirectToAction(nameof(AssignmentResult), new { assignmentId, resultId = result.Id });
+        var resultUrl = Url.Action(nameof(AssignmentResult), new { assignmentId, resultId = outcome.ResultId })!;
+        return wantsJson
+            ? Ok(new { ok = true, status = outcome.Status.ToString(), resultUrl })
+            : Redirect(resultUrl);
     }
 
-    /// <summary>Largest drawing accepted from the sketch pad (decoded bytes).</summary>
-    private const int MaxSketchBytes = 3 * 1024 * 1024;
-
-    /// <summary>
-    /// Stores the picture from each drawing question's sketch pad (posted as a PNG data URL in
-    /// "sketchpng_{i}") on the student's answer, and returns the drawings to mark. Only questions
-    /// the teacher marked as drawing questions are read, and only real PNG data is kept.
-    /// </summary>
-    private async Task<List<GradingService.SketchToGrade>> SaveSketchesAsync(
-        Dictionary<string, string> formData, List<QuestionDto> questions, StudentResult result, Guid studentId)
+    /// <summary>The AI's marking, on its own scope after the response: the submission is already saved.</summary>
+    private void StartGradingAfterSubmit(Guid resultId)
     {
-        var toGrade = new List<GradingService.SketchToGrade>();
-        const string prefix = "data:image/png;base64,";
-
-        for (int i = 0; i < questions.Count; i++)
+        _ = Task.Run(async () =>
         {
-            var q = questions[i];
-            if (!q.RequireDrawing || _grader.IsGroupHeader(questions, q)) continue;
-            if (!formData.TryGetValue($"sketchpng_{i}", out var dataUrl) ||
-                string.IsNullOrEmpty(dataUrl) || !dataUrl.StartsWith(prefix, StringComparison.Ordinal))
-                continue;
-
-            byte[] png;
-            try { png = Convert.FromBase64String(dataUrl[prefix.Length..]); }
-            catch (FormatException) { continue; }
-            if (png.Length == 0 || png.Length > MaxSketchBytes || !FileSignature.IsSupportedImage(png) || png[0] != 0x89)
-                continue;
-
-            var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == i);
-            if (answer is null)
+            try
             {
-                answer = new StudentAnswer { StudentResultId = result.Id, QuestionIndex = i, QuestionId = q.Id ?? $"q{i}" };
-                result.StudentAnswers.Add(answer);
-                _db.StudentAnswers.Add(answer);
+                using var scope = _scopeFactory.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<SubmissionService>().GradeAfterSubmitAsync(resultId);
             }
-
-            answer.SketchPath = await SubmissionStorage.SaveAsync(_env, png, ".png", studentId);
-            answer.UpdatedAt  = DateTime.UtcNow;
-
-            // A teacher's grade stands, and a photographed solution was already marked on its own.
-            if (answer.TeacherOverridden || !string.IsNullOrEmpty(answer.ImagePath)) continue;
-
-            var parent = string.IsNullOrEmpty(q.GroupId) ? null : questions.FirstOrDefault(x => x.Id == q.GroupId);
-            var questionText = parent is null || string.IsNullOrWhiteSpace(parent.Title)
-                ? q.Title
-                : $"{parent.Title}\n{q.Title}";
-            toGrade.Add(new GradingService.SketchToGrade(answer, q, questionText, png));
-        }
-
-        return toGrade;
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background marking failed for result {ResultId}", resultId);
+            }
+        });
     }
 
     // ── INSTANT FEEDBACK ─────────────────────────────────────────────────────────
@@ -819,6 +750,13 @@ public class StudentController : Controller
             .FirstOrDefaultAsync(r => r.Id == resultId && r.StudentId == studentId);
 
         if (result is null) return NotFound();
+
+        // An attempt still in progress has no result yet: never show it as if it were handed in.
+        if (!result.IsSubmitted)
+        {
+            TempData["Error"] = "This attempt has not been submitted yet. Finish it and press Submit.";
+            return RedirectToAction(nameof(TakeAssignment), new { assignmentId = result.AssignmentId });
+        }
 
         var questions = JsonSerializer.Deserialize<List<QuestionDto>>(result.Assignment.Questions)
                         ?? new List<QuestionDto>();

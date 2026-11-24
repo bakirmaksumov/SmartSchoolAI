@@ -63,6 +63,29 @@
   </div>
 </div>
 
+<!-- The hand-in is confirmed: this page only exists for a saved submission. -->
+<div class="alert alert-success d-flex align-items-start gap-2 mb-3" id="submittedConfirmation" role="status">
+  <i class="bx bx-check-circle fs-4"></i>
+  <div>
+    <strong>Submitted.</strong> Your work was handed in on @SmartSchoolAI.Services.SchoolTime.Show(Model.SubmittedAt)
+    (@SmartSchoolAI.Services.SchoolTime.Label) — attempt @Model.AttemptNumber.
+    @if (Model.GradingPending)
+    {
+      <div class="mt-1" id="markingPending">
+        <span class="spinner-border spinner-border-sm me-1"></span>
+        Some answers are still being checked. The score below may still change — this page updates by itself.
+      </div>
+    }
+  </div>
+</div>
+@if (Model.GradingPending)
+{
+  <script>
+    // Checks again shortly; the submission itself is already saved, only marks can still change.
+    setTimeout(function () { location.reload(); }, 8000);
+  </script>
+}
+
 <!-- STATS METRICS ROW -->
 <div class="row mb-4">
   <!-- Overall Grade Score -->

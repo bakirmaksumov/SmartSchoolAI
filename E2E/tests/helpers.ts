@@ -187,7 +187,20 @@ export async function assignTo(page: Page, assignmentId: string, options: Assign
  */
 export async function publishAndAssignAll(page: Page, assignmentId: string): Promise<void> {
   await assignTo(page, assignmentId, { lateJoin: "approval" });
-  await expect(page.locator("#submittedSummary")).toBeVisible();
+  await expect(page.locator("#liveCounters")).toBeVisible();
+}
+
+/**
+ * On the assignment page, opens a student's row so their attempts, dates and extra actions (statistics, reset,
+ * remove) are visible. Without a name, the first student.
+ */
+export async function expandStudent(page: Page, name?: string): Promise<void> {
+  const row = name
+    ? page.locator("#recipientTable tbody.recipient", { hasText: name }).first()
+    : page.locator("#recipientTable tbody.recipient").first();
+  const toggle = row.locator(".attempt-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(row.locator(".collapse.show")).toBeVisible();
 }
 
 export async function submitAssignment(page: Page): Promise<void> {

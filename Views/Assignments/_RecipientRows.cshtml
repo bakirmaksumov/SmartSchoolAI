@@ -1,0 +1,199 @@
+@model SmartSchoolAI.ViewModels.AssignmentDetailsViewModel
+@using SmartSchoolAI.Services
+@{
+    var a = Model.Assignment;
+    string Pct(int s) => $"{s}%";
+}
+@foreach (var row in Model.Progress.Rows)
+{
+    var sid      = row.Student.Id;
+    var latest   = row.Latest;
+    var draft    = row.Draft;
+    var state    = row.State;
+    var detailId = $"att-{sid}";
+    var enr      = row.Enrollment!;
+    var hasCustom = enr.StartDateOverride.HasValue || enr.DueDateOverride.HasValue;
+    var workUrl  = $"/Classes/StudentWork?studentId={sid}&classId={a.ClassId}&returnUrl={Uri.EscapeDataString($"/Assignments/Details/{a.Id}")}";
+    var reviewTarget = row.NeedingReview.FirstOrDefault() ?? latest;
+    var stateKey = state switch { SubmissionState.Submitted => "submitted", SubmissionState.InProgress => "in-progress", _ => "not-started" };
+
+    <tbody class="recipient" data-student="@sid" data-version="@row.Version" data-state="@stateKey"
+           data-review="@(row.NeedsReview ? "needs" : "")"
+           data-search="@($"{row.Student.FullName} {row.Student.Email}".ToLowerInvariant())">
+      <tr class="recipient-main">
+        <td class="toggle-cell">
+          <button type="button" class="btn btn-sm btn-icon btn-text-secondary attempt-toggle" data-bs-toggle="collapse"
+                  data-bs-target="#@detailId" aria-expanded="false" aria-controls="@detailId" data-focus-id="toggle-@sid"
+                  title="Show attempts and details">
+            <i class="bx bx-chevron-right"></i><span class="visually-hidden">Show attempts</span>
+          </button>
+        </td>
+        <td class="name-cell">
+          <a href="@workUrl" class="fw-semibold js-anon student-link" data-focus-id="name-@sid">@row.Student.FullName</a>
+          <small class="d-block text-muted js-anon">@row.Student.Email</small>
+        </td>
+        <td class="submission-cell">
+          @switch (state)
+          {
+            case SubmissionState.Submitted:
+              <span class="badge bg-label-success state-badge">Submitted</span>
+              break;
+            case SubmissionState.InProgress:
+              <span class="badge bg-label-info state-badge">In progress</span>
+              break;
+            default:
+              <span class="badge bg-label-secondary state-badge">Not started</span>
+              break;
+          }
+          @if (row.Submitted.Count > 1)
+          {
+            <small class="d-block text-muted">@row.Submitted.Count attempts</small>
+          }
+          else if (state == SubmissionState.Submitted && draft is not null)
+          {
+            <small class="d-block text-muted">new attempt started</small>
+          }
+        </td>
+        <td class="review-cell">
+          @if (row.NeedsReview)
+          {
+            <span class="badge bg-label-warning">Needs review</span>
+          }
+          else if (row.MarkingPending)
+          {
+            <span class="badge bg-label-secondary"><span class="spinner-border spinner-border-sm me-1" style="width:.6rem;height:.6rem;"></span>Checking</span>
+          }
+          else if (row.Reviewed)
+          {
+            <span class="badge bg-label-primary">Reviewed</span>
+          }
+          else if (latest is not null)
+          {
+            <span class="text-muted small">AI marked</span>
+          }
+          else
+          {
+            <span class="text-muted">—</span>
+          }
+        </td>
+        <td class="score-cell">
+          @if (latest is not null)
+          {
+            <span class="fw-semibold score @(a.IsPass(latest.Score) ? "text-success" : latest.Score >= a.PassThreshold / 2 ? "text-warning" : "text-danger")">@Pct(latest.Score)</span>
+          }
+          else
+          {
+            <span class="text-muted" title="No submitted attempt yet">—</span>
+          }
+        </td>
+        <td class="action-cell text-end">
+          @if (row.NeedsReview && reviewTarget is not null)
+          {
+            <a href="/Assignments/SubmissionDetail?resultId=@reviewTarget.Id" class="btn btn-sm btn-primary main-action" data-focus-id="action-@sid">Review work</a>
+          }
+          else if (latest is not null)
+          {
+            <a href="/Assignments/SubmissionDetail?resultId=@latest.Id" class="btn btn-sm btn-outline-primary main-action" data-focus-id="action-@sid">Open work</a>
+          }
+          else
+          {
+            <span class="text-muted">—</span>
+          }
+        </td>
+      </tr>
+      <tr class="recipient-detail">
+        <td colspan="6" class="p-0 border-0">
+          <div class="collapse" id="@detailId">
+            <div class="attempts-panel">
+              <div class="row g-3">
+                <div class="col-lg-8">
+                  <div class="small fw-semibold text-muted mb-2">Attempts</div>
+                  @if (!row.Attempts.Any())
+                  {
+                    <div class="text-muted small">No attempt yet — <span class="js-anon">@row.Student.FullName</span> has not opened this work.</div>
+                  }
+                  else
+                  {
+                    <ul class="list-unstyled mb-0 attempt-list">
+                      @foreach (var r in row.Attempts)
+                      {
+                        var hasPhoto = r.StudentAnswers.Any(x => !string.IsNullOrEmpty(x.ImagePath));
+                        <li class="attempt-item d-flex flex-wrap align-items-center gap-2" data-attempt="@r.Id">
+                          <span class="fw-semibold">Attempt @r.AttemptNumber</span>
+                          @if (r.IsSubmitted)
+                          {
+                            <span class="badge bg-label-success">Submitted</span>
+                            <span class="small text-muted">@SchoolTime.Show(r.SubmittedAt, "dd MMM HH:mm")</span>
+                            <span class="fw-semibold">@Pct(r.Score)</span>
+                            @if (r.GradingPending) { <span class="badge bg-label-secondary">AI still checking</span> }
+                            @if (ReviewRules.Needs(r)) { <span class="badge bg-label-warning">Needs review</span> }
+                            else if (r.TeacherReviewedAt.HasValue) { <span class="badge bg-label-primary">Reviewed</span> }
+                          }
+                          else
+                          {
+                            <span class="badge bg-label-info">In progress · not submitted</span>
+                            <span class="small text-muted">started @SchoolTime.Show(r.CreatedAt, "dd MMM HH:mm")@(r.UpdatedAt.HasValue ? $" · last saved {SchoolTime.Show(r.UpdatedAt, "dd MMM HH:mm")}" : "")</span>
+                          }
+                          @if (hasPhoto) { <span class="badge bg-label-dark"><i class="bx bx-camera me-1"></i>photo</span> }
+                          <span class="ms-auto d-inline-flex gap-1">
+                            @if (r.IsSubmitted)
+                            {
+                              <a href="/Assignments/SubmissionDetail?resultId=@r.Id" class="btn btn-xs btn-outline-primary" data-focus-id="open-@r.Id">Open</a>
+                            }
+                            <form method="post" asp-action="ResetStudentResult" class="d-inline"
+                                  onsubmit="return confirm('Delete attempt @r.AttemptNumber? The student may then take the assignment again.')">
+                              @Html.AntiForgeryToken()
+                              <input type="hidden" name="resultId" value="@r.Id" />
+                              <input type="hidden" name="assignmentId" value="@a.Id" />
+                              <button type="submit" class="btn btn-xs btn-outline-danger" title="Delete this attempt and allow a retake"><i class="bx bx-reset"></i></button>
+                            </form>
+                          </span>
+                        </li>
+                      }
+                    </ul>
+                  }
+                </div>
+                <div class="col-lg-4">
+                  <div class="small fw-semibold text-muted mb-2">Dates</div>
+                  <div class="small mb-1">Due: <strong>@SchoolTime.Show(row.Due)</strong> @if (row.PersonalDue) { <span class="badge bg-label-info">Personal</span> }</div>
+                  @if (enr.StartDateOverride.HasValue)
+                  {
+                    <div class="small mb-1">Starts: <strong>@SchoolTime.Show(enr.StartDateOverride)</strong> <span class="badge bg-label-info">Personal</span></div>
+                  }
+                  <form method="post" asp-action="UpdateStudentDates" class="mt-2 personal-dates">
+                      @Html.AntiForgeryToken()
+                      <input type="hidden" name="assignmentId" value="@a.Id" />
+                      <input type="hidden" name="studentId" value="@sid" />
+                      <label class="form-label small text-muted mb-1">Start date</label>
+                      <input type="datetime-local" name="startDate" class="form-control form-control-sm mb-2" value="@SchoolTime.Input(enr.StartDateOverride)" />
+                      <label class="form-label small text-muted mb-1">Due date</label>
+                      <input type="datetime-local" name="dueDate" class="form-control form-control-sm mb-2" value="@SchoolTime.Input(enr.DueDateOverride)" />
+                      <div class="form-text mb-2">@SchoolTime.Label. Empty = the assignment's own dates.</div>
+                      <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-sm btn-primary">Save</button>
+                        @if (hasCustom)
+                        {
+                          <button type="submit" formnovalidate class="btn btn-sm btn-outline-secondary"
+                                  onclick="this.closest('form').querySelectorAll('input[type=datetime-local]').forEach(i => i.value = '')">Remove</button>
+                        }
+                      </div>
+                  </form>
+                  <div class="d-flex flex-wrap gap-2 mt-3">
+                    <a href="@workUrl" class="btn btn-xs btn-outline-secondary"><i class="bx bx-user me-1"></i>Student's work</a>
+                    <a href="/Assignments/StudentStats?assignmentId=@a.Id&studentId=@sid" class="btn btn-xs btn-outline-secondary"><i class="bx bx-line-chart me-1"></i>Statistics</a>
+                    <form method="post" asp-action="UnassignStudent" class="d-inline"
+                          onsubmit="return confirm('Remove this student from the task? Their work so far is kept.')">
+                      @Html.AntiForgeryToken()
+                      <input type="hidden" name="assignmentId" value="@a.Id" />
+                      <input type="hidden" name="studentId" value="@sid" />
+                      <button type="submit" class="btn btn-xs btn-outline-danger"><i class="bx bx-user-minus me-1"></i>Remove from task</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </tbody>
+}

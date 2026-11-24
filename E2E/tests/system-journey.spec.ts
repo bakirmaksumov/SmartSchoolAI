@@ -36,7 +36,8 @@ test.afterAll(async () => {
   for (const page of [admin, teacher, student]) await page.context().close();
 });
 
-const detailsRow = () => teacher.getByRole("row").filter({ has: teacher.locator('a[href*="SubmissionDetail"]') });
+// The student's main row (attempts sit in a separate, collapsible row under it).
+const detailsRow = () => teacher.locator("#recipientTable tr.recipient-main").filter({ has: teacher.locator('a[href*="SubmissionDetail"]') });
 
 test("a new teacher registers, and the admin finds them and resets their password", async () => {
   test.setTimeout(120_000);

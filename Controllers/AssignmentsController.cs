@@ -615,10 +615,9 @@ public class AssignmentsController : Controller
         return View("~/Views/Student/TakeAssignment.cshtml", questions);
     }
 
-    // GET: /Assignments/Details/id?filter=all|not-submitted|submitted|needs-review
-    public async Task<IActionResult> Details(Guid id, string filter = "all")
-    {
-        var assignment = await _db.Assignments
+    /// <summary>The assignment with everything its page and the live board need, if this teacher may see it.</summary>
+    private Task<Assignment?> LoadForProgressAsync(Guid id)
+        => _db.Assignments
             .Include(a => a.Class)
                 .ThenInclude(c => c.ClassStudents)
                     .ThenInclude(cs => cs.Student)
@@ -631,74 +630,75 @@ public class AssignmentsController : Controller
             .AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == id && (a.TeacherId == CurrentUserId || a.Class.TeacherId == CurrentUserId || a.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
 
+    // GET: /Assignments/Details/id?tab=students|questions|details&filter=all|submitted|not-submitted|needs-review
+    // With fragment=live, only the counters and student rows (the live board swaps them in place).
+    public async Task<IActionResult> Details(Guid id, string tab = "students", string filter = "all", string? fragment = null)
+    {
+        var assignment = await LoadForProgressAsync(id);
         if (assignment is null) return NotFound();
 
-        var assignedIds = assignment.AssignmentStudents.Select(a => a.StudentId).ToHashSet();
-        var memberIds   = assignment.Class.ClassStudents.Select(cs => cs.StudentId).ToHashSet();
-        // A draft (opened but never submitted) must not count as "submitted" — it
-        // would otherwise hide a student from NotSubmitted and pool an incomplete
-        // attempt's answers into the class-wide solve-rate stats below.
-        var submittedResults = assignment.StudentResults.Where(r => r.IsSubmitted).ToList();
+        var progress = AssignmentProgress.Build(assignment);
+        var questions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment.Questions) ?? new();
 
-        // One row per current recipient; their attempts sit inside the row.
-        var resultsByStudent = assignment.StudentResults
-            .GroupBy(r => r.StudentId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.AttemptNumber).ToList());
-
-        var allRows = assignment.AssignmentStudents
-            .OrderBy(x => x.Student.FullName)
-            .Select(x =>
-            {
-                var attempts = resultsByStudent.TryGetValue(x.StudentId, out var list) ? list : new List<StudentResult>();
-                return new RecipientRow
-                {
-                    Student     = x.Student,
-                    Enrollment  = x,
-                    Attempts    = attempts,
-                    NeedsReview = attempts.Any(ReviewRules.Needs)
-                };
-            })
-            .ToList();
-
-        filter = filter is "not-submitted" or "submitted" or "needs-review" ? filter : "all";
-        var rows = filter switch
+        var model = new AssignmentDetailsViewModel
         {
-            "not-submitted" => allRows.Where(r => !r.HasSubmitted).ToList(),
-            "submitted"     => allRows.Where(r => r.HasSubmitted).ToList(),
-            "needs-review"  => allRows.Where(r => r.NeedsReview).ToList(),
-            _               => allRows
+            Assignment       = assignment,
+            Progress         = progress,
+            Tab              = tab is "questions" or "details" ? tab : "students",
+            Filter           = filter is "submitted" or "not-submitted" or "needs-review" ? filter : "all",
+            CanEditQuestions = assignment.AllowsQuestionEditing(assignment.StudentResults.Any(r => r.IsSubmitted)),
+            QuestionCount    = questions.Count(q => string.IsNullOrEmpty(q.Id) || !questions.Any(x => x.GroupId == q.Id)),
+            TotalMarks       = GradingService.TotalMarks(questions)
         };
 
-        var pending = await _db.LateJoinRequests
+        if (fragment == "live")
+            return PartialView("_DetailsLive", model);
+
+        var members = assignment.Class.ClassStudents.Select(cs => cs.StudentId).ToHashSet();
+        model.PendingRequests = (await _db.LateJoinRequests
             .Where(r => r.AssignmentId == id && r.Status == LateJoinRequestStatus.Pending)
             .Select(r => r.StudentId)
-            .ToListAsync();
+            .ToListAsync()).Count(members.Contains);
+        model.QuestionStats = BuildQuestionStatsForRecipients(questions, progress);
+        model.AssignPanel   = assignment.Status is AssignmentStatus.Draft or AssignmentStatus.Active
+                                  ? await BuildAssignPanelAsync(assignment, "details")
+                                  : null;
+        return View(model);
+    }
 
-        return View(new AssignmentDetailsViewModel
+    /// <summary>
+    /// How each question went, over the newest submitted attempt of each current recipient — so every student
+    /// counts once, a retake replaces the earlier try, and former recipients are left out. Shared stems are kept
+    /// as headings (nothing to answer) so parts read in context.
+    /// </summary>
+    public static List<QuestionStatDto> BuildQuestionStatsForRecipients(List<QuestionDto> questions, AssignmentProgress progress)
+    {
+        var layout  = QuestionLayout.Compute(questions);
+        var latest  = progress.Rows.Select(r => r.Latest).Where(r => r is not null).Cast<StudentResult>().ToList();
+
+        return questions.Select((q, idx) =>
         {
-            Assignment    = assignment,
-            QuestionStats = BuildQuestionStats(assignment, submittedResults.SelectMany(r => r.StudentAnswers)),
-            TotalAssigned = assignment.AssignmentStudents.Count,
-
-            NotSubmitted = allRows.Where(r => !r.HasSubmitted).Select(r => r.Student).ToList(),
-
-            // Class members this assignment has not been given to yet.
-            AvailableStudents = assignment.Class.ClassStudents
-                .Where(cs => !assignedIds.Contains(cs.StudentId))
-                .Select(cs => cs.Student)
-                .ToList(),
-
-            CanEditQuestions    = assignment.AllowsQuestionEditing(submittedResults.Any()),
-            Recipients          = rows,
-            Filter              = filter,
-            SubmittedStudents   = allRows.Count(r => r.HasSubmitted),
-            SubmittedAttempts   = allRows.Sum(r => r.Submitted.Count),
-            NeedsReviewStudents = allRows.Count(r => r.NeedsReview),
-            PendingRequests     = pending.Count(memberIds.Contains),
-            AssignPanel         = assignment.Status is AssignmentStatus.Draft or AssignmentStatus.Active
-                                      ? await BuildAssignPanelAsync(assignment, "details")
-                                      : null
-        });
+            var answers = latest
+                .Select(r => r.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == idx))
+                .Where(a => a is not null && (!string.IsNullOrWhiteSpace(a.AnswerValue)
+                                              || !string.IsNullOrEmpty(a.ImagePath) || !string.IsNullOrEmpty(a.SketchPath)))
+                .Cast<StudentAnswer>()
+                .ToList();
+            var correct = answers.Count(a => a.IsCorrect == true);
+            return new QuestionStatDto
+            {
+                Index     = idx,
+                Label     = layout.Labels[idx],
+                IsStem    = layout.IsStem[idx],
+                IsPart    = layout.ParentOf[idx] >= 0,
+                Title     = q.Title,
+                Students  = latest.Count,
+                Answered  = answers.Count,
+                Correct   = correct,
+                NotMarked = answers.Count(a => a.IsCorrect is null),
+                SolveRate = answers.Count > 0 ? (int)Math.Round(correct * 100.0 / answers.Count) : -1
+            };
+        }).ToList();
     }
 
     // POST: /Assignments/Assign/id — the single "Assign to N students" action: saves who gets the work and,
@@ -875,46 +875,41 @@ public class AssignmentsController : Controller
         }).ToList();
     }
 
-    // GET: /Assignments/ExportGrades/id  — download a gradebook-ready CSV of results.
+    // GET: /Assignments/ExportGrades/id — a gradebook-ready CSV: one row per current recipient (the same statuses
+    // and counts as the page), then work of students who are no longer recipients, marked as such.
     public async Task<IActionResult> ExportGrades(Guid id)
     {
-        var assignment = await _db.Assignments
-            .Include(a => a.AssignmentStudents)
-                .ThenInclude(asn => asn.Student)
-            .Include(a => a.StudentResults)
-                .ThenInclude(sr => sr.Student)
-            .FirstOrDefaultAsync(a => a.Id == id && (a.TeacherId == CurrentUserId || a.Class.TeacherId == CurrentUserId || a.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
-
+        var assignment = await LoadForProgressAsync(id);
         if (assignment is null) return NotFound();
 
-        // Latest SUBMITTED result per student (highest attempt) — an abandoned
-        // draft (opened but never turned in) must never outrank a real grade just
-        // because its AttemptNumber is higher.
-        var latestByStudent = assignment.StudentResults
-            .Where(r => r.IsSubmitted)
-            .GroupBy(r => r.StudentId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.AttemptNumber).First());
-
+        var p  = AssignmentProgress.Build(assignment);
         var sb = new StringBuilder();
-        sb.AppendLine("Student,Email,Score (%),Status,Submitted At,Graded By");
+        sb.AppendLine($"Student,Email,Recipient,Status,Score (%),Submitted at ({SchoolTime.ZoneId}),Submitted attempts,In progress,Needs review,Graded by,Due ({SchoolTime.ZoneId})");
 
-        foreach (var asn in assignment.AssignmentStudents.OrderBy(a => a.Student.FullName))
+        void Row(ProgressRow r, bool current)
         {
-            latestByStudent.TryGetValue(asn.StudentId, out var result);
-
-            var score       = result is null ? "" : result.Score.ToString();
-            var status      = result is null ? "Not submitted" : result.OverallStatus.ToString();
-            var submittedAt = result is null ? "" : SchoolTime.Show(result.SubmittedAt, "yyyy-MM-dd HH:mm");
-            var gradedBy    = result is null ? ""
-                            : result.TeacherReviewedAt.HasValue ? "Teacher" : "AI";
-
-            sb.Append(Csv(asn.Student.FullName)).Append(',')
-              .Append(Csv(asn.Student.Email)).Append(',')
-              .Append(Csv(score)).Append(',')
-              .Append(Csv(status)).Append(',')
-              .Append(Csv(submittedAt)).Append(',')
-              .Append(Csv(gradedBy)).Append('\n');
+            var latest = r.Latest;
+            var status = r.State switch
+            {
+                SubmissionState.Submitted  => "Submitted",
+                SubmissionState.InProgress => "In progress",
+                _                          => "Not started"
+            };
+            sb.Append(Csv(r.Student.FullName)).Append(',')
+              .Append(Csv(r.Student.Email)).Append(',')
+              .Append(current ? "Current" : "Former").Append(',')
+              .Append(status).Append(',')
+              .Append(latest is null ? "" : latest.Score.ToString()).Append(',')
+              .Append(latest is null ? "" : SchoolTime.Show(latest.SubmittedAt, "yyyy-MM-dd HH:mm")).Append(',')
+              .Append(r.Submitted.Count).Append(',')
+              .Append(r.Draft is null ? "No" : "Yes").Append(',')
+              .Append(r.NeedsReview ? "Yes" : "No").Append(',')
+              .Append(latest is null ? "" : latest.TeacherReviewedAt.HasValue ? "Teacher" : latest.GradingPending ? "AI (checking)" : "AI").Append(',')
+              .Append(Csv(SchoolTime.Show(r.Due, "yyyy-MM-dd HH:mm", ""))).Append('\n');
         }
+
+        foreach (var r in p.Rows) Row(r, current: true);
+        foreach (var r in p.Former) Row(r, current: false);
 
         var fileName = $"grades-{Slug(assignment.Title)}-{DateTime.UtcNow:yyyyMMdd}.csv";
         var bytes    = new UTF8Encoding(true).GetBytes(sb.ToString()); // BOM so Excel reads UTF-8
@@ -981,41 +976,26 @@ public class AssignmentsController : Controller
         });
     }
 
-    // GET: /Assignments/LiveStatus/id  — lightweight polling for the live classroom board.
-    // Returns a signature the page compares against to auto-refresh when new
-    // submissions or grade changes arrive, plus current progress counts.
+    // GET: /Assignments/LiveStatus/id — the live board polls this. The signature changes only when something a
+    // teacher sees in a row changes (a hand-in, a new attempt starting, a mark, recipients); saving a draft again
+    // does not, so the board never refreshes in a loop.
     [HttpGet]
     public async Task<IActionResult> LiveStatus(Guid id)
     {
-        var assignment = await _db.Assignments
-            .Include(a => a.StudentResults)
-            .Include(a => a.AssignmentStudents)
-            .FirstOrDefaultAsync(a => a.Id == id && (a.TeacherId == CurrentUserId || a.Class.TeacherId == CurrentUserId || a.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
-
+        var assignment = await LoadForProgressAsync(id);
         if (assignment is null) return NotFound();
 
-        var results    = assignment.StudentResults.Where(r => r.IsSubmitted).ToList();
-        var recipients = assignment.AssignmentStudents.Select(x => x.StudentId).ToHashSet();
-
+        var p = AssignmentProgress.Build(assignment);
         return Json(new
         {
-            signature = LiveSignature(assignment),
-            // Students, not attempts: a recipient who submitted twice counts once.
-            submitted = results.Where(r => recipients.Contains(r.StudentId)).Select(r => r.StudentId).Distinct().Count(),
-            attempts  = results.Count(r => recipients.Contains(r.StudentId)),
-            total     = recipients.Count
+            signature    = p.Signature,
+            assigned     = p.Assigned,
+            submitted    = p.SubmittedStudents,
+            notSubmitted = p.NotSubmitted,
+            attempts     = p.SubmittedAttempts,
+            needsReview  = p.NeedsReviewStudents,
+            total        = p.Assigned
         });
-    }
-
-    /// <summary>
-    /// Changes whenever a submission is added or (re)graded, or the recipients change. The page and the
-    /// polling endpoint must compute it the same way, or the board reloads in a loop.
-    /// </summary>
-    public static string LiveSignature(Assignment assignment)
-    {
-        var submitted = assignment.StudentResults.Where(r => r.IsSubmitted).ToList();
-        var lastTick  = submitted.Any() ? submitted.Max(r => (r.UpdatedAt ?? r.SubmittedAt)).Ticks : 0L;
-        return $"{submitted.Count}:{lastTick}:{assignment.AssignmentStudents.Count}";
     }
 
     // POST: /Assignments/Publish/id  — Draft → Active

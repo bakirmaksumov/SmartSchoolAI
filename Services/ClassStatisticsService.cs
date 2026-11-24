@@ -45,18 +45,24 @@ public class ClassStatisticsService
 
         var submitted = await _db.StudentResults
             .Where(r => assignmentIds.Contains(r.AssignmentId) && r.IsSubmitted)
-            .Select(r => new { r.AssignmentId, r.StudentId, r.Score })
+            .Select(r => new { r.AssignmentId, r.StudentId, r.Score, r.AttemptNumber })
             .ToListAsync();
 
         foreach (var row in assigned)
             if (stats.TryGetValue((assignmentToClass[row.AssignmentId], row.StudentId), out var stat))
                 stat.Assigned++;
 
-        foreach (var group in submitted.GroupBy(r => (assignmentToClass[r.AssignmentId], r.StudentId)))
+        // Counted per assignment, as on the assignment page: an assignment is submitted once the student has a saved
+        // final attempt for it (retakes do not count twice), and only assignments the student was given count.
+        // The average uses each assignment's newest submitted attempt.
+        var given = assigned.Select(x => (x.AssignmentId, x.StudentId)).ToHashSet();
+        foreach (var group in submitted.Where(r => given.Contains((r.AssignmentId, r.StudentId)))
+                                       .GroupBy(r => (assignmentToClass[r.AssignmentId], r.StudentId)))
         {
             if (!stats.TryGetValue(group.Key, out var stat)) continue;
-            stat.Submitted    = group.Count();
-            stat.AverageScore = (int)Math.Round(group.Average(r => r.Score));
+            var perAssignment = group.GroupBy(r => r.AssignmentId).Select(g => g.OrderByDescending(r => r.AttemptNumber).First()).ToList();
+            stat.Submitted    = perAssignment.Count;
+            stat.AverageScore = (int)Math.Round(perAssignment.Average(r => r.Score));
         }
 
         return stats;
@@ -79,31 +85,36 @@ public class ClassStatisticsService
 
         if (assignmentIds.Count == 0) return stats;
 
-        var assignedCounts = await _db.AssignmentStudents
+        var recipients = await _db.AssignmentStudents
             .Where(x => assignmentIds.Contains(x.AssignmentId))
-            .GroupBy(x => x.AssignmentId)
-            .Select(g => new { AssignmentId = g.Key, Count = g.Count() })
+            .Select(x => new { x.AssignmentId, x.StudentId })
             .ToListAsync();
+        var given = recipients.Select(x => (x.AssignmentId, x.StudentId)).ToHashSet();
 
         var results = await _db.StudentResults
             .Where(r => assignmentIds.Contains(r.AssignmentId) && r.IsSubmitted)
             .Select(r => new
             {
                 r.AssignmentId,
+                r.StudentId,
+                r.AttemptNumber,
                 r.Score,
-                Flagged = r.StudentAnswers.Count(a => a.NeedsReview)
+                Flagged = r.StudentAnswers.Any(a => a.NeedsReview)
             })
             .ToListAsync();
 
-        foreach (var row in assignedCounts)
-            if (stats.TryGetValue(row.AssignmentId, out var stat)) stat.Assigned = row.Count;
+        foreach (var row in recipients.GroupBy(x => x.AssignmentId))
+            if (stats.TryGetValue(row.Key, out var stat)) stat.Assigned = row.Count();
 
-        foreach (var group in results.GroupBy(r => r.AssignmentId))
+        // The assignment page's rules: submitted = current recipients with a saved final attempt (students, not
+        // attempts); the average over each one's newest submitted attempt; needs review = students with flagged work.
+        foreach (var group in results.Where(r => given.Contains((r.AssignmentId, r.StudentId))).GroupBy(r => r.AssignmentId))
         {
             if (!stats.TryGetValue(group.Key, out var stat)) continue;
-            stat.Submitted    = group.Count();
-            stat.AverageScore = (int)Math.Round(group.Average(r => r.Score));
-            stat.NeedsReview  = group.Sum(r => r.Flagged);
+            var latest = group.GroupBy(r => r.StudentId).Select(g => g.OrderByDescending(r => r.AttemptNumber).First()).ToList();
+            stat.Submitted    = latest.Count;
+            stat.AverageScore = (int)Math.Round(latest.Average(r => r.Score));
+            stat.NeedsReview  = group.Where(r => r.Flagged).Select(r => r.StudentId).Distinct().Count();
         }
 
         return stats;

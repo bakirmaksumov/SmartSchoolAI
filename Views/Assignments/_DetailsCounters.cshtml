@@ -1,0 +1,31 @@
+@model SmartSchoolAI.ViewModels.AssignmentDetailsViewModel
+@{
+    var p = Model.Progress;
+    var cards = new[]
+    {
+        (Key: "all",           Label: "Assigned",      Value: p.Assigned,            Icon: "bx-user",         Tone: "primary",
+         Note: p.Assigned == 1 ? "student" : "students"),
+        (Key: "submitted",     Label: "Submitted",     Value: p.SubmittedStudents,   Icon: "bx-check-circle", Tone: "success",
+         Note: $"{p.SubmittedAttempts} submitted attempt{(p.SubmittedAttempts == 1 ? "" : "s")}"),
+        (Key: "not-submitted", Label: "Not submitted", Value: p.NotSubmitted,        Icon: "bx-x-circle",     Tone: "danger",
+         Note: $"{p.InProgress} in progress · {p.NotStarted} not started"),
+        (Key: "needs-review",  Label: "Need review",   Value: p.NeedsReviewStudents, Icon: "bx-time-five",    Tone: "warning",
+         Note: $"students · {p.NeedsReviewAttempts} attempt{(p.NeedsReviewAttempts == 1 ? "" : "s")}")
+    };
+}
+@foreach (var c in cards)
+{
+  <div class="col-6 col-lg-3">
+    <a href="?tab=students&filter=@c.Key" class="card h-100 counter-card text-reset @(Model.Filter == c.Key ? "active" : "")"
+       data-filter="@c.Key" data-counter="@c.Key" aria-pressed="@(Model.Filter == c.Key ? "true" : "false")">
+      <div class="card-body d-flex align-items-start gap-3 py-3">
+        <span class="counter-icon text-@c.Tone"><i class="bx @c.Icon"></i></span>
+        <div class="min-w-0">
+          <div class="text-muted fw-semibold small">@c.Label</div>
+          <div class="fs-3 fw-bold lh-sm counter-value">@c.Value</div>
+          <div class="small text-muted text-truncate counter-note">@c.Note</div>
+        </div>
+      </div>
+    </a>
+  </div>
+}

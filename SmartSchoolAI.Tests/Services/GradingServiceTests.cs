@@ -556,10 +556,4 @@ public class GradingServiceTests : IDisposable
         return (assignment.Id, student.Id);
     }
 
-    /// <summary>An IHttpClientFactory that fails any request — no test here should reach the network.</summary>
-    private sealed class ThrowingHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) =>
-            throw new InvalidOperationException("No test should make an HTTP call to the AI.");
-    }
 }
