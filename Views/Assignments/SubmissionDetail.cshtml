@@ -33,12 +33,21 @@
     <div class="card text-center h-100">
       <div class="card-body py-4">
         <div class="avatar avatar-xl mx-auto mb-3">
-          <span class="avatar-initial rounded-circle bg-label-@scoreColor" style="font-size:1.6rem;">
-            @result.Assignment.FormatGrade(result.Score)
+          @{ var unmarked = result.StudentAnswers.Count(SmartSchoolAI.Services.GradingService.IsUnfinished); }
+          <span class="avatar-initial rounded-circle bg-label-@(unmarked > 0 ? "secondary" : scoreColor)" style="font-size:1.6rem;">
+            @(unmarked > 0 ? "—" : result.Assignment.FormatGrade(result.Score))
           </span>
         </div>
         <h6 class="mb-1">Overall Score</h6>
-        <span class="badge bg-@scoreColor">@result.OverallStatus</span>
+        @if (unmarked > 0)
+        {
+          @* A technical failure is not a mark: the score waits until every answer is marked. *@
+          <span class="badge bg-label-warning" data-score-pending>Not fully marked · @unmarked answer@(unmarked == 1 ? "" : "s") to mark</span>
+        }
+        else
+        {
+          <span class="badge bg-@scoreColor">@result.OverallStatus</span>
+        }
         <div class="mt-2">
           @if (result.TeacherReviewedAt.HasValue)
           {
@@ -137,7 +146,12 @@
                         isCorrect == false ? "border-start border-danger border-3" :
                         "border-start border-secondary border-3";
 
-      <div class="p-3 @borderClass @(i > 0 ? "border-top" : "")">
+      var verdict    = SmartSchoolAI.Services.AiCostReport.Verdict(answer);
+      var unfinished = answer is not null && SmartSchoolAI.Services.GradingService.IsUnfinished(answer);
+      Model.AiCosts.TryGetValue(i, out var aiCost);
+      var disputed   = verdict?.TranscriptionIssues.Where(t => t.Step is not null).Select(t => t.Step!.Value).ToHashSet() ?? new HashSet<int>();
+
+      <div class="p-3 @borderClass @(i > 0 ? "border-top" : "")" id="q@(i)">
         <div class="d-flex align-items-start gap-3">
           <div>
             <span class="avatar avatar-sm">
@@ -245,19 +259,99 @@
                   </div>
                 </div>
                 <div class="col-md-8">
-                  <small class="text-muted d-block mb-1"><i class="bx bx-list-ol me-1"></i>Recognized steps:</small>
-                  @foreach (var s in steps)
+                  @if (unfinished)
                   {
-                    var ok = s.Status == ResultStatus.Correct;
-                    <div class="border rounded p-2 mb-1" style="border-left:4px solid @(ok ? "#71dd37" : "#ff3e1d") !important;">
-                      <div class="small">@(ok ? "✅" : "❌") Step @s.StepNumber: @s.StepText</div>
-                      @if (!ok && !string.IsNullOrEmpty(s.Explanation))
-                      {
-                        <div class="small text-muted mt-1">💡 @s.Explanation</div>
-                      }
-                    </div>
+                    var pending = SmartSchoolAI.Services.GradingService.PendingSteps(answer!);
+                    <small class="text-muted d-block mb-1"><i class="bx bx-list-ol me-1"></i>Student's steps (not marked yet):</small>
+                    @foreach (var s in pending)
+                    {
+                      <div class="border rounded p-2 mb-1 small math-render" data-step="@s.Number">Step @s.Number: @s.Text</div>
+                    }
+                  }
+                  else
+                  {
+                    <small class="text-muted d-block mb-1"><i class="bx bx-list-ol me-1"></i>Recognized steps:</small>
+                    @foreach (var s in steps)
+                    {
+                      var ok = s.Status == ResultStatus.Correct;
+                      var isDisputed = disputed.Contains(s.StepNumber);
+                      <div class="border rounded p-2 mb-1 @(isDisputed ? "disputed-step" : "")" data-step="@s.StepNumber"
+                           style="border-left:4px solid @(isDisputed ? "#ffab00" : ok ? "#71dd37" : "#ff3e1d") !important;">
+                        <div class="small"><span aria-hidden="true">@(ok ? "✅" : "❌")</span> Step @s.StepNumber: <span class="math-render">@s.StepText</span></div>
+                        @if (!ok && !string.IsNullOrEmpty(s.Explanation))
+                        {
+                          <div class="small text-muted mt-1">💡 @s.Explanation</div>
+                        }
+                        @foreach (var t in verdict?.TranscriptionIssues.Where(t => t.Step == s.StepNumber) ?? Enumerable.Empty<SmartSchoolAI.Services.AiMarkingService.TranscriptionIssue>())
+                        {
+                          <div class="small mt-1 text-warning fw-semibold" data-issue>
+                            <i class="bx bx-error me-1" aria-hidden="true"></i>
+                            On the photo: “@t.OnPhoto”, read as “@t.Transcribed”@(t.Certain ? "" : " (not certain)")@(t.MarksAffected is > 0 ? $" — {t.MarksAffected:0.##} mark(s) depend on it" : "").
+                            @if (!string.IsNullOrWhiteSpace(t.Note)) { <span class="fw-normal">@t.Note</span> }
+                          </div>
+                        }
+                      </div>
+                    }
+                  }
+                  @if (verdict?.RecognizedSteps is { Count: > 0 } read)
+                  {
+                    <details class="mt-2 small" data-ocr>
+                      <summary class="text-muted">As first read from the photo@(string.IsNullOrEmpty(verdict.RecognitionModel) ? "" : $" ({verdict.RecognitionModel})")</summary>
+                      <ol class="mb-0 mt-1 ps-3">
+                        @foreach (var r in read)
+                        {
+                          <li class="@(disputed.Contains(r.Number) ? "text-warning fw-semibold" : "")">
+                            <span class="math-render">@r.Text</span>
+                            @if (!string.IsNullOrWhiteSpace(r.CrossedOut)) { <span class="text-muted"> (crossed out: <s>@r.CrossedOut</s>)</span> }
+                            @foreach (var u in r.Unclear) { <span class="badge bg-label-warning ms-1">unclear: @u.Fragment</span> }
+                          </li>
+                        }
+                      </ol>
+                    </details>
                   }
                 </div>
+              </div>
+            }
+
+            @if (verdict is { Criteria.Count: > 0 })
+            {
+              <div class="mt-2" data-criteria>
+                <small class="text-muted d-block mb-1"><i class="bx bx-check-square me-1"></i>Marks by criterion (AI@(string.IsNullOrEmpty(verdict.Model) ? "" : $", {verdict.Model}")):</small>
+                <div class="table-responsive">
+                  <table class="table table-sm table-bordered mb-1 small">
+                    <thead class="table-light"><tr><th>Criterion</th><th class="text-center">Marks</th><th>Why</th><th>Based on</th></tr></thead>
+                    <tbody>
+                      @foreach (var c in verdict.Criteria)
+                      {
+                        <tr class="@(c.Step is { } cs && disputed.Contains(cs) ? "table-warning" : "")">
+                          <td>@c.Name</td>
+                          <td class="text-center text-nowrap"><strong>@c.Awarded.ToString("0.##")</strong> / @c.MaxMarks.ToString("0.##")</td>
+                          <td class="math-render">@c.Explanation</td>
+                          <td class="math-render text-muted">@c.Evidence</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            }
+
+            @if (unfinished || aiCost is not null)
+            {
+              <div class="d-flex flex-wrap align-items-center gap-2 mt-2 small text-muted" data-ai-cost>
+                @if (aiCost is not null)
+                {
+                  <span title="@string.Join("\n", aiCost.Lines.Select(l => $"{l.Stage} · {l.Model} · {l.InputTokens?.ToString() ?? "?"} in / {l.OutputTokens?.ToString() ?? "?"} out · {(l.Cost is { } lc ? $"${lc:0.#####}" : "no data")}{(l.Succeeded ? "" : $" · failed ({l.Failure})")}{(l.Shared ? " · shared with other answers" : "")}"))">
+                    <i class="bx bx-coin-stack me-1" aria-hidden="true"></i>AI checking: @aiCost.Calls call@(aiCost.Calls == 1 ? "" : "s") ·
+                    @aiCost.InputTokens.ToString("N0") in / @aiCost.OutputTokens.ToString("N0") out tokens · cost @aiCost.CostText@(aiCost.Shared ? " (one call shared by several answers)" : "")
+                  </span>
+                }
+                @if (unfinished)
+                {
+                  <button type="submit" form="retry_@(i)" class="btn btn-xs btn-warning" data-retry>
+                    <i class="bx bx-refresh me-1" aria-hidden="true"></i>Retry AI marking
+                  </button>
+                }
               </div>
             }
 
@@ -270,7 +364,9 @@
             }
 
             @{
-              var gradePoints = (answer?.PointsAwarded ?? (isCorrect == true ? q.MaxPoints : 0m))
+              // Not marked yet (the AI did not finish, or nothing to mark): the box stays empty, never a silent 0.
+              var notMarked   = answer?.PointsAwarded is null && isCorrect is null;
+              var gradePoints = notMarked ? "" : (answer?.PointsAwarded ?? (isCorrect == true ? q.MaxPoints : 0m))
                   .ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
               var maxPoints = q.MaxPoints.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
             }
@@ -292,7 +388,7 @@
                   <label class="form-label small text-muted d-block mb-1">Marks (out of @maxPoints)</label>
                   <div class="input-group input-group-sm" style="width:130px;">
                     <input type="number" step="0.5" min="0" max="@maxPoints" class="form-control grade-points"
-                           data-idx="@i" data-max="@maxPoints" value="@gradePoints">
+                           data-idx="@i" data-max="@maxPoints" value="@gradePoints" placeholder="@(notMarked ? "not marked" : "")">
                     <span class="input-group-text">/ @maxPoints</span>
                   </div>
                 </div>
@@ -346,6 +442,22 @@
 </div>
 </form>
 
+@* "Retry AI marking" forms live outside the grading form (forms cannot nest); each button points at its own. *@
+@foreach (var a in result.StudentAnswers.Where(SmartSchoolAI.Services.GradingService.IsUnfinished))
+{
+  <form method="post" action="/Assignments/RetryAiMarking" id="retry_@(a.QuestionIndex)" class="d-none"
+        onsubmit="var b=document.querySelector('[form=retry_@(a.QuestionIndex)]'); if(b){b.disabled=true; b.innerHTML='Marking…';}">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="resultId" value="@result.Id" />
+    <input type="hidden" name="questionIndex" value="@a.QuestionIndex" />
+    <input type="hidden" name="returnUrl" value="@(ViewBag.ReturnUrl as string)" />
+  </form>
+}
+<style>
+  .disputed-step { background: rgba(255, 171, 0, .08); }
+  .btn-xs { padding: .15rem .45rem; font-size: .75rem; }
+</style>
+
 @section Scripts {
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
@@ -395,6 +507,12 @@
       rowFor(el.dataset.idx).comment = el.value.trim();
     });
 
+    // A question the teacher left unmarked (no grade chosen, no marks typed) is not saved: an answer that is "not
+    // marked yet" must not become a teacher's 0 just because the form was saved for another question.
+    document.querySelectorAll('.grade-points').forEach(el => {
+      const i = el.dataset.idx;
+      if (el.value.trim() === '' && !document.querySelector('.grade-correct[data-idx="' + i + '"]:checked')) delete rows[i];
+    });
     document.getElementById('gradesJson').value = JSON.stringify(Object.values(rows));
   });
 </script>

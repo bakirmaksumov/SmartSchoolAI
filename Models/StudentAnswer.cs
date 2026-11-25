@@ -48,6 +48,18 @@ public class StudentAnswer : BaseEntity
     // FK
     public Guid StudentResultId { get; set; }
 
+    /// <summary>The cached reading of the photo(s) this answer was graded from (<see cref="AiStageResult.CacheKey"/>).</summary>
+    public string?  RecognitionKey    { get; set; }
+
+    /// <summary>The cached AI grading of this answer (<see cref="AiStageResult.CacheKey"/>); null for old work.</summary>
+    public string?  GradingKey        { get; set; }
+
+    /// <summary>
+    /// What the AI marked, for the teacher: marks per criterion with the reason and the piece of work it rests on,
+    /// the steps as first read from the photo, and any line whose reading decides marks. Null for old work.
+    /// </summary>
+    public string?  GradingJson       { get; set; }
+
     // Navigation
     public StudentResult StudentResult { get; set; } = null!;
 }

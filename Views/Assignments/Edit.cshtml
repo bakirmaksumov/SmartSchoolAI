@@ -1013,6 +1013,13 @@
             </div>
         </div>
 
+        <!-- Mark scheme for the AI marker -->
+        <div class="mb-4">
+            <label class="form-label fw-semibold" for="eq_markScheme">Mark scheme <span class="text-muted fw-normal small">(optional, used by the AI marker)</span></label>
+            <textarea id="eq_markScheme" class="form-control" rows="2" placeholder="e.g. M1 correct method (expands the brackets); A1 x = 3"></textarea>
+            <div class="form-text">One mark point per item. Without it the AI gives method marks for a correct method and accuracy marks for correct results.</div>
+        </div>
+
         <div id="eq_saveError" class="d-none alert alert-danger py-2 small mb-3"></div>
 
         <div class="d-flex gap-2">
@@ -1251,6 +1258,7 @@ function openEditDrawer(idx) {
   // Populate fields
   document.getElementById('eq_title').value      = q.title      ?? '';
   document.getElementById('eq_answerKey').value  = q.answerKey  ?? '';
+  document.getElementById('eq_markScheme').value = q.markScheme ?? '';
   document.getElementById('eq_difficulty').value = q.difficulty ?? 'Medium';
   document.getElementById('eq_type').value       = String(q.type ?? 0);
   document.getElementById('eq_marks').value      = (parseInt(q.marks, 10) > 0) ? parseInt(q.marks, 10) : 1;
@@ -1427,6 +1435,7 @@ async function eqSave() {
   const type       = parseInt(document.getElementById('eq_type').value);
   const difficulty = document.getElementById('eq_difficulty').value;
   const answerKey  = document.getElementById('eq_answerKey').value.trim();
+  const markScheme = document.getElementById('eq_markScheme').value.trim();
   const options    = Array.from(document.querySelectorAll('#eq_optionsList .eq-option'))
                          .map(i => i.value.trim()).filter(Boolean);
   const marks      = Math.min(100, Math.max(1, parseInt(document.getElementById('eq_marks').value, 10) || 1));
@@ -1447,6 +1456,8 @@ async function eqSave() {
     requireWork:        original.requireWork ?? false,
     marks,
     requireDrawing,
+    markScheme:         markScheme || null,
+    explanation:        original.explanation ?? null,
     groupId:            original.groupId ?? null,
     // A diagram hint is only useful until the real image is attached; a
     // validation warning is only useful until the teacher has reviewed and

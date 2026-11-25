@@ -56,6 +56,9 @@ public class SubmissionDetailViewModel
 {
     public StudentResult    Result    { get; set; } = null!;
     public List<QuestionDto> Questions { get; set; } = new();
+
+    /// <summary>Per question index: what the AI calls behind the answer cost.</summary>
+    public Dictionary<int, SmartSchoolAI.Services.AiCostSummary> AiCosts { get; set; } = new();
 }
 
 /// <summary>One student's own results/history for a single assignment — the

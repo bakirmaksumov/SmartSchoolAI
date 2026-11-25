@@ -25,10 +25,7 @@ public class SubmissionAndProgressTests : IDisposable
     {
         var config = new ConfigurationBuilder().Build();              // no AI key: every AI call fails
         IHttpClientFactory http = new ThrowingHttpClientFactory();
-        var grader = new GradingService(db,
-            new AnswerGradingService(config, http, NullLogger<AnswerGradingService>.Instance),
-            new HandwritingAnalysisService(config, http, NullLogger<HandwritingAnalysisService>.Instance),
-            _env, NullLogger<GradingService>.Instance);
+        var grader = AiTestServices.Grading(db, _db.NewContext, config, http, _env);
         return new SubmissionService(db, grader, _env, NullLogger<SubmissionService>.Instance);
     }
 

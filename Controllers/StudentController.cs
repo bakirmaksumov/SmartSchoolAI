@@ -20,7 +20,7 @@ public class StudentController : Controller
     private readonly AuthService                _authService;
     private readonly IConfiguration             _config;
     private readonly IHttpClientFactory         _httpFactory;
-    private readonly HandwritingAnalysisService _handwriting;
+    private readonly AiMarkingService _marking;
     private readonly GradingService             _grader;
     private readonly GenerationJobTracker       _jobs;
     private readonly IServiceScopeFactory       _scopeFactory;
@@ -34,7 +34,7 @@ public class StudentController : Controller
         AuthService                authService,
         IConfiguration             config,
         IHttpClientFactory         httpFactory,
-        HandwritingAnalysisService handwriting,
+        AiMarkingService marking,
         GradingService             grader,
         GenerationJobTracker       jobs,
         IServiceScopeFactory       scopeFactory,
@@ -48,7 +48,7 @@ public class StudentController : Controller
         _authService  = authService;
         _config       = config;
         _httpFactory  = httpFactory;
-        _handwriting  = handwriting;
+        _marking      = marking;
         _grader       = grader;
         _jobs         = jobs;
         _scopeFactory = scopeFactory;
@@ -419,6 +419,7 @@ public class StudentController : Controller
                 var outcome = await grader.AiCheckTypedAnswerAsync(question!, questionIndex, answer);
                 if (!outcome.Success)
                 {
+                    // A technical failure keeps the work (saved as "not marked yet"); the student can try again.
                     job.Error  = outcome.Error;
                     job.Status = "error";
                     return;
@@ -617,20 +618,30 @@ public class StudentController : Controller
             if (pages.Count == 0)
                 return Json(new { success = false, error = "No valid images uploaded." });
 
-            var analysis = await _handwriting.ExtractStepsAsync(pages, question!.Title);
+            // Read by the recognition model once per photo: the same photo again (a second click, a reload, a retry)
+            // reuses the stored reading at no cost; a new photo is read anew.
+            var reading = await _marking.RecognizeAsync(
+                pages.Select(p => new AiMarkingService.Page(p.bytes, p.mime)).ToList(), question!.Title,
+                new AiCallContext("recognition", null, studentId, assignmentId, null, questionIndex.ToString()));
 
             return Json(new
             {
                 success         = true,
                 imagePaths      = paths,
-                detectedProblem = analysis.DetectedProblem,
-                steps           = analysis.Steps
+                detectedProblem = reading.DetectedProblem,
+                steps           = reading.Steps.Select(s => new
+                {
+                    number  = s.Number,
+                    text    = s.Text,
+                    unclear = s.Unclear.Count > 0
+                })
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "AnalyzeHandwritten failed for assignment {AssignmentId} q{QuestionIndex}", assignmentId, questionIndex);
-            return Json(new { success = false, error = "Analysis failed. Please try again." });
+            _logger.LogWarning("AnalyzeHandwritten failed for assignment {AssignmentId} q{QuestionIndex}: {Kind}", assignmentId, questionIndex,
+                               (ex as AiCallException)?.Kind ?? ex.GetType().Name);
+            return Json(new { success = false, retry = true, error = "Reading the photo did not finish. Your photo is saved — please try again." });
         }
     }
 
@@ -703,6 +714,7 @@ public class StudentController : Controller
                 var outcome = await grader.EvaluateStepsAsync(assignmentId, questionIndex, studentId, stepsJson, imagePath, selectedAnswer);
                 if (!outcome.Success)
                 {
+                    // A technical failure keeps the work (saved as "not marked yet"); the student can try again.
                     job.Error  = outcome.Error;
                     job.Status = "error";
                     return;
@@ -715,6 +727,8 @@ public class StudentController : Controller
                     summary        = outcome.Summary,
                     expectedAnswer = outcome.ExpectedAnswer,
                     score          = outcome.Score,
+                    marks          = outcome.Marks,
+                    maxMarks       = outcome.MaxMarks,
                     steps          = outcome.Steps,
                     option         = outcome.Option is null ? null : new { correct = outcome.Option.Correct, feedback = outcome.Option.Feedback }
                 };

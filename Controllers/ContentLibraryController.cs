@@ -219,7 +219,8 @@ public class ContentLibraryController : Controller
         string?         explanation,
         bool            isPublic,
         List<string>?   options,
-        List<Guid>?     skillIds)
+        List<Guid>?     skillIds,
+        string?         rubric = null)
     {
         if (string.IsNullOrWhiteSpace(title))
         {
@@ -280,7 +281,9 @@ public class ContentLibraryController : Controller
                     difficulty  = question.Difficulty.ToString(),
                     answerKey   = question.AnswerKey,
                     options     = JsonSerializer.Deserialize<List<string>>(question.Options) ?? new List<string>(),
-                    visualState = question.VisualState
+                    visualState = question.VisualState,
+                    // "Rubric / Grading notes" on the form: the mark scheme the AI marker follows.
+                    markScheme  = string.IsNullOrWhiteSpace(rubric) ? null : rubric.Trim()
                 };
                 using var doc = JsonDocument.Parse(JsonSerializer.Serialize(qObj));
                 list.Add(doc.RootElement.Clone());

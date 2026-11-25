@@ -1,27 +1,26 @@
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
 namespace SmartSchoolAI.Services;
 
 /// <summary>
-/// AI-grades typed answers that cannot be graded deterministically:
-/// open/short answers with no answer key, or text answers that didn't
-/// exactly match the key (accepts equivalent forms like "x = 2" vs "2").
-/// All items are graded in a single model call to keep cost down.
+/// AI-grades typed answers that cannot be graded deterministically: open/short answers with no key, or text answers
+/// that did not exactly match the key (equivalent forms like "x = 2" and "2" are accepted). Sent straight to the
+/// grading model (OpenRouter:Grading:GradingModel) with the question, the key and the teacher's mark scheme; no
+/// photo-reading call is involved. All items of one submission go in a single call to keep cost down; the call's
+/// tokens and cost are recorded for the submission and its questions.
 /// </summary>
 public class AnswerGradingService
 {
-    private readonly IConfiguration _config;
-    private readonly IHttpClientFactory _httpFactory;
+    private readonly OpenRouterClient _ai;
+    private readonly GradingModels _models;
     private readonly ILogger<AnswerGradingService> _logger;
 
-    public AnswerGradingService(
-        IConfiguration config, IHttpClientFactory httpFactory, ILogger<AnswerGradingService> logger)
+    public AnswerGradingService(OpenRouterClient ai, GradingModels models, ILogger<AnswerGradingService> logger)
     {
-        _config      = config;
-        _httpFactory = httpFactory;
-        _logger      = logger;
+        _ai     = ai;
+        _models = models;
+        _logger = logger;
     }
 
     private const string SystemPrompt = """
@@ -46,12 +45,16 @@ public class AnswerGradingService
           to that number, the way an exam mark scheme would: method marks for a correct
           method even when the final answer is wrong, accuracy marks only for correct
           results. "correct" is true only when the answer earns full marks.
+        - When the item has a teacher's mark scheme, follow it: one criterion per mark point (e.g. M1 for the method,
+          A1 for the result), each with the marks awarded and a short reason. Without a scheme, still list the
+          criteria you used. "marks" is their total.
         Return ONLY valid JSON — no markdown fences, no explanation:
-        [ { "index": 1, "correct": true, "marks": 1, "feedback": "<one short sentence for the student>" } ]
+        [ { "index": 1, "correct": true, "marks": 1, "feedback": "<one short sentence for the student>",
+            "criteria": [ { "criterion": "A1 correct answer", "maxMarks": 1, "awarded": 1, "explanation": "<why>", "evidence": "<the part of the answer>" } ] } ]
         """;
 
     /// <summary>One typed answer to grade. Index is the 0-based question index.</summary>
-    public sealed record ItemToGrade(int Index, string Question, string StudentAnswer, string? ExpectedAnswer, decimal MaxMarks = 1);
+    public sealed record ItemToGrade(int Index, string Question, string StudentAnswer, string? ExpectedAnswer, decimal MaxMarks = 1, string? MarkScheme = null);
 
     /// <summary>The model's verdict for one item.</summary>
     public sealed class GradedItem
@@ -64,19 +67,14 @@ public class AnswerGradingService
         public decimal? Marks { get; set; }
 
         public string Feedback { get; set; } = string.Empty;
+
+        /// <summary>Marks per criterion with the reason; empty when the model gave none.</summary>
+        public List<AiMarkingService.Criterion> Criteria { get; set; } = new();
     }
 
     /// <summary>Grades all items in one model call. Returns verdicts keyed by question index.</summary>
-    public async Task<Dictionary<int, GradedItem>> GradeAsync(IReadOnlyList<ItemToGrade> items)
+    public async Task<Dictionary<int, GradedItem>> GradeAsync(IReadOnlyList<ItemToGrade> items, AiCallContext? context = null)
     {
-        var apiKey  = _config["OpenRouter:ApiKey"]  ?? "";
-        var baseUrl = _config["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
-        var model   = _config["OpenRouter:Model"]   ?? "openai/gpt-4o";
-
-        if (string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException(
-                "OpenRouter API key is not configured. Add 'OpenRouter:ApiKey' to appsettings.");
-
         var sb = new StringBuilder("Grade the following answers.\n\n");
         foreach (var item in items)
         {
@@ -84,60 +82,30 @@ public class AnswerGradingService
             sb.AppendLine($"Question: {item.Question}");
             sb.AppendLine($"Marks available: {item.MaxMarks:0.##}");
             sb.AppendLine($"Expected answer: {(string.IsNullOrWhiteSpace(item.ExpectedAnswer) ? "(not provided)" : item.ExpectedAnswer)}");
+            if (!string.IsNullOrWhiteSpace(item.MarkScheme)) sb.AppendLine($"Teacher's mark scheme: {item.MarkScheme}");
             sb.AppendLine($"Student's answer: {item.StudentAnswer}");
             sb.AppendLine();
         }
 
-        var payload = new
+        var reply = await _ai.CompleteAsync(_models.Grading, new object[]
         {
-            model,
-            temperature = 0.1,   // grading should be as deterministic as possible
-            messages = new object[]
-            {
-                new { role = "system", content = SystemPrompt },
-                new { role = "user",   content = sb.ToString() }
-            }
-        };
+            new { role = "system", content = SystemPrompt },
+            new { role = "user",   content = sb.ToString() }
+        }, (context ?? new AiCallContext("typed-grading")) with { Questions = string.Join(",", items.Select(i => i.Index)) },
+           temperature: _models.GradingTemperature, timeout: _models.Timeout);
 
-        using var http = _httpFactory.CreateClient();
-        http.Timeout = TimeSpan.FromMinutes(3);
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-
-        var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-
-        _logger.LogInformation("Grading {Count} typed answer(s) via OpenRouter …", items.Count);
-
-        var response = await http.PostAsync($"{baseUrl.TrimEnd('/')}/chat/completions", content);
-        var body     = await response.Content.ReadAsStringAsync();
-
-        if (!response.IsSuccessStatusCode)
+        List<GradedItem> graded;
+        try
         {
-            _logger.LogWarning("OpenRouter returned {Status}: {Body}", response.StatusCode, body);
-            throw new Exception($"AI grading returned {(int)response.StatusCode}.");
+            graded = JsonSerializer.Deserialize<List<GradedItem>>(OpenRouterClient.CleanJson(reply.Content),
+                         new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? new();
+        }
+        catch (JsonException ex)
+        {
+            throw new AiCallException("bad-response", "The AI's marking reply could not be read.", ex);
         }
 
-        using var doc = JsonDocument.Parse(body);
-        var raw = doc.RootElement
-                     .GetProperty("choices")[0]
-                     .GetProperty("message")
-                     .GetProperty("content")
-                     .GetString() ?? "[]";
-
-        // Strip markdown fences if the model wrapped the JSON
-        raw = raw.Trim();
-        if (raw.StartsWith("```")) raw = raw[(raw.IndexOf('\n') + 1)..];
-        if (raw.EndsWith("```"))   raw = raw[..raw.LastIndexOf("```")];
-        raw = raw.Trim();
-
-        // Repair LaTeX single backslashes so the JSON is valid.
-        raw = JsonSanitizer.FixInvalidBackslashes(raw);
-
-        var graded = JsonSerializer.Deserialize<List<GradedItem>>(raw,
-                         new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                     ?? new List<GradedItem>();
-
-        return graded
-            .GroupBy(g => g.Index)
-            .ToDictionary(g => g.Key, g => g.First());
+        _logger.LogInformation("Typed grading: {Count} item(s), {Graded} verdict(s)", items.Count, graded.Count);
+        return graded.GroupBy(g => g.Index).ToDictionary(g => g.Key, g => g.First());
     }
 }

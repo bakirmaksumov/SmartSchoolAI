@@ -66,6 +66,14 @@ public class QuestionDto
     public bool RequireDrawing { get; set; }
 
     /// <summary>
+    /// The teacher's mark scheme for the AI marker, e.g. "M1 expands the brackets; A1 x = 3". Optional: without it
+    /// the marker uses a standard scheme (method marks for a correct method, accuracy marks for correct results).
+    /// Changing it makes the next marking run again; the photo is not read again.
+    /// </summary>
+    [JsonPropertyName("markScheme")]
+    public string? MarkScheme { get; set; }
+
+    /// <summary>
     /// When set, this question is a subpoint (e.g. "2a") nested under the
     /// question whose Id matches this value — rendered indented under that
     /// parent and numbered relative to it ("2a", "2b", ...), but otherwise a

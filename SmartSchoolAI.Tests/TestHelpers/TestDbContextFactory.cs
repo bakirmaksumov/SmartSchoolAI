@@ -29,6 +29,9 @@ public sealed class TestDbContextFactory : IDisposable
         Context.Database.EnsureCreated();
     }
 
+    /// <summary>Another context on the same in-memory database (as a second connection would be in production).</summary>
+    public AppDbContext NewContext() => new(new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options);
+
     public void Dispose()
     {
         Context.Dispose();

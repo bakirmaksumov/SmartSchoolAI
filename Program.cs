@@ -22,6 +22,15 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Domain services
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<PdfImportService>();
+// Checking student work: photo reading (OpenRouter:Grading:RecognitionModel) and marking
+// (OpenRouter:Grading:GradingModel). Every call is logged with its tokens and cost; finished stages are stored.
+builder.Services.AddSingleton<GradingModels>();
+builder.Services.AddSingleton(sp => new AiUsageRecorder(
+    () => new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+              .UseSqlite(builder.Configuration.GetConnectionString("Default")).Options),
+    sp.GetRequiredService<ILogger<AiUsageRecorder>>()));
+builder.Services.AddScoped<OpenRouterClient>();
+builder.Services.AddScoped<AiMarkingService>();
 builder.Services.AddScoped<HandwritingAnalysisService>();
 builder.Services.AddScoped<AnswerGradingService>();
 builder.Services.AddScoped<TranslationService>();

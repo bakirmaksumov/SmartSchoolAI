@@ -144,6 +144,10 @@ public class SubmissionService
         {
             await _grader.GradeUngradedAnswersAsync(result, questions);
             await _grader.GradeSketchesAsync(await SketchesToGradeAsync(result, questions));
+            // Photo / typed-steps answers whose marking did not finish before the hand-in: run only the missing stage
+            // (a stored reading is reused). If it fails again the answer stays "not marked yet" for the teacher.
+            foreach (var unfinished in result.StudentAnswers.Where(GradingService.IsUnfinished).Select(a => a.QuestionIndex).ToList())
+                await _grader.RegradeAnswerAsync(result.Id, unfinished);
         }
         catch (Exception ex)
         {
@@ -167,6 +171,7 @@ public class SubmissionService
             var q = questions[i];
             if (_grader.IsGroupHeader(questions, q)) continue;
             var a = result.StudentAnswers.FirstOrDefault(x => x.QuestionIndex == i);
+            if (a is not null && GradingService.IsUnfinished(a)) return true;     // photo marking cut short: finish it
             if (a is null || a.TeacherOverridden || !string.IsNullOrEmpty(a.ImagePath)) continue;
             if (!string.IsNullOrEmpty(a.SketchPath)) return true;
             if (!string.IsNullOrWhiteSpace(a.AnswerValue) && a.IsCorrect != true && !GradingService.IsChoiceQuestion(q)) return true;
@@ -233,6 +238,10 @@ public class SubmissionService
             {
                 answer.IsCorrect     = null;
                 answer.PointsAwarded = null;
+                // A drawing always waits for the teacher: it is in the review queue from the moment it is handed in,
+                // not only once the AI's first guess arrives (which may take a while, or fail).
+                answer.NeedsReview   = true;
+                answer.ReviewNote    = "Drawn answer: waiting for the AI's first mark. Please look at the drawing and confirm the marks.";
             }
         }
     }

@@ -592,14 +592,19 @@
   function renderResults(data) {
     const wrap = $('hwResults');
     const correct = (data.overall || '').toLowerCase() === 'correct';
+    const partial = (data.overall || '').toLowerCase() === 'partial';
 
-    // Just this question's verdict — data.score is the whole assignment's running
+    // Just this question's verdict and its marks — data.score is the whole assignment's running
     // percentage (recomputed after every question), not this one's, so it's left
     // out here; showing it next to a single question's result read as if it were
     // that question's own score.
+    const fmt = function (n) { return String(Math.round(n * 100) / 100); };
+    const marks = (typeof data.marks === 'number' && typeof data.maxMarks === 'number')
+      ? ' <span class="fw-normal hw-marks">· ' + fmt(data.marks) + ' of ' + fmt(data.maxMarks) + ' mark' + (data.maxMarks === 1 ? '' : 's') + '</span>'
+      : '';
     let html =
       '<div class="alert alert-' + (correct ? 'success' : 'warning') + ' py-2 px-3">' +
-        '<strong>' + (correct ? '✅ Correct' : '❌ Not correct') + '</strong>' +
+        '<strong>' + (correct ? '✅ Correct' : partial ? '◐ Partly correct' : '❌ Not correct') + marks + '</strong>' +
         (data.summary ? '<div class="small mt-1">' + escapeHtml(readable(data.summary).text) + '</div>' : '') +
       '</div>';
 

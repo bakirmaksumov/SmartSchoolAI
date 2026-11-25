@@ -93,12 +93,20 @@
     <div class="card card-hover text-center h-100">
       <div class="card-body py-4 d-flex flex-column align-items-center justify-content-center">
         <div class="avatar avatar-xl mb-3" style="width: 80px; height: 80px;">
-          <span class="avatar-initial rounded-circle bg-label-@scoreColor fw-bold fs-2 border border-@scoreColor">
-            @Model.Assignment.FormatGrade(Model.Score)
+          @{ var unmarked = Model.StudentAnswers.Any(SmartSchoolAI.Services.GradingService.IsUnfinished); }
+          <span class="avatar-initial rounded-circle bg-label-@(unmarked ? "secondary" : scoreColor) fw-bold fs-2 border border-@(unmarked ? "secondary" : scoreColor)">
+            @(unmarked ? "—" : Model.Assignment.FormatGrade(Model.Score))
           </span>
         </div>
         <h5 class="card-title fw-bold text-primary mb-1">Overall Score</h5>
-        <span class="badge bg-@scoreColor px-3 py-2 fs-6">@Model.OverallStatus</span>
+        @if (unmarked)
+        {
+          <span class="badge bg-label-warning px-3 py-2 fs-6" data-score-pending>Your work is saved · marking not finished yet</span>
+        }
+        else
+        {
+          <span class="badge bg-@scoreColor px-3 py-2 fs-6">@Model.OverallStatus</span>
+        }
         <small class="text-muted mt-2">Attempt @Model.AttemptNumber of @Model.Assignment.MaxAttempts</small>
       </div>
     </div>

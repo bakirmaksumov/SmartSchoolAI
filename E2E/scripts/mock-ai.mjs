@@ -31,6 +31,7 @@ const defaults = () => ({
   verifyReply: null,  // { overall, agrees, confidence, notes, steps?: [{ number, status, explanation }] }
   answerReply: null,  // { correct, feedback } — or an array, one entry per call (the last repeats)
   answerStatus: null, // an HTTP error status for typed-answer grading (e.g. 500): the AI "fails"
+  evalStatus: null,   // the same for marking steps / a photographed solution (e.g. 503)
   sketchReply: null,  // { correct, marks, confidence, feedback } for a drawn answer
   importReply: null   // the question list an import (PDF / photo) returns, as an array
 });
@@ -51,7 +52,12 @@ const json = (res, status, value) => {
   res.end(JSON.stringify(value));
 };
 
-const completion = content => ({ choices: [{ message: { role: "assistant", content } }] });
+// Like OpenRouter with usage reporting on: tokens and a cost for every reply.
+const completion = content => ({
+  id: "gen-mock-" + Math.random().toString(36).slice(2, 10),
+  choices: [{ message: { role: "assistant", content } }],
+  usage: { prompt_tokens: 1000, completion_tokens: 200, cost: 0.002 }
+});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function describe(body) {
@@ -106,6 +112,7 @@ async function chatCompletions(req, res) {
 
   if (seen.kind === "eval") {
     await sleep(script.evalDelayMs);
+    if (script.evalStatus) return json(res, script.evalStatus, { error: { message: "mock AI failure" } });
     if (script.evalReply) return json(res, 200, completion(JSON.stringify(script.evalReply)));
     const steps = parseSteps(seen.user).map(s => ({ ...s, status: "correct", explanation: "" }));
     return json(res, 200, completion(JSON.stringify({

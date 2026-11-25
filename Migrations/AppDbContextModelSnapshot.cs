@@ -17,6 +17,107 @@ namespace SmartSchoolAI.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.11");
 
+            modelBuilder.Entity("SmartSchoolAI.Models.AiCallLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AssignmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CacheKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("Cost")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Failure")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GenerationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("InputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("OutputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Questions")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ResultId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("StudentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Succeeded")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CacheKey");
+
+                    b.HasIndex("ResultId");
+
+                    b.ToTable("AiCallLogs");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.AiStageResult", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CacheKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PromptVersion")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CacheKey")
+                        .IsUnique();
+
+                    b.ToTable("AiStageResults");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.Assignment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -724,6 +825,12 @@ namespace SmartSchoolAI.Migrations
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("GradingJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GradingKey")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ImagePath")
                         .HasColumnType("TEXT");
 
@@ -742,6 +849,9 @@ namespace SmartSchoolAI.Migrations
 
                     b.Property<int>("QuestionIndex")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("RecognitionKey")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ReviewNote")
                         .HasColumnType("TEXT");

@@ -30,10 +30,7 @@ public class GradingServiceTests : IDisposable
         var config = new ConfigurationBuilder().Build();   // no OpenRouter:ApiKey
         IHttpClientFactory http = new ThrowingHttpClientFactory();
 
-        var grading     = new AnswerGradingService(config, http, NullLogger<AnswerGradingService>.Instance);
-        var handwriting = new HandwritingAnalysisService(config, http, NullLogger<HandwritingAnalysisService>.Instance);
-
-        _sut = new GradingService(_factory.Context, grading, handwriting, _env, NullLogger<GradingService>.Instance);
+        _sut = AiTestServices.Grading(_factory.Context, _factory.NewContext, config, http, _env);
     }
 
     public void Dispose()

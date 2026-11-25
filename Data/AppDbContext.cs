@@ -31,10 +31,25 @@ public class AppDbContext : DbContext
     public DbSet<LateJoinRequest>     LateJoinRequests     { get; set; }
     public DbSet<QuestionReport>      QuestionReports      { get; set; }
     public DbSet<SupportTicket>       SupportTickets       { get; set; }
+    public DbSet<AiStageResult>       AiStageResults       { get; set; }
+    public DbSet<AiCallLog>           AiCallLogs           { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // Finished AI stages are looked up by their key; one row per key, so two racing requests cannot both store one.
+        modelBuilder.Entity<AiStageResult>(e =>
+        {
+            e.HasIndex(x => x.CacheKey).IsUnique();
+            e.Property(x => x.CacheKey).HasMaxLength(100);
+        });
+        modelBuilder.Entity<AiCallLog>(e =>
+        {
+            e.HasIndex(x => x.CacheKey);
+            e.HasIndex(x => x.ResultId);
+            e.Property(x => x.Cost).HasPrecision(18, 8);
+        });
 
         ConfigureUser(modelBuilder);
         ConfigureRole(modelBuilder);

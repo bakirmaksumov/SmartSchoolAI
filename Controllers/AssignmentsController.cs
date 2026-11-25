@@ -975,11 +975,36 @@ public class AssignmentsController : Controller
 
         if (result is null) return NotFound();
 
+        // Reads only what is stored: opening the page never calls the AI.
         return View(new SubmissionDetailViewModel
         {
             Result    = result,
-            Questions = JsonSerializer.Deserialize<List<QuestionDto>>(result.Assignment.Questions) ?? new()
+            Questions = JsonSerializer.Deserialize<List<QuestionDto>>(result.Assignment.Questions) ?? new(),
+            AiCosts   = await AiCostReport.ForResultAsync(_db, result)
         });
+    }
+
+    // POST: /Assignments/RetryAiMarking — runs the AI marking of one photographed / typed-steps answer again when it
+    // did not finish. Only the missing stage is paid for: a stored reading or grading is reused. A teacher's own mark
+    // is never replaced; the result reaches the student as before (nothing is published by this).
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("ai")]
+    public async Task<IActionResult> RetryAiMarking(Guid resultId, int questionIndex, string? returnUrl = null)
+    {
+        var allowed = await _db.StudentResults.AnyAsync(r => r.Id == resultId &&
+            (r.Assignment.TeacherId == CurrentUserId || r.Assignment.Class.TeacherId == CurrentUserId ||
+             r.Assignment.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
+        if (!allowed) return NotFound();
+
+        using var scope = _scopeFactory.CreateScope();
+        var outcome = await scope.ServiceProvider.GetRequiredService<GradingService>().RegradeAnswerAsync(resultId, questionIndex);
+        if (outcome.Success) TempData["Success"] = $"AI marking finished: {outcome.Marks:0.##} of {outcome.MaxMarks:0.##} marks.";
+        else                 TempData["Error"]   = outcome.Error ?? "AI marking did not finish. Please try again later.";
+
+        var back = $"/Assignments/SubmissionDetail?resultId={resultId}" +
+                   (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? $"&returnUrl={Uri.EscapeDataString(returnUrl)}" : "");
+        return Redirect(back + $"#q{questionIndex}");
     }
 
     // GET: /Assignments/LiveStatus/id — the live board polls this. The signature changes only when something a
