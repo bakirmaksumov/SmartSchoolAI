@@ -34,9 +34,16 @@ public sealed class GradingModels
     /// <summary>Temperature for grading; null = the model's default (GPT-5 models accept only their default).</summary>
     public double? GradingTemperature { get; }
     public TimeSpan Timeout { get; }
+    /// <summary>How much the reading model may "think" (OpenRouter reasoning effort: low|medium|high); low by default —
+    /// copying handwriting needs care, not long reasoning, and thinking tokens are paid as output.</summary>
+    public string? RecognitionReasoning { get; }
+    /// <summary>Reasoning effort for marking; null = the model's default.</summary>
+    public string? GradingReasoning { get; }
 
     public GradingModels(IConfiguration config)
     {
+        RecognitionReasoning = Effort(config["OpenRouter:Grading:RecognitionReasoningEffort"] ?? "low");
+        GradingReasoning     = Effort(config["OpenRouter:Grading:GradingReasoningEffort"]);
         Recognition = Non(config["OpenRouter:Grading:RecognitionModel"]) ?? "google/gemini-3.1-pro-preview";
         Grading     = Non(config["OpenRouter:Grading:GradingModel"]) ?? "openai/gpt-5.5";
         GradingTemperature = double.TryParse(config["OpenRouter:Grading:Temperature"], System.Globalization.NumberStyles.Float,
@@ -45,6 +52,8 @@ public sealed class GradingModels
     }
 
     private static string? Non(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    private static string? Effort(string? s) => s?.Trim().ToLowerInvariant() is "low" or "medium" or "high" ? s.Trim().ToLowerInvariant() : null;
 }
 
 /// <summary>
@@ -69,7 +78,7 @@ public class OpenRouterClient
 
     public async Task<AiReply> CompleteAsync(
         string model, object[] messages, AiCallContext context, double? temperature = null, TimeSpan? timeout = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? reasoningEffort = null)
     {
         var apiKey  = _config["OpenRouter:ApiKey"] ?? "";
         var baseUrl = _config["OpenRouter:BaseUrl"] ?? "https://openrouter.ai/api/v1";
@@ -83,6 +92,7 @@ public class OpenRouterClient
             ["usage"]    = new { include = true }      // OpenRouter then reports tokens and cost in the reply
         };
         if (temperature is { } t) payload["temperature"] = t;
+        if (reasoningEffort is not null) payload["reasoning"] = new { effort = reasoningEffort };
 
         var log = new AiCallLog
         {

@@ -26,9 +26,9 @@ namespace SmartSchoolAI.Services;
 public class AiMarkingService
 {
     /// <summary>Change when the reading instructions change: earlier readings then no longer match.</summary>
-    public const string RecognitionPromptVersion = "read-v2";
+    public const string RecognitionPromptVersion = "read-v4";   // v4: low reasoning effort; caret = power
     /// <summary>Change when the marking instructions change.</summary>
-    public const string GradingPromptVersion = "mark-v2";
+    public const string GradingPromptVersion = "mark-v3";
 
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new();
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true };
@@ -58,6 +58,8 @@ public class AiMarkingService
           A student's mistake stays a mistake: if they wrote "2 + 2 = 5", transcribe "2 + 2 = 5".
         - A minus sign matters: never drop or add one. "−3" and "3" are different.
         - A handwritten "?" is a question mark, never a digit.
+        - A caret "^" is the student's way of writing a power: "2^-3" or "2^(-3)" is $2^{-3}$, "x^2" is $x^{2}$.
+          A caret is never the digit 1 and never a letter.
         - Corrections: when the student crossed something out and wrote a replacement, transcribe the line as it
           finally stands and put the crossed-out part in "crossedOut". Leave out lines that are entirely crossed out.
         - Illegible or genuinely ambiguous symbols: write your best reading in the line, mark the place with [?] right
@@ -92,6 +94,10 @@ public class AiMarkingService
           results, so a correct method with an arithmetic slip at the end keeps its method marks.
         - Accept equivalent forms and equivalent wording ("x = 2" and "2", "0.5" and "1/2").
         - Judge mathematics, not handwriting or neatness. Never invent an error.
+        - A line that only copies the question or is a heading (e.g. "Evaluate $2^{-3}$", "Answer:") is not a step of
+          the solution: mark it "correct" and do not take marks for how it was copied.
+        - "[?]" marks a symbol the reader could not read. Look at the photo for it. Never mark a step wrong only
+          because of "[?]"; report it in "transcriptionIssues", and set "needsTeacher" only if marks depend on it.
         - First solve the task yourself so you know the correct final answer and, for domain/inequality problems,
           the correct boundary conditions. Domain rules: an even root's radicand must be ≥ 0 (it MAY equal zero); a
           denominator must be ≠ 0, so a radicand under a root in the denominator must be > 0 (strict). Include the
@@ -250,7 +256,8 @@ public class AiMarkingService
             {
                 new { role = "system", content = RecognitionSystemPrompt },
                 new { role = "user", content = content.ToArray() }
-            }, context with { Stage = "recognition", CacheKey = key }, temperature: 0.1, timeout: _models.Timeout);
+            }, context with { Stage = "recognition", CacheKey = key }, temperature: 0.1, timeout: _models.Timeout,
+               reasoningEffort: _models.RecognitionReasoning);
 
             var parsed = Parse<Recognition>(reply.Content, "recognition");
             parsed.Steps.RemoveAll(s => string.IsNullOrWhiteSpace(s.Text));
@@ -323,7 +330,8 @@ public class AiMarkingService
             {
                 new { role = "system", content = GradingSystemPrompt },
                 new { role = "user", content = content.ToArray() }
-            }, context with { Stage = "grading", CacheKey = key }, temperature: _models.GradingTemperature, timeout: _models.Timeout);
+            }, context with { Stage = "grading", CacheKey = key }, temperature: _models.GradingTemperature, timeout: _models.Timeout,
+               reasoningEffort: _models.GradingReasoning);
 
             var verdict = Parse<Verdict>(reply.Content, "grading");
             verdict.Key = key;

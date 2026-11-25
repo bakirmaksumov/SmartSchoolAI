@@ -92,7 +92,7 @@ public class AnswerGradingService
             new { role = "system", content = SystemPrompt },
             new { role = "user",   content = sb.ToString() }
         }, (context ?? new AiCallContext("typed-grading")) with { Questions = string.Join(",", items.Select(i => i.Index)) },
-           temperature: _models.GradingTemperature, timeout: _models.Timeout);
+           temperature: _models.GradingTemperature, timeout: _models.Timeout, reasoningEffort: _models.GradingReasoning);
 
         List<GradedItem> graded;
         try

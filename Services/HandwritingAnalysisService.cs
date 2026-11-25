@@ -53,6 +53,10 @@ public class HandwritingAnalysisService
         apply the operations in the order given and compare the resulting function with the target;
         different valid orders (with correspondingly different numbers) are all correct.
 
+        A line that only copies the question or is a heading is not a step of the solution: mark it "correct".
+        "[?]" marks a symbol the text reader could not read (you do not see the photo): never mark a step
+        "incorrect" only because of "[?]" or an odd-looking copy of the question.
+
         Report your own verdict, whether you agree with the marker, and how confident
         you are. Use a LOW confidence when the task is ambiguous, the steps are unclear
         or you cannot verify the result. Write notes in simple, clear English.
@@ -96,7 +100,7 @@ public class HandwritingAnalysisService
                 new { role = "system", content = VerifySystemPrompt },
                 new { role = "user",   content = userText }
             }, (context ?? new AiCallContext("verification")) with { Stage = "verification" },
-               temperature: _models.GradingTemperature, timeout: _models.Timeout);
+               temperature: _models.GradingTemperature, timeout: _models.Timeout, reasoningEffort: _models.GradingReasoning);
 
             return JsonSerializer.Deserialize<GradingVerificationDto>(OpenRouterClient.CleanJson(reply.Content),
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
