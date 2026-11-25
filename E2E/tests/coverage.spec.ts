@@ -70,7 +70,7 @@ test("setup: class, published assignment, one correct submission", async () => {
 
 test("student result page shows the score and is reachable from the assignment list", async () => {
   await student.goto(`/Student/Assignments?classId=${classId}`);
-  await student.getByRole("link", { name: /View My Result/ }).first().click();
+  await student.getByRole("link", { name: /View feedback/ }).first().click();
   await expect(student).toHaveURL(/\/Student\/AssignmentResult/i);
   await expect(student.getByText("100%", { exact: true }).first()).toBeVisible();
 });

@@ -493,11 +493,11 @@ test("17:00 Tashkent stays 17:00: created, saved again, a personal due date, and
   // The student sees their own time, on the same clock.
   const timur = students["Timur"];
   await timur.goto(`/Student/Assignments?classId=${classId}`);
-  const card = timur.locator(".card", { hasText: title("Homework TZ") }).last();
-  await expect(card.locator(".my-due")).toHaveText(/Due 28 Nov 2099 17:00/);
+  const card = timur.locator("[data-work-item]", { hasText: title("Homework TZ") }).last();
+  await expect(card.locator("[data-due]")).toContainText(`Your deadline: Due 28 Nov 2099, 17:00 (${zone})`);
   await timur.goto(`/Student/TakeAssignment?assignmentId=${id}`);
-  await expect(timur.locator("#myDue")).toContainText(`28 Nov 2099 17:00 (${zone})`);
+  await expect(timur.locator("#myDue")).toContainText(`28 Nov 2099, 17:00 (${zone})`);
   const amira = students["Amira"];
   await amira.goto(`/Student/TakeAssignment?assignmentId=${id}`);
-  await expect(amira.locator("#myDue")).toContainText(`27 Nov 2099 17:00 (${zone})`);
+  await expect(amira.locator("#myDue")).toContainText(`27 Nov 2099, 17:00 (${zone})`);
 });

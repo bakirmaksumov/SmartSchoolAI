@@ -213,7 +213,7 @@ public class GradingService
         if (steps.Count == 0)
             return new StepsGradeOutcome(false, "No steps to evaluate.", Guid.Empty, null, null, null, 0, null);
 
-        var result = await GetOrCreateResultAsync(assignmentId, studentId);
+        var result = await GetOrCreateSavedResultAsync(assignmentId, studentId);   // saved before the slow AI part
         var mark   = await MarkStepsAsync(result, assignment!, question!, questionIndex, steps, imagePath);
         await _db.SaveChangesAsync();
 
@@ -566,6 +566,28 @@ public class GradingService
         return result;
     }
 
+    /// <summary>
+    /// The attempt in progress, created and saved now if there is none. Used where other requests can touch the same
+    /// attempt meanwhile (marking that waits seconds for the AI, the draft autosave): the attempt exists in the
+    /// database before the slow part, so a second request finds it instead of creating the same attempt number.
+    /// When two requests create it at the same moment, the loser takes the winner's attempt.
+    /// </summary>
+    public async Task<StudentResult> GetOrCreateSavedResultAsync(Guid assignmentId, Guid studentId)
+    {
+        var result = await GetOrCreateResultAsync(assignmentId, studentId);
+        if (_db.Entry(result).State != EntityState.Added) return result;
+        try
+        {
+            await _db.SaveChangesAsync();
+            return result;
+        }
+        catch (DbUpdateException)
+        {
+            _db.Entry(result).State = EntityState.Detached;
+            return await GetOrCreateResultAsync(assignmentId, studentId);
+        }
+    }
+
     /// <summary>Recomputes the aggregate score/status and refreshes the summary text.</summary>
     public void RecomputeResultScore(StudentResult result, int totalQuestions, int passThreshold)
     {
@@ -628,12 +650,18 @@ public class GradingService
 
     private StudentAnswer AnswerFor(StudentResult result, QuestionDto question, int questionIndex)
     {
-        var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == questionIndex);
+        var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == questionIndex)
+                     // Saved meanwhile by another request (the draft autosave while the AI was marking): use that row.
+                     ?? _db.StudentAnswers.FirstOrDefault(a => a.StudentResultId == result.Id && a.QuestionIndex == questionIndex);
         if (answer is null)
         {
             answer = new StudentAnswer { QuestionIndex = questionIndex, StudentResultId = result.Id };
             result.StudentAnswers.Add(answer);
             _db.StudentAnswers.Add(answer);
+        }
+        else if (!result.StudentAnswers.Contains(answer))
+        {
+            result.StudentAnswers.Add(answer);
         }
         answer.QuestionId = question.Id ?? $"q{questionIndex}";
         answer.UpdatedAt  = DateTime.UtcNow;

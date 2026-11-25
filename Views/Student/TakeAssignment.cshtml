@@ -207,10 +207,14 @@
   {
     <span>Attempt @attemptNum of @assignment?.MaxAttempts</span>
   }
-  @{ var myDue = ViewBag.MyDue as DateTime? ?? assignment?.Deadline; }
+  @{ var myDue = ViewBag.MyDue as DateTime? ?? assignment?.Deadline; var personalDue = ViewBag.PersonalDue as bool? ?? false; }
   @if (myDue.HasValue)
   {
-    <span class="ms-2" id="myDue">· Due: @SmartSchoolAI.Services.SchoolTime.Show(myDue) <span class="text-muted">(@SmartSchoolAI.Services.SchoolTime.Label)</span></span>
+    <span class="ms-2" id="myDue">· @(personalDue ? "Your deadline: " : "")@SmartSchoolAI.Services.StudentWork.DueText(myDue, DateTime.UtcNow) <span class="text-muted">(@SmartSchoolAI.Services.SchoolTime.Label)</span></span>
+  }
+  @if (!isPreview)
+  {
+    <span class="ms-2 draft-status" id="draftStatus" role="status" aria-live="polite"></span>
   }
 </p>
 
@@ -235,6 +239,9 @@
   <input type="hidden" name="assignmentId" value="@assignment?.Id" id="assignmentId" />
   @* One key per press of Submit: a retry with the same key gets the attempt already saved, never a new one. *@
   <input type="hidden" name="submissionKey" value="@Guid.NewGuid()" id="submissionKey" />
+  <input type="hidden" id="attemptNumber" value="@attemptNum" />
+  @* The attempt in progress as saved on the server (any device), restored by take-assignment.js. *@
+  <script type="application/json" id="serverDraft">@Html.Raw(System.Text.Json.JsonSerializer.Serialize(ViewBag.ServerDraft as Dictionary<string, string> ?? new()))</script>
 
   @* Hidden inputs for all questions — synced by JS *@
   @for (int i = 0; i < Model.Count; i++)
@@ -797,6 +804,11 @@
               </div>
             }
 
+            var savedPhotos = (ViewBag.SavedPhotos as Dictionary<int, List<string>>)?.GetValueOrDefault(i);
+            <!-- The photo saved for this question (from the server), or the one on its way -->
+            <div class="photo-status mt-3 d-none" data-qindex="@i" data-label="@displayLabel[i]" role="status" aria-live="polite"
+                 data-saved="@(savedPhotos is { Count: > 0 } ? System.Text.Json.JsonSerializer.Serialize(savedPhotos) : null)"></div>
+
             <!-- ── Show your work: typed working and/or a photo of it ──────────── -->
             <div class="mt-4 pt-3 border-top work-block">
               <div class="form-check form-switch">
@@ -919,8 +931,8 @@
       <button type="submit" class="btn btn-success ms-auto" id="submitBtn">
         <i class="bx bx-send me-1"></i> Submit Assignment
       </button>
-      <a asp-action="Index" asp-controller="Student" class="btn btn-outline-secondary">
-        <i class="bx bx-x me-1"></i> Cancel
+      <a href="/Student" class="btn btn-outline-secondary" id="backToMyWork">
+        <i class="bx bx-arrow-back me-1"></i> My work
       </a>
     }
   </div>
@@ -933,14 +945,17 @@
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title mb-0"><i class="bx bx-error-circle text-warning me-2"></i>Submit and finish?</h5>
+          <h5 class="modal-title mb-0"><i class="bx bx-send text-success me-2" aria-hidden="true"></i>Ready to submit?</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <p class="mb-2">
-            Once you submit, this attempt is <strong>finished</strong> and your answers are locked.
-            You can still come back anytime afterwards to review your result, see feedback, and get
-            help from the tutor.
+          <p class="fw-semibold mb-1" id="submitSummary"></p>
+          <ul class="small text-danger mb-2 ps-3" id="submitMissing"></ul>
+          <p class="small text-muted mb-2 d-none" id="submitUploads" role="status">
+            <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span><span></span>
+          </p>
+          <p class="small text-muted mb-0">
+            Once you submit, this attempt is finished and your answers are locked. You can open what you handed in at any time.
           </p>
           <p class="text-danger mb-0" id="submitWarnText"></p>
           <div class="alert alert-danger mt-3 mb-0 d-none" id="submitError" role="alert">
@@ -952,11 +967,11 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
-            <i class="bx bx-arrow-back me-1"></i> Keep working
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal" id="backToQuestions">
+            <i class="bx bx-arrow-back me-1"></i> Back to questions
           </button>
           <button type="button" class="btn btn-success" id="confirmSubmitBtn">
-            <i class="bx bx-send me-1"></i> <span id="confirmSubmitLabel">Yes, submit</span>
+            <i class="bx bx-send me-1"></i> <span id="confirmSubmitLabel">Submit assignment</span>
           </button>
         </div>
       </div>
@@ -1213,6 +1228,7 @@
   <script src="~/js/waiting-game.js" asp-append-version="true"></script>
   <script src="~/js/grade-poll.js" asp-append-version="true"></script>
   <script src="~/js/math-text.js" asp-append-version="true"></script>
+  <script src="~/js/photo-status.js" asp-append-version="true"></script>
   <script src="~/js/take-assignment.js" asp-append-version="true"></script>
   <script src="~/js/number-line-widget.js" asp-append-version="true"></script>
   <script src="~/js/dot-plot-widget.js" asp-append-version="true"></script>

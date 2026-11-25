@@ -143,7 +143,7 @@ test("the student signs in, finds the assignment and submits one right and one w
   test.setTimeout(180_000);
   await signIn(student, studentEmail, studentPassword);
   await expect(student).toHaveURL(/\/Student\/?$/);
-  await expect(student.getByText(className, { exact: true }).first()).toBeVisible();
+  await expect(student.getByRole("link", { name: className, exact: true }).first()).toBeVisible();
 
   await student.goto("/Student/Classes");
   await student.locator('a[href*="/Student/Assignments?classId="]').first().click();

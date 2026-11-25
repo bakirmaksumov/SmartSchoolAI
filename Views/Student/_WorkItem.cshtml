@@ -1,0 +1,56 @@
+@model SmartSchoolAI.Services.StudentWorkItem
+@using SmartSchoolAI.Services
+@*
+  One piece of work: title, class, status (in words and an icon, never colour alone), the student's own due date
+  with time and time zone, and its actions. Used by "My work" and by the class page, so both always agree.
+*@
+@{
+    var now = DateTime.UtcNow;
+    var (tone, icon) = Model.State switch
+    {
+        StudentWorkState.InProgress => ("primary", "bx-edit"),
+        StudentWorkState.ToStart    => (Model.Overdue ? "danger" : "secondary", Model.Overdue ? "bx-error" : "bx-circle"),
+        StudentWorkState.NotOpenYet => ("secondary", "bx-lock-alt"),
+        StudentWorkState.Submitted  => ("info", "bx-time-five"),
+        StudentWorkState.Feedback   => ("success", "bx-check-circle"),
+        _                           => ("danger", "bx-block")
+    };
+    var score = Model.LatestFeedback is { } fb ? fb.Assignment?.FormatGrade(fb.Score) ?? $"{fb.Score}%" : null;
+}
+<div class="work-item" data-work-item data-state="@Model.State.ToString().ToLowerInvariant()" data-assignment="@Model.Assignment.Id">
+  <div class="work-item-main">
+    <div class="work-item-title">@Model.Assignment.Title</div>
+    <div class="work-item-meta">
+      <span>@Model.ClassName</span>
+      <span aria-hidden="true">·</span>
+      <span>@(Model.Assignment.Type == SmartSchoolAI.Models.AssignmentType.Homework ? "Homework" : "Classroom Practice")</span>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+      <span class="badge bg-label-@tone work-status" data-status><i class="bx @icon me-1" aria-hidden="true"></i>@Model.StatusText</span>
+      @if (Model.State is StudentWorkState.Submitted or StudentWorkState.Feedback && Model.LatestSubmitted is { } sub)
+      {
+        <span class="small text-muted" data-submitted-at><i class="bx bx-check me-1" aria-hidden="true"></i>Handed in @SchoolTime.Show(sub.SubmittedAt, "dd MMM · HH:mm")</span>
+      }
+      else if (Model.State != StudentWorkState.NotOpenYet)
+      {
+        <span class="small @(Model.Overdue ? "text-danger fw-semibold" : "text-muted")" data-due title="@SchoolTime.Label">
+          <i class="bx bx-calendar me-1" aria-hidden="true"></i>@(Model.PersonalDue ? "Your deadline: " : "")@StudentWork.DueText(Model.Due, now)@(Model.Due.HasValue ? $" ({SchoolTime.Label})" : "")
+        </span>
+      }
+      @if (score is not null && Model.State == StudentWorkState.Feedback)
+      {
+        <span class="badge bg-label-success" data-score>@score</span>
+      }
+    </div>
+  </div>
+  <div class="work-item-actions">
+    @if (Model.Primary is { } p)
+    {
+      <a class="btn btn-primary btn-sm" href="@p.Url" data-primary><i class="bx @p.Icon me-1" aria-hidden="true"></i>@p.Label</a>
+    }
+    @if (Model.Secondary is { } s)
+    {
+      <a class="btn btn-outline-secondary btn-sm" href="@s.Url" data-secondary><i class="bx @s.Icon me-1" aria-hidden="true"></i>@s.Label</a>
+    }
+  </div>
+</div>

@@ -411,8 +411,10 @@
     if (files.length === 0) return;
 
     const gen = generation;
+    const uploadQi = questionIndex;
     showStage('loading');
     startProgress('AI is reading your solution…');
+    if (window.PhotoStatus) PhotoStatus.uploading(uploadQi);
 
     const fd = new FormData();
     fd.append('assignmentId', assignmentId);
@@ -428,13 +430,17 @@
 
       finishProgress();
       imagePaths = data.imagePaths || [];
+      if (window.PhotoStatus) PhotoStatus.uploaded(uploadQi);
       renderEditableSteps(data.steps || []);
       saveDraft();   // recognized steps cost an AI call — persist immediately
       showStage('edit');
     } catch (err) {
+      // A lost connection lands here too: the error stays next to the question with a way to try again.
+      const message = (err && err.name === 'TypeError') ? 'The upload was interrupted — check your connection.' : err.message;
+      if (window.PhotoStatus) PhotoStatus.failed(uploadQi, message);
       if (gen !== generation) return;
       stopProgress();
-      alert(err.message);
+      alert(message);
       showStage('upload');
     }
   }
@@ -446,7 +452,9 @@
     const gen = generation;
     const qi  = questionIndex;
     const photoKey = imagePaths.join('|');   // identifies which photo this verdict is about
+    const savedPaths = imagePaths.slice();
     showStage('loading');
+    if (window.PhotoStatus && savedPaths.length) PhotoStatus.saving(qi);
     startProgress('AI is checking your steps…');
 
     const fd = new FormData();
@@ -466,6 +474,8 @@
       // The local progress ticker keeps the bar moving; the poll decides completion.
       pollGrading(data.jobId, qi, gen, photoKey);
     } catch (err) {
+      if (window.PhotoStatus && savedPaths.length)
+        PhotoStatus.failed(qi, (err && err.name === 'TypeError') ? 'The connection was lost before the photo was saved.' : err.message);
       if (gen !== generation) return;
       stopProgress();
       alert(err.message);
@@ -480,6 +490,8 @@
     GradePoll.start(jobId, {
       onDone: function (result) {
         clearDraft(qi);   // evaluated and saved server-side — that question's draft is done
+        var photoPaths = (token || '').indexOf('/uploads/') >= 0 ? token.split('|') : [];
+        if (window.PhotoStatus && photoPaths.length) PhotoStatus.saved(qi, photoPaths);
         // The verdict belongs to the question it was started for, whichever question the dialog shows now.
         if (window.QuizChecks) QuizChecks.recordWork(qi, 'photo', token, result);
         else markAnswered(qi);
@@ -490,6 +502,12 @@
         showStage('results');
       },
       onError: function (msg) {
+        // The marking did not finish, but the server kept the photo with the question ("Your work is saved").
+        var keptPaths = (token || '').indexOf('/uploads/') >= 0 ? token.split('|') : [];
+        if (window.PhotoStatus && keptPaths.length) {
+          if (/work is saved/i.test(msg || '')) PhotoStatus.saved(qi, keptPaths, 'marking will finish later');
+          else PhotoStatus.failed(qi, msg);
+        }
         if (gen !== generation) return;
         stopProgress();
         alert(msg);

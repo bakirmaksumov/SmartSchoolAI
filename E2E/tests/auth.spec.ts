@@ -143,7 +143,7 @@ test("new student self-registers with an invite code and lands in that class", a
 
     await signIn(page, email, password);
     await expect(page).toHaveURL(/\/Student\/?$/);
-    await expect(page.getByText(className, { exact: true }).first()).toBeVisible();
+    await expect(page.getByRole("link", { name: className, exact: true }).first()).toBeVisible();
   } finally {
     await teacherPage.close();
   }

@@ -55,7 +55,7 @@ test("teacher creates a class and the student joins it", async () => {
 
 test("student joining with a bad invite code is refused", async () => {
   await student.goto("/Student");
-  await student.getByRole("button", { name: /Join a Class/ }).first().click();
+  await student.getByRole("button", { name: /Join a class/i }).first().click();
   const modal = student.locator("#joinClassModal");
   await modal.locator('input[name="inviteCode"]').fill("QQQQQQ");
   await modal.getByRole("button", { name: "Join Class" }).click();
@@ -99,7 +99,8 @@ test("teacher publishes and assigns, student sees it and answers wrongly", async
   await expect(student.getByText(assignmentTitle).first()).toBeVisible();
 
   await answerAll(student, ["0", "0", "0"]);
-  await expect(student.getByText("0%", { exact: true }).first()).toBeVisible();
+  // Wrong answers go to the AI (none in this run) and wait for the teacher: handed in, no provisional score.
+  await expect(student.locator("#submittedConfirmation")).toBeVisible();
 });
 
 test("teacher sees the submission, its details and can export grades", async () => {

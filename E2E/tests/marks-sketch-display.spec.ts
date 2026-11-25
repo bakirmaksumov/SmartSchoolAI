@@ -236,13 +236,11 @@ test("submitting marks the drawing from the picture and weighs every question by
   expect(answerCalls).toHaveLength(1);                                             // only the answer the key could not decide
   expect(answerCalls[0].user).toContain("Marks available: 2");
 
-  // (1 + 4 + 1) of 7 marks = 86%.
-  await expect(student.getByText("86%").first()).toBeVisible();
-  await expect(student.locator("#overallFeedback")).toContainText("6 of 7 marks");
-  await expect(student.getByText("4 / 4 marks")).toBeVisible();
-  await expect(student.getByText("1 / 2 marks")).toBeVisible();
-  await expect(student.locator('img[alt="Your drawing"]')).toBeVisible();
-  await expect(student.getByText("Your teacher will check this drawing")).toBeVisible();
+  // A drawing always waits for the teacher: the student sees the hand-in confirmed and their own drawing, and no
+  // marks until the result is available. (The 86% — (1 + 4 + 1) of 7 marks — is checked on the teacher's page.)
+  await expect(student.locator("#awaitingReview")).toContainText("Awaiting review");
+  await expect(student.locator('img[alt^="Your drawing"]')).toBeVisible();
+  await expect(student.locator("[data-score]")).toHaveCount(0);
   await shot(student, "sketch-result");
 });
 
@@ -260,6 +258,7 @@ test("teacher sees the drawing flagged for review and marks out of each question
   expect(file.headers()["content-type"]).toContain("image/png");
 
   await expect(teacher.getByText("Needs your review").first()).toBeVisible();
+  await expect(teacher.getByText("86%").first()).toBeVisible();                       // (1 + 4 + 1) of 7 marks
   await expect(teacher.getByText("the AI's mark is only a first guess")).toBeVisible();
   await expect(teacher.locator(`.grade-points[data-idx="${B}"]`)).toHaveAttribute("data-max", "4");
   await expect(teacher.locator(`.grade-points[data-idx="${B}"]`)).toHaveValue("4");

@@ -66,11 +66,11 @@ export async function createClass(page: Page, name: string): Promise<string> {
 
 export async function joinClass(page: Page, inviteCode: string, className: string): Promise<void> {
   await page.goto("/Student");
-  await page.getByRole("button", { name: /Join a Class/ }).first().click();
+  await page.getByRole("button", { name: /Join a class/i }).first().click();
   const modal = page.locator("#joinClassModal");
   await modal.locator('input[name="inviteCode"]').fill(inviteCode);
   await modal.getByRole("button", { name: "Join Class" }).click();
-  await expect(page.getByText(className, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: className, exact: true }).first()).toBeVisible();
 }
 
 export async function createDraftAssignment(page: Page, title: string, className: string): Promise<string> {
@@ -205,5 +205,5 @@ export async function expandStudent(page: Page, name?: string): Promise<void> {
 
 export async function submitAssignment(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Submit Assignment" }).click();
-  await page.locator("#submitConfirmModal").getByRole("button", { name: "Yes, submit" }).click();
+  await page.locator("#confirmSubmitBtn").click();
 }

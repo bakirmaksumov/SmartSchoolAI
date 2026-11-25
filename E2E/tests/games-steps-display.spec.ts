@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import { addQuestion, createClass, createDraftAssignment, publishAndAssignAll, signIn, submitAssignment, unique } from "./helpers";
 
@@ -59,7 +60,12 @@ async function startPhotoReading(questionIndex: number): Promise<void> {
   await block.locator(`[data-hw-open][data-qindex="${questionIndex}"]`).click();
   await student.waitForFunction(() => (window as unknown as { __hwShown: boolean }).__hwShown);
 
-  await student.locator("#hwFileInput").setInputFiles(resolve(fixtures, "solution-correct.jpg"));
+  // A new photo each time (unique bytes after the image): the same photo is read only once, from the store, with
+  // no waiting screen at all — this test is about the wait while a new photo is read.
+  await student.locator("#hwFileInput").setInputFiles({
+    name: "solution.jpg", mimeType: "image/jpeg",
+    buffer: Buffer.concat([readFileSync(resolve(fixtures, "solution-correct.jpg")), Buffer.from(randomUUID())])
+  });
   await student.locator("#hwCropUseFullBtn").click();
   await expect(student.locator("#hwAnalyzeBtn")).toBeEnabled();
   await student.locator("#hwAnalyzeBtn").click();

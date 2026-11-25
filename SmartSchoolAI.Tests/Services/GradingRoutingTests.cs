@@ -389,6 +389,49 @@ public class GradingRoutingTests : IDisposable
         Assert.Equal(1m, answer.PointsAwarded);
     }
 
+    [Fact]
+    public async Task A_draft_saved_while_the_photo_is_being_marked_does_not_lose_the_marking()
+    {
+        var (s, a) = await SetupAsync();
+        var photo = await PhotoAsync(s, "PHOTO: solution");
+        _ai.Delay = TimeSpan.FromMilliseconds(400);                     // the AI takes a moment…
+
+        var marking = EvaluateAsync(s, a.Id, StepsJson("2x + 6 = 10", "2x = 4", "x = 2"), photo);
+        await Task.Delay(100);
+        StudentResult drafted;                                           // …meanwhile the page autosaves a typed answer
+        await using (var db = _db.NewContext())
+            drafted = await AiTestServices.Grading(db, _db.NewContext, _config, _ai, _env).GetOrCreateSavedResultAsync(a.Id, s);
+        var outcome = await marking;
+
+        Assert.True(outcome.Success, outcome.Error);
+        await using var check = _db.NewContext();
+        var attempts = await check.StudentResults.Where(r => r.StudentId == s && r.AssignmentId == a.Id).ToListAsync();
+        Assert.Equal(drafted.Id, Assert.Single(attempts).Id);           // one attempt, shared
+        Assert.Equal(3m, (await AnswerAsync(s, a.Id)).PointsAwarded);
+    }
+
+    [Fact]
+    public async Task Working_autosaved_for_the_same_question_while_it_is_marked_does_not_lose_the_marking()
+    {
+        var (s, a) = await SetupAsync();
+        _ai.Delay = TimeSpan.FromMilliseconds(400);
+        await using (var db = _db.NewContext())                         // the attempt exists (the student typed before)
+            await AiTestServices.Grading(db, _db.NewContext, _config, _ai, _env).GetOrCreateSavedResultAsync(a.Id, s);
+
+        var marking = EvaluateAsync(s, a.Id, StepsJson("2x + 6 = 10", "2x = 4", "x = 2"), "");   // typed steps for question 1
+        await Task.Delay(100);
+        await using (var db = _db.NewContext())                         // meanwhile the draft autosave writes that question's working
+        {
+            var r = await db.StudentResults.FirstAsync(x => x.StudentId == s && x.AssignmentId == a.Id && !x.IsSubmitted);
+            db.StudentAnswers.Add(new StudentAnswer { StudentResultId = r.Id, QuestionIndex = 0, QuestionId = "q0", WorkText = "2x + 6 = 10" });
+            await db.SaveChangesAsync();
+        }
+        var outcome = await marking;
+
+        Assert.True(outcome.Success, outcome.Error);
+        Assert.Equal(3m, (await AnswerAsync(s, a.Id)).PointsAwarded);
+    }
+
     // ── Older work ───────────────────────────────────────────────────────────
 
     [Fact]

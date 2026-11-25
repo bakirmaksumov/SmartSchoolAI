@@ -72,7 +72,7 @@ test("teacher builds a 10-question mixed assignment, student answers it, scores 
     const inviteCode = await createClass(teacherPage, className);
 
     await signInAs(studentPage, "student");
-    await expect(studentPage.getByRole("heading", { name: /Welcome to EduSchool AI/ })).toBeVisible();
+    await expect(studentPage.getByRole("heading", { name: "My work" })).toBeVisible();
     await joinClass(studentPage, inviteCode, className);
 
     const assignmentId = await createDraftAssignment(teacherPage, assignmentTitle, className);
@@ -99,7 +99,13 @@ test("teacher builds a 10-question mixed assignment, student answers it, scores 
     }
 
     await submitAssignment(studentPage);
-    await expect(studentPage.getByText(`${expectedScore}%`, { exact: true }).first()).toBeVisible();
+    // Handed in. The score shows once the result is available; an answer the AI could not mark (no AI in this
+    // run) waits for the teacher, and the student sees "Awaiting review" instead of a provisional score.
+    await expect(studentPage.locator("#submittedConfirmation")).toBeVisible();
+    if (await studentPage.locator("#feedbackReady").isVisible())
+      await expect(studentPage.getByText(`${expectedScore}%`, { exact: true }).first()).toBeVisible();
+    else
+      await expect(studentPage.locator("#awaitingReview, #markingPending").first()).toBeVisible();
 
     await teacherPage.goto(`/Assignments/Details/${assignmentId}`);
     const resultRow = teacherPage.getByRole("row").filter({ hasText: "E2E Student" });
