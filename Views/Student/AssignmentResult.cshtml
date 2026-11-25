@@ -258,7 +258,7 @@
             <div class="col-md-6">
               <div class="p-3 bg-light rounded border">
                 <small class="text-muted d-block mb-1 fw-semibold">Your Answer:</small>
-                <div class="fw-bold @(answer?.IsCorrect == true ? "text-success" : answer?.IsCorrect == false ? "text-danger" : "text-muted") math-render">
+                <div class="fw-bold @(answer?.IsCorrect == true ? "text-success" : answer?.IsCorrect == false ? "text-danger" : "text-muted") math-text" data-student-answer>
                   @(string.IsNullOrWhiteSpace(answer?.AnswerValue) ? "—" : answer.AnswerValue)
                 </div>
               </div>
@@ -267,7 +267,7 @@
             <div class="col-md-6">
               <div class="p-3 bg-light rounded border">
                 <small class="text-muted d-block mb-1 fw-semibold">Correct Solution:</small>
-                <div class="fw-bold text-success math-render">
+                <div class="fw-bold text-success math-text">
                   @(string.IsNullOrWhiteSpace(q.AnswerKey) ? "—" : q.AnswerKey)
                 </div>
               </div>
@@ -295,10 +295,10 @@
                 {
                   var ok = st.Status == SmartSchoolAI.Models.ResultStatus.Correct;
                   <div class="border rounded p-2 mb-2" style="border-left:4px solid @(ok ? "#71dd37" : "#ff3e1d") !important;">
-                    <div class="small fw-semibold"><span class="visually-hidden">@(ok ? "Correct step." : "Step with a mistake.")</span><span aria-hidden="true">@(ok ? "✅" : "❌")</span> Step @st.StepNumber: <span class="math-render">@st.StepText</span></div>
+                    <div class="small fw-semibold"><span class="visually-hidden">@(ok ? "Correct step." : "Step with a mistake.")</span><span aria-hidden="true">@(ok ? "✅" : "❌")</span> Step @st.StepNumber: <span class="math-text" data-step-text>@st.StepText</span></div>
                     @if (!ok && !string.IsNullOrEmpty(st.Explanation))
                     {
-                      <div class="small text-muted mt-1">💡 @st.Explanation</div>
+                      <div class="small text-muted mt-1">💡 <span class="math-text">@st.Explanation</span></div>
                     }
                   </div>
                 }
@@ -309,7 +309,7 @@
           {
             <div class="mt-3">
               <small class="text-muted d-block mb-1 fw-semibold"><i class="bx bx-edit me-1" aria-hidden="true"></i>Your working:</small>
-              <div class="p-3 bg-light rounded border math-render" style="line-height:2; white-space:pre-wrap;">@answer.WorkText</div>
+              <div class="p-3 bg-light rounded border math-text math-block" style="line-height:2;">@answer.WorkText</div>
             </div>
           }
 
@@ -336,7 +336,7 @@
           {
             <div class="alert alert-lighter border mt-3 mb-2 d-flex align-items-center" data-source="ai-feedback">
               <i class="bx bx-bot fs-4 text-primary me-2" aria-hidden="true"></i>
-              <div class="small"><strong>AI feedback:</strong> <span id="qFeedback_@i">@answer.AiSummary</span></div>
+              <div class="small"><strong>AI feedback:</strong> <span id="qFeedback_@i" class="math-text">@answer.AiSummary</span></div>
             </div>
             @if (voiceEnabled || translationEnabled)
             {
@@ -387,6 +387,8 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+  <script src="~/js/math-text.js" asp-append-version="true"></script>
+  <script src="~/js/math-display.js" asp-append-version="true"></script>
   <script src="~/js/accessibility-widget.js" asp-append-version="true"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {

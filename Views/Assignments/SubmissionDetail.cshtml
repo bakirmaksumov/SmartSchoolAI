@@ -188,7 +188,7 @@
               <div class="col-md-6">
                 <div class="bg-lighter rounded p-2 mb-2">
                   <small class="text-muted d-block mb-1"><i class="bx bx-user me-1"></i>Student's Answer:</small>
-                  <span class="@(isCorrect == false ? "text-danger" : "")">
+                  <span class="math-text @(isCorrect == false ? "text-danger" : "")" data-student-answer>
                     @(string.IsNullOrEmpty(answer?.AnswerValue) ? "— No answer —" : answer.AnswerValue)
                   </span>
                 </div>
@@ -196,7 +196,7 @@
               <div class="col-md-6">
                 <div class="bg-lighter rounded p-2 mb-2">
                   <small class="text-muted d-block mb-1"><i class="bx bx-check-circle me-1"></i>Correct Answer:</small>
-                  <span class="text-success fw-semibold">
+                  <span class="text-success fw-semibold math-text">
                     @(string.IsNullOrEmpty(q.AnswerKey) ? "— N/A —" : q.AnswerKey)
                   </span>
                 </div>
@@ -209,7 +209,7 @@
             @if (answer?.NeedsReview == true && !string.IsNullOrWhiteSpace(answer.ReviewNote))
             {
               <div class="alert alert-warning py-2 px-3 mb-2 small">
-                <i class="bx bx-error-circle me-1"></i>@answer.ReviewNote
+                <i class="bx bx-error-circle me-1"></i><span class="math-text">@answer.ReviewNote</span>
               </div>
             }
 
@@ -219,7 +219,7 @@
                 <small class="text-muted d-block mb-1">
                   <i class="bx bx-edit me-1"></i>Student's working:
                 </small>
-                <div class="math-render" style="white-space:pre-wrap; line-height:2;">@answer.WorkText</div>
+                <div class="math-text math-block" style="line-height:2;">@answer.WorkText</div>
               </div>
             }
 
@@ -232,7 +232,7 @@
                 </a>
                 @if (!string.IsNullOrWhiteSpace(answer.AiSummary))
                 {
-                  <div class="small text-muted mt-1"><i class="bx bx-bot me-1"></i>@answer.AiSummary</div>
+                  <div class="small text-muted mt-1"><i class="bx bx-bot me-1"></i><span class="math-text">@answer.AiSummary</span></div>
                 }
               </div>
             }
@@ -265,7 +265,7 @@
                     <small class="text-muted d-block mb-1"><i class="bx bx-list-ol me-1"></i>Student's steps (not marked yet):</small>
                     @foreach (var s in pending)
                     {
-                      <div class="border rounded p-2 mb-1 small math-render" data-step="@s.Number">Step @s.Number: @s.Text</div>
+                      <div class="border rounded p-2 mb-1 small" data-step="@s.Number">Step @s.Number: <span class="math-text">@s.Text</span></div>
                     }
                   }
                   else
@@ -277,16 +277,16 @@
                       var isDisputed = disputed.Contains(s.StepNumber);
                       <div class="border rounded p-2 mb-1 @(isDisputed ? "disputed-step" : "")" data-step="@s.StepNumber"
                            style="border-left:4px solid @(isDisputed ? "#ffab00" : ok ? "#71dd37" : "#ff3e1d") !important;">
-                        <div class="small"><span aria-hidden="true">@(ok ? "✅" : "❌")</span> Step @s.StepNumber: <span class="math-render">@s.StepText</span></div>
+                        <div class="small"><span aria-hidden="true">@(ok ? "✅" : "❌")</span> Step @s.StepNumber: <span class="math-text" data-step-text>@s.StepText</span></div>
                         @if (!ok && !string.IsNullOrEmpty(s.Explanation))
                         {
-                          <div class="small text-muted mt-1">💡 @s.Explanation</div>
+                          <div class="small text-muted mt-1">💡 <span class="math-text">@s.Explanation</span></div>
                         }
                         @foreach (var t in verdict?.TranscriptionIssues.Where(t => t.Step == s.StepNumber) ?? Enumerable.Empty<SmartSchoolAI.Services.AiMarkingService.TranscriptionIssue>())
                         {
                           <div class="small mt-1 text-warning fw-semibold" data-issue>
                             <i class="bx bx-error me-1" aria-hidden="true"></i>
-                            On the photo: “@t.OnPhoto”, read as “@t.Transcribed”@(t.Certain ? "" : " (not certain)")@(t.MarksAffected is > 0 ? $" — {t.MarksAffected:0.##} mark(s) depend on it" : "").
+                            On the photo: “<span class="math-text">@t.OnPhoto</span>”, read as “<span class="math-text">@t.Transcribed</span>”@(t.Certain ? "" : " (not certain)")@(t.MarksAffected is > 0 ? $" — {t.MarksAffected:0.##} mark(s) depend on it" : "").
                             @if (!string.IsNullOrWhiteSpace(t.Note)) { <span class="fw-normal">@t.Note</span> }
                           </div>
                         }
@@ -301,7 +301,7 @@
                         @foreach (var r in read)
                         {
                           <li class="@(disputed.Contains(r.Number) ? "text-warning fw-semibold" : "")">
-                            <span class="math-render">@r.Text</span>
+                            <span class="math-text">@r.Text</span>
                             @if (!string.IsNullOrWhiteSpace(r.CrossedOut)) { <span class="text-muted"> (crossed out: <s>@r.CrossedOut</s>)</span> }
                             @foreach (var u in r.Unclear) { <span class="badge bg-label-warning ms-1">unclear: @u.Fragment</span> }
                           </li>
@@ -326,8 +326,8 @@
                         <tr class="@(c.Step is { } cs && disputed.Contains(cs) ? "table-warning" : "")">
                           <td>@c.Name</td>
                           <td class="text-center text-nowrap"><strong>@c.Awarded.ToString("0.##")</strong> / @c.MaxMarks.ToString("0.##")</td>
-                          <td class="math-render">@c.Explanation</td>
-                          <td class="math-render text-muted">@c.Evidence</td>
+                          <td class="math-text">@c.Explanation</td>
+                          <td class="math-text text-muted">@c.Evidence</td>
                         </tr>
                       }
                     </tbody>
@@ -359,7 +359,7 @@
             {
               <div class="bg-label-info rounded p-2">
                 <small class="text-muted d-block mb-1"><i class="bx bx-bulb me-1"></i>Explanation:</small>
-                <span>@q.Explanation</span>
+                <span class="math-text math-block">@q.Explanation</span>
               </div>
             }
 
@@ -462,6 +462,8 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+  <script src="~/js/math-text.js" asp-append-version="true"></script>
+  <script src="~/js/math-display.js" asp-append-version="true"></script>
 <script>
   // Render LaTeX in question text, student answers and their working.
   document.addEventListener('DOMContentLoaded', function () {

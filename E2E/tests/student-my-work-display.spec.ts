@@ -259,6 +259,8 @@ test("after the teacher marks it: Feedback → question 3 with photo, marks, the
   await expect(phone.locator('[data-source="teacher-comment"]')).toContainText("Good factorising.");
   await expect(phone.locator('[data-source="teacher-reviewed"]').first()).toContainText("Reviewed by teacher");
   await expect(phone.locator("[data-marks]").filter({ hasText: "3 / 3" })).toHaveCount(1);
+  await expect(phone.locator("[data-step-text]").first()).toHaveText("(x − 2)(x − 3) = 0");   // readable, not LaTeX
+  expect(await phone.locator(".list-group").first().innerText()).not.toMatch(/\$|\\frac/);
   await shot(phone, "4-feedback-phone");
 
   await laptop.goto(phone.url());

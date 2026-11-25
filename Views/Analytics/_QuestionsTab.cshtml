@@ -81,7 +81,7 @@
                     <tr>
                       <td class="js-anon">@an.StudentName</td>
                       <td class="answer-cell">
-                        @if (!string.IsNullOrWhiteSpace(an.Value)) { <span class="math-render">@(an.Value.Length > 160 ? an.Value[..160] + "…" : an.Value)</span> }
+                        @if (!string.IsNullOrWhiteSpace(an.Value)) { <span class="math-text">@(an.Value.Length > 160 ? an.Value[..160] + "…" : an.Value)</span> }
                         @if (!string.IsNullOrEmpty(an.ImagePath)) { <a class="d-inline-block small me-2" href="@an.ImagePath" target="_blank" rel="noopener"><i class="bx bx-image me-1" aria-hidden="true"></i>Photo of working</a> }
                         @if (!string.IsNullOrEmpty(an.SketchPath)) { <a class="d-inline-block small" href="@an.SketchPath" target="_blank" rel="noopener"><i class="bx bx-pencil me-1" aria-hidden="true"></i>Drawing</a> }
                       </td>

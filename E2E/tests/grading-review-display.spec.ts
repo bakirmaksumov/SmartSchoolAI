@@ -126,7 +126,8 @@ test("setup: a 3-mark question with the teacher's mark scheme", async () => {
 test("partial marks: the student sees 2 of 3; the teacher sees photo, steps, criteria, the doubtful sign and the cost", async () => {
   test.setTimeout(180_000);
   await mock("/__script", {
-    ocr: { detectedProblem: "", steps: [{ number: 1, text: "$2x = -6$" }, { number: 2, text: "$x = 3$" }] },
+    ocr: { detectedProblem: "", steps: [{ number: 1, text: "$2x = -6$" }, { number: 2, text: "$x = 3$" },
+                                        { number: 3, text: String.raw`$\begin{cases} x = 3 \\ x \neq 0 \end{cases}$` }] },
     evalReply: {
       criteria: [
         { criterion: "M1 subtracts 6", maxMarks: 1, awarded: 1, explanation: "Correct.", evidence: "line 1: $2x = -6$", step: 1 },
@@ -153,6 +154,10 @@ test("partial marks: the student sees 2 of 3; the teacher sees photo, steps, cri
   await teacher.goto(`/Assignments/SubmissionDetail?resultId=${results.a}`);
   const q = teacher.locator("#q0");
   await expect(q.locator('img[alt="Solution photo"]')).toBeVisible();                     // the original photo
+  // Maths is shown as maths, never as LaTeX source: simple lines as readable text, a system of cases typeset.
+  await expect(q.locator("[data-step-text]").first()).toHaveText("2x = −6");
+  await expect(q.locator("[data-step='3'] .katex")).toBeVisible();
+  expect(await q.innerText()).not.toMatch(/\$(?!\d)|\\frac|\\begin|\\neq/);          // ("$0.006" is the cost, in dollars)
   await expect(q.locator("[data-criteria] tbody tr")).toHaveCount(3);
   await expect(q.locator("[data-criteria]")).toContainText("A1 x = -3");
   await expect(q.locator(".disputed-step[data-step='2']")).toBeVisible();                // the doubtful line stands out

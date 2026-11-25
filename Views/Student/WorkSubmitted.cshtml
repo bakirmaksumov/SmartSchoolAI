@@ -95,12 +95,12 @@
             }
             else if (!string.IsNullOrWhiteSpace(a.AnswerValue))
             {
-              <div class="math-render" data-answer>@a.AnswerValue</div>
+              <div class="math-text" data-answer>@a.AnswerValue</div>
             }
             @if (!string.IsNullOrWhiteSpace(a.WorkText) && string.IsNullOrEmpty(a.ImagePath))
             {
               <div class="small text-muted mt-1">Your working:</div>
-              <div class="math-render small" style="white-space:pre-wrap;">@a.WorkText</div>
+              <div class="math-text math-block small">@a.WorkText</div>
             }
             @if (!string.IsNullOrEmpty(a.SketchPath))
             {
@@ -130,6 +130,8 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+  <script src="~/js/math-text.js" asp-append-version="true"></script>
+  <script src="~/js/math-display.js" asp-append-version="true"></script>
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       if (typeof renderMathInElement !== 'function') return;
