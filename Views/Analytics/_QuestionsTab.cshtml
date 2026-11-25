@@ -1,0 +1,104 @@
+@model SmartSchoolAI.ViewModels.AnalyticsViewModel
+@using SmartSchoolAI.ViewModels
+@using SmartSchoolAI.Services
+@{
+    var here = Uri.EscapeDataString(Context.Request.Path + Context.Request.QueryString);
+}
+<div class="card mb-4" id="questionsTab">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-end">
+    <div class="me-auto">
+      <h5 class="card-title mb-0">Questions</h5>
+      <small class="text-muted">From the newest submitted attempt of each student. Average = marks over graded answers only.</small>
+    </div>
+    <form method="get" action="/Analytics" class="d-flex gap-2 align-items-end">
+      <input type="hidden" name="classId" value="@Model.SelectedClassId" />
+      <input type="hidden" name="tab" value="questions" />
+      @if (Model.Type != "all") { <input type="hidden" name="type" value="@Model.Type" /> }
+      @if (Model.Period != "all") { <input type="hidden" name="period" value="@Model.Period" /> }
+      <div>
+        <label class="form-label small text-muted mb-1" for="qAssignment">Assignment</label>
+        <select class="form-select form-select-sm" id="qAssignment" name="questionAssignment" data-autosubmit>
+          @foreach (var a in Model.Assignments)
+          {
+            <option value="@a.Id" selected="@(a.Id == Model.QuestionAssignmentId)">@a.Title (@a.Submitted of @a.Recipients submitted)</option>
+          }
+        </select>
+      </div>
+      <noscript><button class="btn btn-sm btn-primary">Show</button></noscript>
+    </form>
+  </div>
+
+  @if (Model.Questions.Count == 0)
+  {
+    <div class="card-body text-muted">This assignment has no questions.</div>
+  }
+  else
+  {
+    <ul class="list-unstyled mb-0 question-list" id="questionList">
+      @foreach (var q in Model.Questions)
+      {
+        if (q.IsStem)
+        {
+          <li class="question-stem px-3 py-2" id="q-@q.Index">
+            <span class="badge bg-label-secondary me-2">Q@(q.Label)</span><span class="math-render">@q.Title</span>
+          </li>
+          continue;
+        }
+        var share = q.AveragePoints is { } ap && q.MaxPoints > 0 ? (int)Math.Round(ap * 100 / q.MaxPoints) : (int?)null;
+        <li class="question-item @(q.IsPart ? "is-part" : "")" id="q-@q.Index" data-question="@q.Index">
+          <button type="button" class="question-head" aria-expanded="false" aria-controls="answers-@q.Index">
+            <span class="q-label">@(q.IsPart ? $"({q.Label[^1..]})" : $"Q{q.Label}")</span>
+            <span class="q-title math-render">@q.Title</span>
+            <span class="q-bar" aria-hidden="true">
+              @if (share is { } sh) { <span class="q-bar-fill" style="width:@Math.Clamp(sh, 0, 100)%"></span> }
+            </span>
+            <span class="q-figure">
+              @if (q.AveragePoints is { } avg)
+              {
+                <strong>@AnalyticsService.Marks(avg) of @AnalyticsService.Marks(q.MaxPoints)</strong>
+              }
+              else
+              {
+                <span class="text-muted fst-italic">no marks yet</span>
+                <span class="text-muted"> · max @AnalyticsService.Marks(q.MaxPoints)</span>
+              }
+              <span class="d-block small text-muted" data-graded>@q.GradedAnswers of @q.Answered graded</span>
+            </span>
+            <i class="bx bx-chevron-down q-chevron" aria-hidden="true"></i>
+          </button>
+          <div class="question-answers" id="answers-@q.Index" hidden>
+            @if (q.Answers.Count == 0)
+            {
+              <p class="text-muted small mb-0">No answers handed in yet.</p>
+            }
+            else
+            {
+              <table class="table table-sm align-middle mb-0">
+                <thead><tr><th>Student</th><th>Answer</th><th>Marks</th><th class="text-end"><span class="visually-hidden">Open</span></th></tr></thead>
+                <tbody>
+                  @foreach (var an in q.Answers)
+                  {
+                    <tr>
+                      <td class="js-anon">@an.StudentName</td>
+                      <td class="answer-cell">
+                        @if (!string.IsNullOrWhiteSpace(an.Value)) { <span class="math-render">@(an.Value.Length > 160 ? an.Value[..160] + "…" : an.Value)</span> }
+                        @if (!string.IsNullOrEmpty(an.ImagePath)) { <a class="d-inline-block small me-2" href="@an.ImagePath" target="_blank" rel="noopener"><i class="bx bx-image me-1" aria-hidden="true"></i>Photo of working</a> }
+                        @if (!string.IsNullOrEmpty(an.SketchPath)) { <a class="d-inline-block small" href="@an.SketchPath" target="_blank" rel="noopener"><i class="bx bx-pencil me-1" aria-hidden="true"></i>Drawing</a> }
+                      </td>
+                      <td class="text-nowrap">
+                        @if (an.Graded) { <strong>@AnalyticsService.Marks(an.Points!.Value)</strong><span class="text-muted"> / @AnalyticsService.Marks(q.MaxPoints)</span> }
+                        else if (an.NeedsReview) { <span class="badge bg-label-warning">needs review</span> }
+                        else { <span class="text-muted small">not marked</span> }
+                      </td>
+                      <td class="text-end"><a class="btn btn-xs btn-outline-primary" href="/Assignments/SubmissionDetail?resultId=@an.ResultId&returnUrl=@here">Open work</a></td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
+          </div>
+        </li>
+      }
+    </ul>
+  }
+</div>

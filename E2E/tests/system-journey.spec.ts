@@ -198,8 +198,11 @@ test("after the change every page agrees on 100%: student, teacher, CSV and anal
   await expect(teacher.locator("#students a.student-link", { hasText: studentName })).toBeVisible();
 
   await teacher.goto(`/Analytics?classId=${classId}`);
-  await expect(teacher.locator("#classSelector")).toBeVisible();
+  await expect(teacher.locator("#fClass")).toHaveValue(classId);
   await expect(teacher.locator("body")).not.toContainText(/An error occurred while processing your request/i);
+  // Analytics shows the same 100% for this student as the other pages.
+  await teacher.goto(`/Analytics?classId=${classId}&tab=students`);
+  await expect(teacher.locator("[data-student-row]", { hasText: studentName })).toContainText("100%");
 
   // The teacher's dashboard counts the student and the assignment.
   await teacher.goto("/");

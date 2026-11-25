@@ -1,0 +1,112 @@
+@model SmartSchoolAI.ViewModels.AnalyticsViewModel
+@using SmartSchoolAI.ViewModels
+@using SmartSchoolAI.Services
+@*
+  The list a counter, a chart segment or a "Teacher actions" line opens: the very items the number was counted from.
+*@
+@{
+    var here    = Uri.EscapeDataString(Context.Request.Path + Context.Request.QueryString);
+    var rows    = Model.FilteredWork;
+    var scope   = Model.Work.Where(w => (Model.WorkAssignmentId is null || w.AssignmentId == Model.WorkAssignmentId)
+                                     && (Model.WorkStudentId is null || w.StudentId == Model.WorkStudentId)).ToList();
+    var aTitle  = Model.WorkAssignmentId is { } aid ? Model.Work.FirstOrDefault(w => w.AssignmentId == aid)?.AssignmentTitle : null;
+    var sName   = Model.WorkStudentId is { } sid ? Model.Work.FirstOrDefault(w => w.StudentId == sid)?.StudentName : null;
+    var chips   = new[] { "all", "not-submitted", "submitted", "awaiting", "graded", "overdue" };
+}
+<div class="card" id="workList" data-status="@Model.WorkStatus">
+  <div class="card-header d-flex flex-wrap align-items-start gap-2">
+    <div class="me-auto">
+      <a href="@Model.Link("overview")" class="small d-inline-flex align-items-center mb-1" id="backToOverview">
+        <i class="bx bx-arrow-back me-1" aria-hidden="true"></i>Overview
+      </a>
+      <h5 class="card-title mb-0">
+        @AnalyticsViewModel.StatusTitle(Model.WorkStatus)
+        @if (aTitle is not null) { <span class="text-muted fw-normal">· @aTitle</span> }
+        @if (sName is not null) { <span class="text-muted fw-normal js-anon">· @sName</span> }
+      </h5>
+      <small class="text-muted" id="workCount" data-count="@rows.Count">@AnalyticsService.Plural(rows.Count, "item") · one per student given the assignment</small>
+    </div>
+    @if (Model.WorkAssignmentId is { } a2)
+    {
+      <a class="btn btn-sm btn-outline-primary" href="/Assignments/Details/@a2">Open assignment page</a>
+    }
+  </div>
+  <div class="px-3 pt-3 d-flex flex-wrap gap-2" role="group" aria-label="Show">
+    @foreach (var c in chips)
+    {
+      var n = scope.Count(w => AnalyticsViewModel.Matches(w, c));
+      var on = c == Model.WorkStatus;
+      <a class="btn btn-sm @(on ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@(on ? "true" : "false")"
+         data-chip="@c" href="@Model.Link("work", c, Model.WorkAssignmentId, Model.WorkStudentId)">
+        @AnalyticsViewModel.StatusTitle(c).Replace("All assigned work", "All") <span class="badge bg-white text-dark ms-1">@n</span>
+      </a>
+    }
+  </div>
+  @if (rows.Count == 0)
+  {
+    <div class="card-body text-center text-muted py-5" id="workEmpty">
+      <i class="bx bx-check-circle empty-icon" aria-hidden="true"></i>
+      <p class="mt-2 mb-0">Nothing here — no work is @AnalyticsViewModel.StatusTitle(Model.WorkStatus).ToLowerInvariant() right now.</p>
+    </div>
+  }
+  else
+  {
+    <div class="table-responsive mt-2">
+      <table class="table table-hover align-middle mb-0 work-table">
+        <thead class="table-light">
+          <tr><th>Student</th><th>Assignment</th><th>Due</th><th>Status</th><th>Score</th><th class="text-end"><span class="visually-hidden">Open</span></th></tr>
+        </thead>
+        <tbody>
+          @foreach (var w in rows)
+          {
+            <tr data-work-row data-student="@w.StudentId" data-assignment="@w.AssignmentId">
+              <td>
+                <a class="fw-semibold js-anon" href="/Classes/StudentWork?studentId=@w.StudentId&classId=@Model.SelectedClassId&returnUrl=@here">@w.StudentName</a>
+              </td>
+              <td>
+                <a href="/Assignments/Details/@w.AssignmentId">@w.AssignmentTitle</a>
+                <span class="d-block small text-muted">@AnalyticsViewModel.TypeLabel(w.AssignmentType) · given @SchoolTime.Show(w.AssignedAt, "dd MMM")</span>
+              </td>
+              <td class="text-nowrap">
+                @SchoolTime.Show(w.Due, "dd MMM, HH:mm", "—")
+                @if (w.PersonalDue) { <span class="badge bg-label-info ms-1">personal</span> }
+              </td>
+              <td>
+                @switch (w.Status)
+                {
+                  case AnalyticsWorkStatus.Graded:
+                    <span class="badge bg-label-success">Graded</span>
+                    break;
+                  case AnalyticsWorkStatus.AwaitingReview:
+                    <span class="badge bg-label-warning">@(w.MarkingPending ? "AI marking" : "Awaiting review")</span>
+                    break;
+                  default:
+                    if (w.Overdue) { <span class="badge bg-label-danger">Overdue</span> }
+                    else { <span class="badge bg-label-secondary">Not submitted</span> }
+                    if (w.DraftOpen) { <span class="d-block small text-muted">draft in progress</span> }
+                    break;
+                }
+                @if (w.SubmittedAttempts > 1) { <span class="d-block small text-muted">@w.SubmittedAttempts attempts</span> }
+              </td>
+              <td>
+                @if (w.Status == AnalyticsWorkStatus.Graded) { <strong>@w.Score%</strong> }
+                else if (w.Status == AnalyticsWorkStatus.AwaitingReview) { <span class="text-muted" title="Not final until reviewed">@w.Score% <small>(provisional)</small></span> }
+                else { <span class="text-muted">—</span> }
+              </td>
+              <td class="text-end text-nowrap">
+                @if (w.LatestResultId is { } rid)
+                {
+                  <a class="btn btn-sm btn-outline-primary" href="/Assignments/SubmissionDetail?resultId=@rid&returnUrl=@here">Open work</a>
+                }
+                else
+                {
+                  <a class="btn btn-sm btn-outline-secondary" href="/Assignments/Details/@w.AssignmentId?filter=not-submitted">Assignment</a>
+                }
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</div>

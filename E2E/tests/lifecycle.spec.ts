@@ -139,7 +139,7 @@ test("class results and analytics reflect the score", async () => {
   await expect(teacher.locator("body")).toContainText("E2E Student");
 
   await teacher.goto("/Analytics");
-  await expect(teacher.locator("#classSelector")).toBeVisible();
+  await expect(teacher.locator("#fClass")).toBeVisible();
 });
 
   test("closing the assignment blocks submissions; reopening restores them; then it can be deleted", async () => {

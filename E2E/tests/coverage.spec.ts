@@ -232,17 +232,25 @@ test("question editor: move, require-work toggle, subpoint, duplicate, remove", 
   }).toPass();
 });
 
-test("analytics dashboard loads for the class on both tabs", async () => {
-  for (const tab of ["practice", "assessment"]) {
+test("analytics loads for the class, old Practice/Assessment links included, and every section opens", async () => {
+  // The old tabs were the assignment type: they now open the overview filtered to that type.
+  for (const [tab, type] of [["practice", "practice"], ["assessment", "homework"]]) {
     const response = await teacher.goto(`/Analytics?classId=${classId}&tab=${tab}`);
     expect(response?.status(), tab).toBeLessThan(400);
-    await expect(teacher.getByRole("heading", { name: /Analytics Dashboard/ })).toBeVisible();
-    await expect(teacher.locator("#classSelector")).toHaveValue(classId);
-    await expect(teacher.locator("#analyticsTabs .nav-link.active")).toHaveText(new RegExp(tab, "i"));
+    await expect(teacher.getByRole("heading", { name: /Class analytics/ })).toBeVisible();
+    await expect(teacher.locator("#fClass")).toHaveValue(classId);
+    await expect(teacher.locator("#fType")).toHaveValue(type);
+    await expect(teacher.locator('#analyticsTabs .nav-link.active')).toHaveAttribute("data-tab", "overview");
   }
 
-  await teacher.locator("#classSelector").selectOption(classId);
+  for (const tab of ["assignments", "students", "questions"]) {
+    await teacher.locator(`#analyticsTabs [data-tab="${tab}"]`).click();
+    await expect(teacher).toHaveURL(new RegExp(`tab=${tab}`));
+    await expect(teacher.locator("body")).not.toContainText(/An error occurred while processing your request/i);
+  }
+  await teacher.locator("#fType").selectOption("all");
   await expect(teacher).toHaveURL(new RegExp(`classId=${classId}`));
+  await expect(teacher).not.toHaveURL(/type=/);
 });
 
 test("admin can search teachers and the reset-password server check rejects short passwords", async ({ browser }) => {
