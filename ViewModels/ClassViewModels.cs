@@ -38,6 +38,8 @@ public class ClassDetailsViewModel
 public class StudentRosterViewModel
 {
     public List<StudentRosterRowDto> Rows            { get; set; } = new();
+    /// <summary>Which ten rows are shown, and how many students match in all.</summary>
+    public PageInfo                  Page            { get; set; } = new();
     public List<Class>               Classes         { get; set; } = new();
     public Guid?                     SelectedClassId { get; set; }
     public string?                   Search          { get; set; }

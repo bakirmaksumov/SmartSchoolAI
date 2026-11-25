@@ -85,3 +85,37 @@ test("Content Library: ten per page; deleting the only item on page 2 lands on t
   await expect(rows()).toHaveCount(10);
   await expect(page.locator(".pagination")).toHaveCount(0);
 });
+
+test("Students: ten per page; a search starts again at page 1", async () => {
+  test.setTimeout(300_000);
+  const rosterClass = unique("Roster class");
+  const invite = await createClass(page, rosterClass);
+  for (let i = 1; i <= 11; i++) {
+    const p = await (await page.context().browser()!.newContext()).newPage();
+    await p.goto("/Auth/StudentRegister");
+    await p.locator('input[name="inviteCode"]').fill(invite);
+    await p.locator('input[name="fullName"]').fill(`${stamp} Pupil ${String(i).padStart(2, "0")}`);
+    await p.locator('input[name="email"]').fill(`${stamp}.p${i}@example.test`);
+    await p.locator('input[name="password"]').fill(password);
+    await p.locator('input[name="confirmPassword"]').fill(password);
+    await p.locator('button[type="submit"]').click();
+    await expect(p).toHaveURL(/\/Auth\/Login/);
+    await p.context().close();
+  }
+
+  await page.goto("/Classes/Students");
+  await expect(page.locator("#rosterCount")).toHaveText("11 students");
+  await expect(rows()).toHaveCount(10);
+  await expect(summary()).toHaveText("Showing 1–10 of 11");
+  await page.locator(".pagination").getByRole("link", { name: "Next page" }).click();
+  await expect(page).toHaveURL(/page=2/);
+  await expect(rows()).toHaveCount(1);
+  await expect(page.getByText(`${stamp} Pupil 11`)).toBeVisible();
+
+  // A search narrows the list and starts again at page 1; no pager when it fits on one page.
+  await page.locator('input[name="search"]').fill(`${stamp} Pupil 0`);
+  await page.locator('input[name="search"]').press("Enter");
+  await expect(page).not.toHaveURL(/page=/);
+  await expect(page.locator("#rosterCount")).toHaveText("9 students");
+  await expect(page.locator(".pagination")).toHaveCount(0);
+});

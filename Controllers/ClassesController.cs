@@ -167,7 +167,7 @@ public class ClassesController : Controller
     }
 
     // GET: /Classes/Students — every student across the teacher's classes.
-    public async Task<IActionResult> Students(Guid? classId = null, string? search = null)
+    public async Task<IActionResult> Students(Guid? classId = null, string? search = null, int? page = null)
     {
         var classes = await _db.Classes
             .AccessibleBy(CurrentUserId)
@@ -203,9 +203,14 @@ public class ClassesController : Controller
             }
         }
 
+        // Ten per page, by name; the class breaks ties so a student in two classes keeps a stable place.
+        var ordered  = rows.OrderBy(r => r.FullName).ThenBy(r => r.ClassName).ThenBy(r => r.StudentId).ToList();
+        var pageInfo = PageInfo.For(page, ordered.Count);
+
         return View(new StudentRosterViewModel
         {
-            Rows            = rows.OrderBy(r => r.FullName).ThenBy(r => r.ClassName).ToList(),
+            Rows            = ordered.Skip((pageInfo.Page - 1) * pageInfo.PageSize).Take(pageInfo.PageSize).ToList(),
+            Page            = pageInfo,
             Classes         = classes,
             SelectedClassId = classId,
             Search          = search
@@ -590,9 +595,17 @@ public class ClassesController : Controller
     /// action came from there, otherwise the class page's Students tab.
     /// </summary>
     private IActionResult BackToStudents(Guid classId, string? returnTo)
-        => returnTo == "roster"
-            ? RedirectToAction(nameof(Students))
-            : RedirectToAction(nameof(Details), new { id = classId, tab = "students" });
+    {
+        if (returnTo != "roster")
+            return RedirectToAction(nameof(Details), new { id = classId, tab = "students" });
+
+        // Back to the same page and filters of the roster (a page left empty shows the one before it).
+        var back = Request.HasFormContentType ? Request.Form["returnUrl"].ToString() : null;
+        return !string.IsNullOrEmpty(back) && Url.IsLocalUrl(back) &&
+               back.StartsWith("/Classes/Students", StringComparison.OrdinalIgnoreCase)
+            ? LocalRedirect(back)
+            : RedirectToAction(nameof(Students));
+    }
 
     /// <summary>
     /// Loads a student only if they are enrolled in a class this teacher owns or
