@@ -21,6 +21,31 @@ test("forgot password page explains who can reset", async ({ page }) => {
   await expect(page.locator("body")).toContainText(/teacher|administrator/i);
 });
 
+test("Back after logout or a new sign-in never shows the previous user's page", async ({ page }) => {
+  await signInAs(page, "teacher");
+  const home = await page.goto("/");
+  expect(home?.headers()["cache-control"] ?? "", "signed-in pages must not be stored").toContain("no-store");
+  await expect(page.locator('a.menu-link[href="/ContentLibrary"]')).toHaveCount(1);
+
+  // Logout, then Back: the browser must ask the server again, which sends an anonymous visitor to login.
+  await page.goto("/Auth/Logout");
+  await expect(page).toHaveURL(/\/Auth\/Login/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/Auth\/Login/);
+
+  // Another person signs in on the same browser, then Back: never the teacher's dashboard.
+  await signInAs(page, "teacher");
+  await page.goto("/Auth/Logout");
+  await signInAs(page, "student");
+  await expect(page).toHaveURL(/\/Student\/?$/);
+  // The teacher's menu (Content Library) must never come back. The teacher's name alone is no sign:
+  // a student's own pages list the teacher of each class.
+  for (let step = 0; step < 4; step++) {
+    if (!(await page.goBack())) break;
+    await expect(page.locator('a.menu-link[href="/ContentLibrary"]'), `Back step ${step + 1}`).toHaveCount(0);
+  }
+});
+
 test("each role lands on its own home page and logout ends the session", async ({ page }) => {
   await signInAs(page, "teacher");
   await expect(page).toHaveURL(/\/$/);

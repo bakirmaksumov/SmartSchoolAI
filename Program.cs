@@ -212,6 +212,9 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();   // must come before UseAuthorization and the rate limiter
+// Pages for a signed-in user are never kept by the browser, so Back after logout or after another person
+// signs in on the same computer does not show the previous user's page from memory.
+app.UseMiddleware<SmartSchoolAI.Middleware.NoStoreForSignedInMiddleware>();
 // After authentication so the "ai" policy sees the signed-in user and limits each person
 // separately; before it, every request looked anonymous and the whole school shared one IP bucket.
 app.UseRateLimiter();
