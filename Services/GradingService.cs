@@ -215,7 +215,20 @@ public class GradingService
 
         var result = await GetOrCreateSavedResultAsync(assignmentId, studentId);   // saved before the slow AI part
         var mark   = await MarkStepsAsync(result, assignment!, question!, questionIndex, steps, imagePath);
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // Another request wrote this question's answer meanwhile (a second check of the same question, the draft
+            // autosave). Read the attempt again and apply the marking to it: the reading and the grading are stored,
+            // so this costs no AI call.
+            _db.ChangeTracker.Clear();
+            result = await GetOrCreateSavedResultAsync(assignmentId, studentId);
+            mark   = await MarkStepsAsync(result, assignment!, question!, questionIndex, steps, imagePath);
+            await _db.SaveChangesAsync();
+        }
 
         if (!mark.Success)
             return new StepsGradeOutcome(false, mark.Error, result.Id, null, null, null, result.Score, steps, CanRetry: true);

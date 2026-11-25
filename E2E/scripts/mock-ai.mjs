@@ -32,6 +32,7 @@ const defaults = () => ({
   answerReply: null,  // { correct, feedback } — or an array, one entry per call (the last repeats)
   answerStatus: null, // an HTTP error status for typed-answer grading (e.g. 500): the AI "fails"
   evalStatus: null,   // the same for marking steps / a photographed solution (e.g. 503)
+  tutorStatus: null,  // the same for the AI tutor's streamed reply (e.g. 503)
   sketchReply: null,  // { correct, marks, confidence, feedback } for a drawn answer
   importReply: null   // the question list an import (PDF / photo) returns, as an array
 });
@@ -95,6 +96,7 @@ async function chatCompletions(req, res) {
   requests.push(seen);
 
   if (seen.kind === "tutor") {
+    if (script.tutorStatus) return json(res, script.tutorStatus, { error: { message: "mock AI failure" } });
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
     for (const piece of script.tutorChunks) {
       res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`);

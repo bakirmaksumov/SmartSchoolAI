@@ -898,12 +898,14 @@ public class StudentController : Controller
             chatMessages.Add(new { role = m.Role, content = m.Content });
 
         string reply;
+        var tutorFailed = false;
         try
         {
             reply = await CallTutorAsync(chatMessages);
         }
         catch (Exception ex)
         {
+            tutorFailed = true;
             _logger.LogError(ex, "SendChatMessage failed for session {SessionId}", sessionId);
             reply = "Sorry, I couldn't reach the tutor right now. Please try again.";
         }
@@ -913,6 +915,11 @@ public class StudentController : Controller
         session.Messages  = JsonSerializer.Serialize(messages);
         session.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
+
+        // A message sent while studying the result: one request, its outcome as the server saw it.
+        await HttpContext.RequestServices.GetRequiredService<ActivityLogService>().RecordAsync(
+            session.StudentResult.AssignmentId, studentId, session.StudentResult.AttemptNumber, null,
+            ActivityKind.TutorMessage, tutorFailed ? ActivityOutcome.Error : ActivityOutcome.Received);
 
         return RedirectToAction(nameof(Chat),
             new { resultId = session.StudentResultId, mode = session.Mode });
@@ -1260,6 +1267,11 @@ public class StudentController : Controller
             messages
         };
 
+        // What became of this request, for the attempt's activity (the server decides; the stream's parts are one request).
+        // Its time is when it arrived, so it sorts right after the click that opened the tutor.
+        var requestedAt = DateTime.UtcNow;
+        var delivered = false;
+        var failed    = false;
         try
         {
             using var httpClient  = _httpFactory.CreateClient();
@@ -1278,6 +1290,7 @@ public class StudentController : Controller
                     "ChatStream: OpenRouter returned {Status}: {Body}", httpResponse.StatusCode, errorBody);
 
                 await WriteSseAsync("⚠️ Sorry, I couldn't reach the tutor right now. Please try again.");
+                failed = true;
                 return;
             }
 
@@ -1303,16 +1316,62 @@ public class StudentController : Controller
                         .GetString();
 
                     if (!string.IsNullOrEmpty(deltaContent))
+                    {
                         await WriteSseAsync(deltaContent);
+                        delivered = true;
+                    }
                 }
                 catch { /* skip malformed chunk */ }
             }
         }
         catch (Exception ex)
         {
+            failed = true;
+            if (HttpContext.RequestAborted.IsCancellationRequested) return;   // the student left: recorded as interrupted below
             _logger.LogError(ex, "ChatStream failed");
             await WriteSseAsync("⚠️ Sorry, I couldn't reach the tutor right now. Please try again.");
         }
+        finally
+        {
+            // A student's own request while working (a teacher previewing is not logged). Counted once per request id,
+            // however many parts the answer streamed in.
+            if (assignment is not null && request.Kind is not null && User.IsInRole(Role.Student))
+            {
+                var outcome = HttpContext.RequestAborted.IsCancellationRequested ? ActivityOutcome.Interrupted
+                            : delivered && !failed ? ActivityOutcome.Received
+                            : ActivityOutcome.Error;
+                var kind = request.Kind switch
+                {
+                    "hint"    => ActivityKind.HintRequested,
+                    "message" => ActivityKind.TutorMessage,
+                    _         => ActivityKind.TutorRequest
+                };
+                var log = HttpContext.RequestServices.GetRequiredService<ActivityLogService>();
+                var attemptNo = await log.CurrentAttemptAsync(assignment.Id, CurrentStudentId);
+                if (request.Opened)   // the click that opened the tutor, on the server's clock, just before its first request
+                    await log.RecordAsync(assignment.Id, CurrentStudentId, attemptNo, request.QuestionIndex,
+                                          ActivityKind.TutorOpened, ActivityOutcome.Allowed, null, requestedAt.AddMilliseconds(-1));
+                await log.RecordAsync(assignment.Id, CurrentStudentId, attemptNo, request.QuestionIndex, kind, outcome, request.RequestId, requestedAt);
+            }
+        }
+    }
+
+    // ── ACTIVITY (browser actions) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Copy / cut / paste inside the assignment and opening the AI tutor, reported by the page in small batches. Only
+    /// these actions, only for the student's own attempt; a batch sent twice is stored once. A failure here never
+    /// affects the work: the page just keeps the batch for later.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("activity")]
+    public async Task<IActionResult> LogActivity([FromBody] ActivityLogService.BrowserBatch batch)
+    {
+        var result = await HttpContext.RequestServices.GetRequiredService<ActivityLogService>()
+            .RecordBrowserBatchAsync(CurrentStudentId, batch);
+        return result.Ok ? Json(new { ok = true, stored = result.Stored, duplicates = result.Duplicates })
+                         : StatusCode(result.Error == "Not stored." ? 503 : 400, new { ok = false, error = result.Error });
     }
 
     /// <summary>

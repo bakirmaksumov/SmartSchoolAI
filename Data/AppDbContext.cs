@@ -33,6 +33,8 @@ public class AppDbContext : DbContext
     public DbSet<SupportTicket>       SupportTickets       { get; set; }
     public DbSet<AiStageResult>       AiStageResults       { get; set; }
     public DbSet<AiCallLog>           AiCallLogs           { get; set; }
+    public DbSet<AttemptActivity>        AttemptActivities        { get; set; }
+    public DbSet<AttemptActivitySummary> AttemptActivitySummaries { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -44,6 +46,25 @@ public class AppDbContext : DbContext
             e.HasIndex(x => x.CacheKey).IsUnique();
             e.Property(x => x.CacheKey).HasMaxLength(100);
         });
+        // A student's actions per attempt: read by attempt, in time order; a repeated delivery is found by its id.
+        modelBuilder.Entity<AttemptActivity>(e =>
+        {
+            e.HasIndex(x => new { x.AssignmentId, x.StudentId, x.AttemptNumber, x.OccurredAt });
+            e.HasIndex(x => new { x.StudentId, x.ClientId }).IsUnique().HasFilter("ClientId IS NOT NULL");
+            // Ids as 16-byte blobs and times as 8-byte ticks (UTC) instead of 36- and ~27-character text: this table can
+            // hold many rows per attempt, and its indexes repeat the ids. (The daily clean-up scans it once; no index.)
+            var bytes = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.GuidToBytesConverter();
+            e.Property(x => x.AssignmentId).HasConversion(bytes);
+            e.Property(x => x.StudentId).HasConversion(bytes);
+            e.Property(x => x.ClientId).HasConversion(new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<Guid?, byte[]?>(
+                v => v.HasValue ? v.Value.ToByteArray() : null, v => v == null ? null : new Guid(v)));
+            var utc = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTime, long>(
+                v => v.ToUniversalTime().Ticks, v => new DateTime(v, DateTimeKind.Utc));
+            e.Property(x => x.OccurredAt).HasConversion(utc);
+            e.Property(x => x.ReceivedAt).HasConversion(utc);
+        });
+        modelBuilder.Entity<AttemptActivitySummary>(e =>
+            e.HasIndex(x => new { x.AssignmentId, x.StudentId, x.AttemptNumber }).IsUnique());
         modelBuilder.Entity<AiCallLog>(e =>
         {
             e.HasIndex(x => x.CacheKey);

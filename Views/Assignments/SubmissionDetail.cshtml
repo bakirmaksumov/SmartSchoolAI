@@ -100,6 +100,29 @@
 </div>
 
 <!-- AI Summary -->
+@{
+    var activeTab = ViewBag.Tab as string ?? "answers";
+    var tabBase = $"/Assignments/SubmissionDetail?resultId={result.Id}" +
+                  (ViewBag.ReturnUrl is string ru ? $"&returnUrl={Uri.EscapeDataString(ru)}" : "");
+}
+<ul class="nav nav-tabs mb-3" id="submissionTabs" role="tablist" aria-label="Submission">
+  <li class="nav-item" role="presentation">
+    <a class="nav-link @(activeTab == "answers" ? "active" : "")" href="@tabBase" data-tab="answers" role="tab"
+       aria-selected="@(activeTab == "answers" ? "true" : "false")"><i class="bx bx-list-check me-1" aria-hidden="true"></i>Answers</a>
+  </li>
+  <li class="nav-item" role="presentation">
+    <a class="nav-link @(activeTab == "activity" ? "active" : "")" href="@(tabBase)&tab=activity" data-tab="activity" role="tab"
+       aria-selected="@(activeTab == "activity" ? "true" : "false")"><i class="bx bx-pulse me-1" aria-hidden="true"></i>Activity</a>
+  </li>
+</ul>
+
+@if (activeTab == "activity")
+{
+  <partial name="_SubmissionActivity" model="Model" />
+}
+else
+{
+<div id="answersTab">
 @if (!string.IsNullOrEmpty(result.AiSummary))
 {
   <div class="card mb-4">
@@ -453,6 +476,9 @@
     <input type="hidden" name="returnUrl" value="@(ViewBag.ReturnUrl as string)" />
   </form>
 }
+</div>
+}
+
 <style>
   .disputed-step { background: rgba(255, 171, 0, .08); }
   .btn-xs { padding: .15rem .45rem; font-size: .75rem; }

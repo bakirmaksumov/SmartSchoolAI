@@ -1027,6 +1027,7 @@
     if (sending) return;                       // a double click sends once
     sending = true;
     cancelServerSave();                        // a late draft save must never start a new attempt
+    if (window.ActivityLog) { try { await ActivityLog.flushNow(1500); } catch (e) { /* never blocks the hand-in */ } }
 
     var errorBox  = document.getElementById('submitError');
     var errorText = document.getElementById('submitErrorText');
@@ -1112,10 +1113,16 @@
   // Expose globally so the button onclick works
   window.openTutorial = function (opts) {
     // Inline onclick handlers call this with no arguments; the step buttons pass { step }.
+    // This is the student's own click: an opening for the activity log (a reload or a restored chat is not). When it
+    // starts a conversation, the server logs the opening with that first request (same clock, exact order);
+    // reopening a conversation already under way sends no request, so the page reports it.
+    tutorOpenClicked = true;
     return openTutorial(opts && opts.step ? opts : undefined);
   };
   window.closeTutorial = closeTutorial;
   window.setTutorialMode = setTutorialMode;
+
+  var tutorOpenClicked = false;
 
   function openTutorial(opts) {
     // Help opened from a step starts its own conversation about that step.
@@ -1137,6 +1144,8 @@
                         && chatQuestionIdx === qIdx
                         && chatHistory.length > 0;
     if (sameConversation) {
+      if (tutorOpenClicked && window.ActivityLog) ActivityLog.tutorOpened(qIdx);
+      tutorOpenClicked = false;
       updateModeButtons();
       return;
     }
@@ -1163,7 +1172,7 @@
       if (chatStep.feedback) contextMsg += ' (the checker said: ' + chatStep.feedback + ')';
     }
 
-    streamTutorTurn(contextMsg, false);  // hidden priming; assistant replies with the first hint
+    streamTutorTurn(contextMsg, false, 'hint');  // hidden priming; assistant replies with the first hint
   }
 
   function closeTutorial() {
@@ -1217,7 +1226,7 @@
     var intent = mode === 'solution' ? 'Can you show me the full solution?'
                : mode === 'concept'  ? 'Can you explain the concept behind this?'
                :                       'Can you give me a hint?';
-    streamTutorTurn(intent, true);
+    streamTutorTurn(intent, true, mode === 'hint' ? 'hint' : 'mode');
   }
 
   function updateModeButtons() {
@@ -1379,7 +1388,9 @@
 
   // Sends one tutor turn: appends the user message, streams the assistant reply,
   // and keeps the running history so the conversation continues across modes.
-  async function streamTutorTurn(userMessage, showUserBubble) {
+  // kind: 'hint' (a hint asked for), 'mode' (Concept / Solution), 'message' (typed by the student): one request id per
+  // turn, so the activity log counts the request once however its answer streams in.
+  async function streamTutorTurn(userMessage, showUserBubble, kind) {
     if (showUserBubble) addUserBubble(userMessage);
     chatHistory.push({ role: 'user', content: userMessage });
 
@@ -1389,10 +1400,21 @@
     try {
       var assignmentId = document.getElementById('assignmentId')?.value || '';
       var csrfToken = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+      var requestId = window.ActivityLog ? ActivityLog.newRequestId() : null;
+      var openedNow = tutorOpenClicked;                 // this request starts the conversation the student opened
+      tutorOpenClicked = false;
+      var activityHeaders = requestId ? {
+        'X-Activity-Id': requestId, 'X-Activity-Kind': kind || 'mode', 'X-Activity-Assignment': assignmentId,
+        'X-Activity-Opened': openedNow ? '1' : '0',
+        'X-Activity-Question': chatQuestionIdx === null || chatQuestionIdx === undefined ? '' : String(chatQuestionIdx)
+      } : {};
       var response = await fetch('/Student/ChatStream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        headers: Object.assign({ 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken }, activityHeaders),
         body: JSON.stringify(Object.assign({
+          requestId:    requestId,
+          kind:         requestId ? (kind || 'mode') : null,
+          opened:       openedNow,
           message:      userMessage,
           mode:         chatMode,
           assignmentId: assignmentId,
@@ -1443,7 +1465,7 @@
     if (sendBtn) sendBtn.disabled = true;
 
     try {
-      await streamTutorTurn(userMessage, true);
+      await streamTutorTurn(userMessage, true, 'message');
     } finally {
       if (sendBtn) sendBtn.disabled = false;
       input.focus();

@@ -217,6 +217,14 @@
     <span class="ms-2 draft-status" id="draftStatus" role="status" aria-live="polite"></span>
   }
 </p>
+@if (!isPreview)
+{
+  @* Said before the work starts: what the activity log records, and what it never does. *@
+  <p class="small text-muted mb-3" id="activityNotice">
+    <i class="bx bx-info-circle me-1" aria-hidden="true"></i>Your teacher can see when you copy or paste in this assignment and when
+    you ask for hints or use the AI Tutor — not what you copy, paste or write to the tutor.
+  </p>
+}
 
 <!-- ── QUESTION NAV PILLS ────────────────────────────────────────────── -->
 <div class="card mb-4">
@@ -1229,6 +1237,7 @@
   <script src="~/js/grade-poll.js" asp-append-version="true"></script>
   <script src="~/js/math-text.js" asp-append-version="true"></script>
   <script src="~/js/photo-status.js" asp-append-version="true"></script>
+  <script src="~/js/activity-log.js" asp-append-version="true"></script>
   <script src="~/js/take-assignment.js" asp-append-version="true"></script>
   <script src="~/js/number-line-widget.js" asp-append-version="true"></script>
   <script src="~/js/dot-plot-widget.js" asp-append-version="true"></script>

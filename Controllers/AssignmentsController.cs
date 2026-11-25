@@ -960,7 +960,8 @@ public class AssignmentsController : Controller
         });
     }
 
-    public async Task<IActionResult> SubmissionDetail(Guid resultId, string? returnUrl = null)
+    public async Task<IActionResult> SubmissionDetail(Guid resultId, string? returnUrl = null, string? tab = null,
+                                                      string? kind = null, int? question = null, int page = 1)
     {
         // Opened from a student's work page or the review queue: "Back" returns there (local paths only).
         ViewBag.ReturnUrl = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? returnUrl : null;
@@ -971,9 +972,20 @@ public class AssignmentsController : Controller
             .Include(r => r.Student)
             .Include(r => r.StudentAnswers)
             .Include(r => r.StepResults)
+            .Include(r => r.ChatSessions)
             .FirstOrDefaultAsync(r => r.Id == resultId && (r.Assignment.TeacherId == CurrentUserId || r.Assignment.Class.TeacherId == CurrentUserId || r.Assignment.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
 
         if (result is null) return NotFound();
+
+        // Activity: only for a teacher of this class (checked above, before anything of the attempt is read).
+        if (tab == "activity")
+        {
+            var log = HttpContext.RequestServices.GetRequiredService<ActivityLogService>();
+            // ("kind", not "action": that name is MVC's own route value.)
+            ViewBag.Activity = await log.TimelineAsync(result, kind is "copy" or "paste" or "hint" or "tutor" ? kind : null, question, page);
+            ViewBag.RetentionDays = log.RetentionDays;
+        }
+        ViewBag.Tab = tab == "activity" ? "activity" : "answers";
 
         // Reads only what is stored: opening the page never calls the AI.
         return View(new SubmissionDetailViewModel

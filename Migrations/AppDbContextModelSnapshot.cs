@@ -239,6 +239,102 @@ namespace SmartSchoolAI.Migrations
                     b.ToTable("AssignmentStudents");
                 });
 
+            modelBuilder.Entity("SmartSchoolAI.Models.AttemptActivity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("AssignmentId")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("ClientId")
+                        .HasColumnType("BLOB");
+
+                    b.Property<byte>("Flags")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("OccurredAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte>("Outcome")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<short?>("QuestionIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ReceivedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("StudentId")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StudentId", "ClientId")
+                        .IsUnique()
+                        .HasFilter("ClientId IS NOT NULL");
+
+                    b.HasIndex("AssignmentId", "StudentId", "AttemptNumber", "OccurredAt");
+
+                    b.ToTable("AttemptActivities");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.AttemptActivitySummary", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Copies")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("HintsReceived")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("HintsRequested")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Pastes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PastesBlocked")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("PurgedBefore")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TutorOpened")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TutorRequests")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignmentId", "StudentId", "AttemptNumber")
+                        .IsUnique();
+
+                    b.ToTable("AttemptActivitySummaries");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.AuditLog", b =>
                 {
                     b.Property<Guid>("Id")

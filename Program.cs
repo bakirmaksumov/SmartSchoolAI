@@ -39,6 +39,10 @@ builder.Services.AddScoped<AnalyticsService>();
 builder.Services.AddScoped<ClassStatisticsService>();
 builder.Services.AddScoped<AssignmentDistributionService>();
 builder.Services.AddScoped<SubmissionService>();
+// The student's actions per attempt (copy / paste, hints, the AI tutor) for the teacher's Activity tab, and the daily
+// clean-up of details past ActivityLog:DetailRetentionDays.
+builder.Services.AddScoped<ActivityLogService>();
+builder.Services.AddHostedService<ActivityRetentionSweep>();
 // Marks submissions whose AI marking was cut short by a restart (GradingPending still set).
 builder.Services.AddHostedService<PendingMarkingSweep>();
 builder.Services.AddScoped<ReCaptchaService>();
@@ -70,6 +74,34 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
+    // A tutor request refused by the "ai" limit is still a request the student made: it goes to the attempt's
+    // activity as "Limit reached". The page sends the request's id and context in headers for this.
+    options.OnRejected = async (context, _) =>
+    {
+        var http = context.HttpContext;
+        if (!http.Request.Path.StartsWithSegments("/Student/ChatStream") || !http.User.IsInRole("Student")) return;
+        var h = http.Request.Headers;
+        if (!Guid.TryParse(h["X-Activity-Id"], out var requestId) || !Guid.TryParse(h["X-Activity-Assignment"], out var assignmentId)) return;
+        var studentId = Guid.Parse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+        var log = http.RequestServices.GetRequiredService<ActivityLogService>();
+        var attempt = await log.CurrentAttemptAsync(assignmentId, studentId);
+        int? question = int.TryParse(h["X-Activity-Question"], out var q) ? q : null;
+        var kind = h["X-Activity-Kind"].ToString() switch
+        {
+            "hint" => SmartSchoolAI.Models.ActivityKind.HintRequested,
+            "message" => SmartSchoolAI.Models.ActivityKind.TutorMessage,
+            _ => SmartSchoolAI.Models.ActivityKind.TutorRequest
+        };
+        // Only for work the student was given (checked when the request is stored is the student's own attempt).
+        var db = http.RequestServices.GetRequiredService<AppDbContext>();
+        if (!await db.AssignmentStudents.AnyAsync(x => x.AssignmentId == assignmentId && x.StudentId == studentId)) return;
+        var now = DateTime.UtcNow;
+        if (h["X-Activity-Opened"] == "1")
+            await log.RecordAsync(assignmentId, studentId, attempt, question, SmartSchoolAI.Models.ActivityKind.TutorOpened,
+                                  SmartSchoolAI.Models.ActivityOutcome.Allowed, null, now.AddMilliseconds(-1));
+        await log.RecordAsync(assignmentId, studentId, attempt, question, kind, SmartSchoolAI.Models.ActivityOutcome.LimitReached, requestId, now);
+    };
+
     options.AddPolicy("login", httpContext => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions
@@ -90,6 +122,13 @@ builder.Services.AddRateLimiter(options =>
             Window      = TimeSpan.FromMinutes(5),
             QueueLimit  = 0
         }));
+
+    // The browser's activity batches (copy / paste / opening the tutor): small and frequent, per account.
+    options.AddPolicy("activity", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? httpContext.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 
     // Handing in work is never refused because the student used the answer checker a lot: it has its own budget,
     // generous enough for retries after a lost connection, per account.
