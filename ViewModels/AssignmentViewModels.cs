@@ -7,6 +7,7 @@ namespace SmartSchoolAI.ViewModels;
 public class AssignmentListViewModel
 {
     public List<Assignment> Assignments    { get; set; } = new();
+    public PageInfo         Page           { get; set; } = new();
     public List<Class>      Classes        { get; set; } = new();
     public Guid?            SelectedClassId { get; set; }
     public string?          SelectedStatus  { get; set; }

@@ -48,7 +48,7 @@ public class AssignmentsController : Controller
         Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
     // GET: /Assignments
-    public async Task<IActionResult> Index(Guid? classId = null, string? status = null)
+    public async Task<IActionResult> Index(Guid? classId = null, string? status = null, int? page = null)
     {
         var query = _db.Assignments
             .Include(a => a.Class)
@@ -62,9 +62,15 @@ public class AssignmentsController : Controller
             Enum.TryParse<AssignmentStatus>(status, ignoreCase: true, out var parsedStatus))
             query = query.Where(a => a.Status == parsedStatus);
 
+        // Ten per page, newest first; Id breaks ties so an item never shows on two pages.
+        var (assignments, pageInfo) = await query
+            .OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id)
+            .ToPageAsync(page);
+
         return View(new AssignmentListViewModel
         {
-            Assignments = await query.OrderByDescending(a => a.CreatedAt).ToListAsync(),
+            Assignments = assignments,
+            Page        = pageInfo,
             Classes = await _db.Classes
                 .AccessibleBy(CurrentUserId)
                 .OrderBy(c => c.Name)

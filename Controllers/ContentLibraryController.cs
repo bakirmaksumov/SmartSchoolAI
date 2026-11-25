@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using SmartSchoolAI.Data;
 using SmartSchoolAI.Models;
 using SmartSchoolAI.Services;
+using SmartSchoolAI.ViewModels;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -151,7 +152,8 @@ public class ContentLibraryController : Controller
         int?    grade      = null,
         string? difficulty = null,
         string? search     = null,
-        Guid?   assignmentId = null)
+        Guid?   assignmentId = null,
+        int?    page       = null)
     {
         // A teacher's own questions, plus anything another teacher chose to
         // share ("Make visible to other teachers" — IsPublic). Without this,
@@ -172,9 +174,11 @@ public class ContentLibraryController : Controller
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(q => q.Title.Contains(search));
 
-        var questions = await query
-            .OrderByDescending(q => q.CreatedAt)
-            .ToListAsync();
+        // Ten per page, newest first; Id breaks ties so a question never shows on two pages.
+        var (questions, pageInfo) = await query
+            .OrderByDescending(q => q.CreatedAt).ThenByDescending(q => q.Id)
+            .ToPageAsync(page);
+        ViewBag.Page = pageInfo;
 
         ViewBag.Subjects = await _db.Questions
             .Where(q => (q.CreatedByEmail == CurrentUserEmail || q.IsPublic) && q.Subject != null)
@@ -348,7 +352,7 @@ public class ContentLibraryController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(Guid id, string? returnUrl = null)
     {
         var question = await FindOwnedQuestionAsync(id);
         if (question is null) return NotFound();
@@ -357,6 +361,10 @@ public class ContentLibraryController : Controller
         await _db.SaveChangesAsync();
 
         TempData["Success"] = "Question removed from library.";
+        // Back to the same page and filters the teacher was on (Index moves to the last page if this one is now empty).
+        if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) &&
+            returnUrl.StartsWith("/ContentLibrary", StringComparison.OrdinalIgnoreCase))
+            return LocalRedirect(returnUrl);
         return RedirectToAction(nameof(Index));
     }
 

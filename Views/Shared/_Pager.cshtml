@@ -1,0 +1,61 @@
+@model SmartSchoolAI.ViewModels.PageInfo
+@*
+  Pager under a list: "Showing 11–20 of 34" and page links. Each link keeps the current filters (every other
+  query parameter) and only changes ?page=. Nothing is shown when everything fits on one page.
+*@
+@{
+    string Link(int page)
+    {
+        var query = Context.Request.Query
+            .Where(kv => !string.Equals(kv.Key, "page", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(kv => kv.Value.Select(v => new KeyValuePair<string, string?>(kv.Key, v)))
+            .ToList();
+        if (page > 1) query.Add(new KeyValuePair<string, string?>("page", page.ToString()));
+        return Context.Request.Path + Microsoft.AspNetCore.Http.QueryString.Create(query).ToString();
+    }
+}
+@if (Model.TotalPages > 1)
+{
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 px-3 py-3 border-top list-pager">
+    <span class="text-muted small" data-pager-summary>Showing @Model.From–@Model.To of @Model.Total</span>
+    <nav aria-label="Pages">
+      <ul class="pagination pagination-sm mb-0">
+        <li class="page-item @(Model.HasPrevious ? "" : "disabled")">
+          @if (Model.HasPrevious)
+          {
+            <a class="page-link" href="@Link(Model.Page - 1)" aria-label="Previous page" rel="prev"><i class="bx bx-chevron-left"></i></a>
+          }
+          else
+          {
+            <span class="page-link" aria-hidden="true"><i class="bx bx-chevron-left"></i></span>
+          }
+        </li>
+        @foreach (var p in Model.Window())
+        {
+          if (p is null)
+          {
+            <li class="page-item disabled"><span class="page-link">…</span></li>
+          }
+          else if (p == Model.Page)
+          {
+            <li class="page-item active" aria-current="page"><span class="page-link">@p</span></li>
+          }
+          else
+          {
+            <li class="page-item"><a class="page-link" href="@Link(p.Value)">@p</a></li>
+          }
+        }
+        <li class="page-item @(Model.HasNext ? "" : "disabled")">
+          @if (Model.HasNext)
+          {
+            <a class="page-link" href="@Link(Model.Page + 1)" aria-label="Next page" rel="next"><i class="bx bx-chevron-right"></i></a>
+          }
+          else
+          {
+            <span class="page-link" aria-hidden="true"><i class="bx bx-chevron-right"></i></span>
+          }
+        </li>
+      </ul>
+    </nav>
+  </div>
+}
