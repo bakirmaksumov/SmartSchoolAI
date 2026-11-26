@@ -329,7 +329,8 @@ public class CambridgeImportService
             p.Criteria = m.Criteria;
             p.SchemeMarks = m.SchemeMarks;
             p.SchemePages = m.Pages;
-            p.Status = m.Status;
+            // An answer format still to be chosen keeps the part in review, whatever the mark scheme says.
+            p.Status = p.FormatQuestion is not null ? ImportPartStatus.NeedsReview : m.Status;
             p.ReviewReason = m.Reason;
             p.PendingReplacement = null;
         }
@@ -345,6 +346,7 @@ public class CambridgeImportService
     {
         if (p.Status == ImportPartStatus.Saved) return "This part is already saved.";
         if (p.PendingReplacement is not null) return "Choose between your version and the new reading first.";
+        if (p.FormatQuestion is not null) return "Choose a drawn or a written answer first.";
         if (string.IsNullOrWhiteSpace(p.AnswerKey) && string.IsNullOrWhiteSpace(p.Criteria))
             return "Add an answer key or marking criteria before confirming.";
         p.Status = ImportPartStatus.Confirmed;
@@ -357,7 +359,7 @@ public class CambridgeImportService
     public async Task<int> ConfirmMatchedAsync(CambridgeImport i, IReadOnlyCollection<Guid> partIds)
     {
         var n = 0;
-        foreach (var p in i.Parts.Where(p => partIds.Contains(p.Id) && p.Status == ImportPartStatus.Matched && p.PendingReplacement is null))
+        foreach (var p in i.Parts.Where(p => partIds.Contains(p.Id) && p.Status == ImportPartStatus.Matched && p.PendingReplacement is null && p.FormatQuestion is null))
         { p.Status = ImportPartStatus.Confirmed; p.UpdatedAt = DateTime.UtcNow; n++; }
         await _db.SaveChangesAsync();
         return n;
@@ -375,6 +377,22 @@ public class CambridgeImportService
         return null;
     }
 
+    /// <summary>The teacher's choice of answer format: drawn on the sketch pad, or written. A part that was in review
+    /// only for its format becomes Matched again.</summary>
+    public async Task<string?> SetFormatAsync(CambridgeImportPart p, bool drawing)
+    {
+        if (p.Status == ImportPartStatus.Saved) return "This part is already in your Content Library; edit it there.";
+        p.NeedsDrawing = drawing;
+        if (drawing) p.Kind = "OpenText";
+        var wasOpen = p.FormatQuestion is not null;
+        p.FormatQuestion = null;
+        if (wasOpen && p.Status == ImportPartStatus.NeedsReview && p.ReviewReason is null && p.PendingReplacement is null)
+            p.Status = p.AnswerKey is null && p.Criteria is null ? ImportPartStatus.Recognised : ImportPartStatus.Matched;
+        p.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return null;
+    }
+
     public async Task ResolvePendingAsync(CambridgeImportPart p, bool useNew)
     {
         var r = PendingOf(p);
@@ -382,7 +400,8 @@ public class CambridgeImportService
         if (useNew && p.Status != ImportPartStatus.Saved)
         {
             p.AnswerKey = r.AnswerKey; p.Criteria = r.Criteria; p.SchemeMarks = r.SchemeMarks; p.SchemePages = r.SchemePages;
-            p.Status = r.Status; p.ReviewReason = r.Reason; p.EditedByTeacher = false;
+            p.Status = p.FormatQuestion is not null ? ImportPartStatus.NeedsReview : r.Status;
+            p.ReviewReason = r.Reason; p.EditedByTeacher = false;
         }
         p.PendingReplacement = null;
         p.UpdatedAt = DateTime.UtcNow;
@@ -419,7 +438,8 @@ public class CambridgeImportService
             var q = new Question
             {
                 Title = p.Text,
-                Type = p.Kind == "OpenText" ? QuestionType.OpenText : QuestionType.ShortAnswer,
+                Type = p.Kind == "OpenText" || p.NeedsDrawing ? QuestionType.OpenText : QuestionType.ShortAnswer,
+                RequireDrawing = p.NeedsDrawing,
                 Difficulty = DifficultyLevel.Medium,
                 Subject = i.Subject,
                 AnswerKey = p.AnswerKey ?? "",

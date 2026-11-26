@@ -403,4 +403,153 @@ public class CambridgeImportTests : IDisposable
         Assert.Contains("M1 A1", b.MarkScheme);
         Assert.True(b.RequireWork);
     }
+
+    // ── Answer keys with more than one required result ───────────────────────────────────────────────────────────
+    // Shaped like question 1(a) of the 2027 specimen Paper 1 mark scheme, where the real reading kept only the second
+    // of two required results as the key: two independent B1 rows, only one of them marked final.
+    private const string TwoResultsPaper = """
+    {"questions":[{"number":1,"stem":"The points $A(0, 1)$, … and $E(2, 9)$ lie on the curve $y = f(x)$.","figure":null,"parts":[
+      {"label":"(a)","text":"Complete the table to show the gradients of $CE$ and $DE$.","marks":2,"page":2,"kind":"ShortAnswer"},
+      {"label":"(b)","text":"State what the values in the table indicate about the value of $f'(2)$.","marks":1,"page":2,"kind":"ShortAnswer"}]}]}
+    """;
+    private const string TwoResultsScheme = """
+    {"rows":[
+      {"question":"1(a)","appliesTo":["1(a)"],"answer":"Gradient of $CE = 2.5$","codes":"B1","marks":1,"final":false,"page":4},
+      {"question":"1(a)","appliesTo":["1(a)"],"answer":"Gradient of $DE = 2.1$","codes":"B1","marks":1,"final":true,"page":4},
+      {"question":"1(b)","appliesTo":["1(b)"],"answer":"$f'(2) = 2$","codes":"B1","marks":1,"final":true,"guidance":"Accept reasonable conclusion following their gradient","page":4}
+    ]}
+    """;
+
+    [Fact]
+    public void Two_required_results_with_only_one_in_the_key_need_review_and_name_the_missing_one()
+    {
+        var (m, _) = CambridgeImportLogic.Match(new List<(string, int?)> { ("1(a)", 2), ("1(b)", 1) }, CambridgeImportLogic.ParseScheme(TwoResultsScheme));
+        var a = m[0];
+        Assert.Equal(ImportPartStatus.NeedsReview, a.Status);
+        Assert.Equal("Gradient of $DE = 2.1$", a.AnswerKey);                    // what was extracted, kept for the teacher to complete
+        Assert.Contains("asks for 2 separate results", a.Reason);
+        Assert.Contains("Missing: Gradient of $CE = 2.5$.", a.Reason);
+        Assert.Equal(ImportPartStatus.Matched, m[1].Status);
+    }
+
+    [Fact]
+    public void Two_required_results_both_marked_final_make_a_complete_key()
+    {
+        var scheme = CambridgeImportLogic.ParseScheme(TwoResultsScheme.Replace("\"final\":false", "\"final\":true"));
+        var a = CambridgeImportLogic.Match(new List<(string, int?)> { ("1(a)", 2) }, scheme).Matches[0];
+        Assert.Equal(ImportPartStatus.Matched, a.Status);
+        Assert.Equal("Gradient of $CE = 2.5$; Gradient of $DE = 2.1$", a.AnswerKey);
+        Assert.Null(a.Reason);
+    }
+
+    [Fact]
+    public void Two_ways_to_one_answer_are_one_result_not_an_incomplete_key()
+    {
+        var scheme = CambridgeImportLogic.ParseScheme("""
+        {"rows":[
+          {"question":"3","answer":"$7 + (n-1)d = 84$ and $7 + (3n-1)d = 245$","codes":"B1","marks":1,"page":5},
+          {"question":"3","answer":"Eliminate $d$","codes":"M1","marks":1,"page":5},
+          {"question":"3","answer":"$n = 12$","codes":"A1","marks":1,"final":true,"page":5},
+          {"question":"3","answer":"OR $2nd = 161$, so $n = 12$","codes":"M1 A1","marks":2,"final":true,"page":5},
+          {"question":"3","answer":"Use $u_{3n} - u_{n}$","codes":"M1","marks":1,"alternative":"Alternative method 1","page":5},
+          {"question":"3","answer":"$n = 12$","codes":"A1","marks":1,"final":true,"alternative":"Alternative method 1","page":5},
+          {"question":"4","answer":"$f^{-1}(x) = \\frac{x-2}{3}$","codes":"B1","marks":1,"page":5},
+          {"question":"4","answer":"$gf(x) = 4(3x+2) - 12$","codes":"B1","marks":1,"page":5},
+          {"question":"4","answer":"Equate, $x = \\frac{2}{7}$","codes":"M1 A1","marks":2,"final":true,"page":5}
+        ]}
+        """);
+        var (m, _) = CambridgeImportLogic.Match(new List<(string, int?)> { ("3", 3), ("4", 4) }, scheme);
+        Assert.Equal((ImportPartStatus.Matched, "$n = 12$", (string?)null), (m[0].Status, m[0].AnswerKey, m[0].Reason));
+        Assert.Equal(3, m[0].SchemeMarks);                                       // the "OR" row is another method, not added
+        Assert.Contains("(instead of the method above)", m[0].Criteria);
+        // B1 rows before a method mark are steps towards the one answer, not separate results.
+        Assert.Equal((ImportPartStatus.Matched, (string?)null), (m[1].Status, m[1].Reason));
+    }
+
+    [Fact]
+    public async Task After_completing_the_key_the_teacher_can_confirm_the_part()
+    {
+        _reader.Paper = TwoResultsPaper;
+        _reader.Scheme = TwoResultsScheme;
+        var svc = Svc();
+        var i = await ReadSchemeAsync(svc, await ReadPaperAsync(svc));
+        var a = i.Parts.Single(p => p.Number == "1(a)");
+        Assert.Equal(ImportPartStatus.NeedsReview, a.Status);
+        Assert.Contains("Missing: Gradient of $CE = 2.5$", a.ReviewReason);
+
+        Assert.Null(await svc.EditAsync(a, "Gradient of $CE = 2.5$; Gradient of $DE = 2.1$", a.Criteria, a.Marks));
+        Assert.Null(await svc.ConfirmAsync(a));
+        Assert.Equal((1, 0), ((await svc.SaveConfirmedAsync(i)).Saved, 0));
+        var q = await _factory.Context.Questions.SingleAsync();
+        Assert.Equal("Gradient of $CE = 2.5$; Gradient of $DE = 2.1$", q.AnswerKey);
+    }
+
+    // ── Drawn answers ────────────────────────────────────────────────────────────────────────────────────────────
+    [Theory]
+    [InlineData("Sketch the graph of $y = f^{-1}(x)$ on the diagram.", true, true, false)]
+    [InlineData("Hence sketch the curve, showing where it meets the axes.", true, true, false)]
+    [InlineData("On the diagram, shade the region $R$.", true, true, false)]
+    [InlineData("Find the area of the shaded region.", false, false, false)]       // the figure belongs to the question
+    [InlineData("Complete the table to show the gradients of $CE$ and $DE$.", false, false, false)]
+    [InlineData("Sketch the graph of $y = |2x - 3|$.", false, true, true)]          // says sketch, read as written
+    [InlineData("The diagram shows a sketch of the curve. Find the coordinates of $M$.", true, true, true)]  // read as drawn, text does not ask
+    public void A_drawn_answer_is_told_apart_from_a_figure_in_the_question(string text, bool readAsDrawing, bool drawing, bool unclear)
+    {
+        var f = CambridgeImportLogic.AnswerFormat(text, readAsDrawing);
+        Assert.Equal((drawing, unclear), (f.Drawing, f.Question is not null));
+        if (unclear) Assert.StartsWith(CambridgeImportLogic.FormatReasonPrefix, f.Question);
+    }
+
+    private const string DrawingPaper = """
+    {"questions":[{"number":8,"stem":"The diagram shows the graph of $y = f(x)$.","figure":{"page":3,"box":[0.1,0.1,0.9,0.5],"description":"The graph of y = f(x)"},"parts":[
+      {"label":"(a)","text":"State the range of $f$.","marks":1,"page":3,"usesFigure":true,"kind":"ShortAnswer","needsDrawing":false},
+      {"label":"(b)","text":"On the diagram, sketch the graph of $y = f^{-1}(x)$.","marks":2,"page":3,"usesFigure":true,"kind":"OpenText","needsDrawing":true},
+      {"label":"(c)","text":"Sketch the graph of $y = f(x) + 1$ on the same diagram.","marks":1,"page":3,"usesFigure":true,"kind":"ShortAnswer","needsDrawing":false}]}]}
+    """;
+    private const string DrawingScheme = """
+    {"rows":[
+      {"question":"8(a)","answer":"$-1 \\le f(x) \\le 3$","codes":"B1","marks":1,"final":true,"page":6},
+      {"question":"8(b)","answer":"Reflection of the curve in $y = x$","codes":"B1 B1","marks":2,"final":true,"page":6},
+      {"question":"8(c)","answer":"Curve translated up by 1","codes":"B1","marks":1,"final":true,"page":6}
+    ]}
+    """;
+
+    [Fact]
+    public async Task A_drawn_answer_reaches_the_assignment_as_a_sketch_pad_question_and_an_unclear_one_waits_for_the_teacher()
+    {
+        _reader.Paper = DrawingPaper;
+        _reader.Scheme = DrawingScheme;
+        var svc = Svc();
+        var i = await ReadSchemeAsync(svc, await ReadPaperAsync(svc));
+        var a = i.Parts.Single(p => p.Number == "8(a)");
+        var b = i.Parts.Single(p => p.Number == "8(b)");
+        var c = i.Parts.Single(p => p.Number == "8(c)");
+        Assert.Equal((false, ImportPartStatus.Matched), (a.NeedsDrawing, a.Status));   // uses the figure, answered in writing
+        Assert.Equal((true, ImportPartStatus.Matched), (b.NeedsDrawing, b.Status));
+        Assert.Null(b.FormatQuestion);
+
+        // The wording asks for a sketch but the reading said written: the teacher chooses, and cannot confirm first.
+        Assert.Equal(ImportPartStatus.NeedsReview, c.Status);
+        Assert.NotNull(c.FormatQuestion);
+        Assert.Equal(0, await svc.ConfirmMatchedAsync(i, new[] { c.Id }));
+        Assert.Equal("Choose a drawn or a written answer first.", await svc.ConfirmAsync(c));
+        Assert.Null(await svc.SetFormatAsync(c, drawing: true));
+        Assert.Equal((ImportPartStatus.Matched, (string?)null), (c.Status, c.FormatQuestion));
+
+        await LibraryFileStorage.SaveFigureAsync(_env, i.Id, "q8", new byte[] { 0x89, 0x50, 0x4E, 0x47, 9, 9 });
+        Assert.Equal(3, await svc.ConfirmMatchedAsync(i, i.Parts.Select(p => p.Id).ToList()));
+        await svc.SaveConfirmedAsync(i);
+        var saved = await _factory.Context.Questions.OrderBy(q => q.SourceKey).ToListAsync();
+        Assert.Equal(new[] { false, true, true }, saved.Select(q => q.RequireDrawing));
+        Assert.Equal(QuestionType.OpenText, saved[2].Type);
+
+        // In the assignment the drawn parts use the existing sketch pad, under the shared question with the figure.
+        var list = new List<JsonElement>();
+        await LibraryToAssignment.AddAsync(_env, Guid.NewGuid(), list, saved);
+        var dtos = JsonSerializer.Deserialize<List<SmartSchoolAI.Models.Dtos.QuestionDto>>(JsonSerializer.Serialize(list))!;
+        Assert.Equal(4, dtos.Count);
+        Assert.False(dtos[0].RequireDrawing);                                     // the shared question
+        Assert.Equal(new[] { false, true, true }, dtos.Skip(1).Select(d => d.RequireDrawing));
+        Assert.Equal(new[] { true, false, false }, dtos.Skip(1).Select(d => d.RequireWork));
+    }
 }

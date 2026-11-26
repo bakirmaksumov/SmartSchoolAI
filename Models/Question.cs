@@ -102,4 +102,8 @@ public class Question : BaseEntity
     /// <summary>Questions of one source question share this key ("…#10"), so parts added to the same assignment sit
     /// under one shared question with the stem and figure shown once.</summary>
     public string? SourceGroupKey { get; set; }
+
+    /// <summary>The student answers by drawing on the sketch pad (e.g. "Sketch the graph of y = f⁻¹(x) on this
+    /// diagram"); carried to the assignment question's "requireDrawing".</summary>
+    public bool RequireDrawing { get; set; }
 }

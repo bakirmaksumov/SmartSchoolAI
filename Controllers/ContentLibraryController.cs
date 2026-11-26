@@ -401,6 +401,7 @@ public class ContentLibraryController : Controller
         {
             if (Request.Form.TryGetValue("stem", out var stem)) question.Stem = string.IsNullOrWhiteSpace(stem) ? null : stem.ToString().Trim();
             if (Request.Form.TryGetValue("markScheme", out var ms)) question.MarkScheme = string.IsNullOrWhiteSpace(ms) ? null : ms.ToString().Trim();
+            if (Request.Form.ContainsKey("requireDrawingField")) question.RequireDrawing = Request.Form["requireDrawing"].Contains("true");
             if (Request.Form.TryGetValue("marks", out var mk))
                 question.Marks = int.TryParse(mk, out var m) && m is > 0 and <= 100 ? m : null;
         }

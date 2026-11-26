@@ -531,6 +531,9 @@ namespace SmartSchoolAI.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FormatQuestion")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("ImportId")
                         .HasColumnType("TEXT");
 
@@ -881,6 +884,9 @@ namespace SmartSchoolAI.Migrations
                     b.Property<string>("Options")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("RequireDrawing")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("SkillIds")
                         .IsRequired()

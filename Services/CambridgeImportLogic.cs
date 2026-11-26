@@ -121,6 +121,7 @@ public static class CambridgeImportLogic
                 var number = q.Number + Suffix(p.Label ?? "");
                 if (parts.Any(x => x.Number == number)) continue;   // a repeated label is read once
                 var figure = q.Figure is { Page: > 0, Box.Length: 4 } f ? f : null;
+                var format = AnswerFormat(p.Text, p.NeedsDrawing);
                 Guid? topic = null;
                 if (p.Topic is { } tn && topicsByNumber.TryGetValue(tn.Trim(), out var tid)
                     && !string.Equals(p.TopicConfidence, "low", StringComparison.OrdinalIgnoreCase))
@@ -135,7 +136,8 @@ public static class CambridgeImportLogic
                     Marks = p.Marks is > 0 ? p.Marks : null,
                     PaperPage = p.Page ?? figure?.Page,
                     Kind = string.Equals(p.Kind, "OpenText", StringComparison.OrdinalIgnoreCase) ? "OpenText" : "ShortAnswer",
-                    NeedsDrawing = p.NeedsDrawing,
+                    NeedsDrawing = format.Drawing,
+                    FormatQuestion = format.Question,
                     // The figure belongs to the question; every part of it keeps access to it.
                     FigureKey = figure is null ? null : $"q{q.Number}",
                     FigureBox = figure is null ? null : JsonSerializer.Serialize(new { page = figure.Page, box = figure.Box }),
@@ -196,16 +198,22 @@ public static class CambridgeImportLogic
                 continue;
             }
 
-            var main = exact.Where(r => string.IsNullOrWhiteSpace(r.Row.Alternative)).Select(r => r.Row).ToList();
-            var alternatives = exact.Where(r => !string.IsNullOrWhiteSpace(r.Row.Alternative)).Select(r => r.Row)
-                                    .GroupBy(r => r.Alternative!.Trim()).ToList();
+            var main = exact.Where(r => !IsAlternative(r.Row)).Select(r => r.Row).ToList();
+            var alternatives = exact.Where(r => IsAlternative(r.Row)).Select(r => r.Row)
+                                    .GroupBy(r => string.IsNullOrWhiteSpace(r.Alternative) ? "Alternative method" : r.Alternative!.Trim()).ToList();
             var shared = exact.Where(r => r.Targets.Count > 1).ToList();
             var schemeMarks = main.Sum(r => r.Marks);
 
-            var final = main.Where(r => r.Final && !string.IsNullOrWhiteSpace(r.Answer)).Select(r => r.Answer!.Trim()).Distinct().ToList();
+            // The same answer reached by two methods is one answer; distinct final answers of the main method are
+            // separate results the question asks for ("the gradients of CE and DE") and all belong in the key.
+            var final = main.Where(r => r.Final && !string.IsNullOrWhiteSpace(r.Answer)).Select(r => r.Answer!.Trim()).DistinctBy(Canon).ToList();
+            var required = RequiredResults(main, final);
             string? key = final.Count == 1 ? final[0]
-                : final.Count == 0 && main.Count(r => !string.IsNullOrWhiteSpace(r.Answer)) == 1 ? main.First(r => !string.IsNullOrWhiteSpace(r.Answer)).Answer!.Trim()
+                : final.Count > 1 ? string.Join("; ", final)
+                : required.Count > 1 ? string.Join("; ", required)
+                : main.Count(r => !string.IsNullOrWhiteSpace(r.Answer)) == 1 ? main.First(r => !string.IsNullOrWhiteSpace(r.Answer)).Answer!.Trim()
                 : null;
+            var missing = key is null ? new List<string>() : required.Where(r => !KeyHas(key, r)).ToList();
 
             if (shared.Count > 0)
                 reasons.Add($"One mark scheme row covers {string.Join(" and ", shared.SelectMany(r => r.Targets).Distinct())}; check how its marks split.");
@@ -215,10 +223,11 @@ public static class CambridgeImportLogic
                 reasons.Add("Only alternative methods were found; choose the method to use.");
             foreach (var r in exact.Where(r => r.Row.Unreadable).Select(r => r.Row))
                 reasons.Add($"A formula on mark scheme p.{r.Page?.ToString() ?? "?"} could not be read.");
+            if (missing.Count > 0)
+                reasons.Add($"Incomplete answer key: the mark scheme asks for {required.Count} separate results " +
+                            $"({string.Join("; ", required)}), but the key has only {key}. Missing: {string.Join("; ", missing)}.");
             if (key is null)
-                reasons.Add(final.Count > 1
-                    ? "The mark scheme gives more than one final answer; choose the key."
-                    : "The mark scheme gives no single final answer; decide the key from the criteria.");
+                reasons.Add("The mark scheme gives no single final answer; decide the key from the criteria.");
 
             var pages = exact.Select(r => r.Row.Page).Where(p => p is > 0).Select(p => p!.Value).Distinct().OrderBy(p => p).ToList();
             matches.Add(new PartMatch(number,
@@ -231,6 +240,72 @@ public static class CambridgeImportLogic
 
         var unused = rows.Where(r => !r.Targets.Any(numbers.Contains)).Select(r => r.Row.Question).Distinct().ToList();
         return (matches, unused);
+    }
+
+    // ── Required results ─────────────────────────────────────────────────────────────────────────────────────────
+    /// <summary>A row of another method: under an "Alternative method" heading, or printed as "OR …".</summary>
+    private static bool IsAlternative(SchemeRow r) =>
+        !string.IsNullOrWhiteSpace(r.Alternative) || Regex.IsMatch(r.Answer ?? "", @"^\s*(OR\b|Alt(ernative)?\b)", RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// The separate results a subpart's main method requires, when it requires more than one: its distinct final
+    /// answers, or — for a subpart marked by independent B marks only (no method marks, so no row is a step towards
+    /// another) — each answered row, as in "B1 gradient of CE = 2.5", "B1 gradient of DE = 2.1".
+    /// </summary>
+    private static List<string> RequiredResults(List<SchemeRow> main, List<string> finals)
+    {
+        var independent = main.Count >= 2 && main.All(r => IsIndependentMark(r.Codes))
+            ? main.Where(r => !string.IsNullOrWhiteSpace(r.Answer)).Select(r => r.Answer!.Trim()).DistinctBy(Canon).ToList()
+            : new List<string>();
+        var list = independent.Count > finals.Count ? independent : finals;
+        return list.Count > 1 ? list : new List<string>();
+    }
+
+    private static bool IsIndependentMark(string? codes)
+    {
+        var tokens = Regex.Split(codes ?? "", @"[\s,;]+").Where(t => t.Length > 0).ToList();
+        return tokens.Count > 0 && tokens.All(t => Regex.IsMatch(t, @"^B\d+(FT)?$", RegexOptions.IgnoreCase));
+    }
+
+    /// <summary>The key states this result: the whole result, or its value after "=" (at least two characters and
+    /// not inside a longer number, so "2" is not found in "2.5").</summary>
+    private static bool KeyHas(string key, string result)
+    {
+        var k = Canon(key);
+        var r = Canon(result);
+        if (k.Contains(r)) return true;
+        var eq = r.LastIndexOf('=');
+        var value = eq >= 0 ? r[(eq + 1)..] : "";
+        return value.Length >= 2 && Regex.IsMatch(k, $@"(^|[^0-9.]){Regex.Escape(value)}($|[^0-9])");
+    }
+
+    /// <summary>Lower case, no spaces and no $ delimiters, for comparing answers.</summary>
+    private static string Canon(string s) => Regex.Replace(s, @"[\s$]+", "").ToLowerInvariant();
+
+    // ── Answer format ────────────────────────────────────────────────────────────────────────────────────────────
+    /// <summary>Starts the review reason while the answer format still needs the teacher's choice.</summary>
+    public const string FormatReasonPrefix = "Answer format: ";
+
+    // An instruction to draw: the verb opens the sentence or a clause ("Sketch …", "Hence draw …", "On the diagram,
+    // sketch …"), never a noun describing the paper's own figure ("The diagram shows a sketch of …").
+    private static readonly Regex DrawTask = new(
+        @"(?:^|[.;:!?]\s+|,\s*|\b(?:and|hence|then|also)\s+)(sketch|draw|plot|shade|construct|complete\s+the\s+(?:graph|diagram|sketch|grid))\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    public sealed record FormatCheck(bool Drawing, string? Question);
+
+    /// <summary>
+    /// Whether the student answers a subpart by drawing (the existing sketch pad over the question's figure) or in
+    /// writing. A figure printed in the question is not a drawing task. When the wording and the reader disagree,
+    /// the format is left for the teacher to choose (<see cref="FormatCheck.Question"/>), with drawing proposed.
+    /// </summary>
+    public static FormatCheck AnswerFormat(string? text, bool readAsDrawing)
+    {
+        var task = DrawTask.Match(text ?? "");
+        if (task.Success == readAsDrawing) return new FormatCheck(readAsDrawing, null);
+        return task.Success
+            ? new FormatCheck(true, $"{FormatReasonPrefix}the part says “{task.Groups[1].Value} …” but was read as a written answer. Choose a drawn or a written answer.")
+            : new FormatCheck(true, $"{FormatReasonPrefix}the part was read as a drawn answer, but its text does not ask the student to draw — the figure may only belong to the question. Choose a drawn or a written answer.");
     }
 
     /// <summary>One number is the other's parent ("10(b)" and "10(b)(i)").</summary>

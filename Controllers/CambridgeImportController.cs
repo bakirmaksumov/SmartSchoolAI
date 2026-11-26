@@ -307,6 +307,21 @@ public class CambridgeImportController : Controller
         return BackToPart(id, partId, filter);
     }
 
+    [HttpPost("{id:guid}/Format")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Format(Guid id, Guid partId, string? format, string? filter)
+    {
+        var i = await Mine(id);
+        var p = i?.Parts.FirstOrDefault(x => x.Id == partId);
+        if (i is null || p is null) return NotFound();
+        if (format is not ("drawn" or "written")) TempData["Error"] = "Choose a drawn or a written answer.";
+        else if (await _imports.SetFormatAsync(p, format == "drawn") is { } error) TempData["Error"] = error;
+        else TempData["Success"] = format == "drawn"
+            ? $"{p.Number}: the student draws the answer on the sketch pad."
+            : $"{p.Number}: the student writes the answer.";
+        return BackToPart(id, partId, filter);
+    }
+
     [HttpPost("{id:guid}/Resolve")]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Resolve(Guid id, Guid partId, bool useNew, string? filter)

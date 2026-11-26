@@ -111,7 +111,11 @@ public class CambridgeImportPart : BaseEntity
     public int?    PaperPage { get; set; }
     /// <summary>"ShortAnswer" or "OpenText" (show that / sketch / explain).</summary>
     public string  Kind  { get; set; } = "ShortAnswer";
+    /// <summary>The student answers by drawing on the sketch pad (over the question's figure, when it has one).</summary>
     public bool    NeedsDrawing { get; set; }
+    /// <summary>Set while the answer format is unclear (the wording and the reading disagree): why, for the teacher
+    /// to choose a drawn or a written answer on the review step. Null once clear or chosen.</summary>
+    public string? FormatQuestion { get; set; }
 
     /// <summary>The figure this subpart uses (shared by the question's parts), as a key into the import's figures.</summary>
     public string? FigureKey  { get; set; }

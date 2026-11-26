@@ -82,7 +82,9 @@ public class OpenRouterCambridgeReader : ICambridgeAiReader
           "box" [left, top, right, bottom] as fractions (0–1) of the page width and height, generously including
           labels, and a one-sentence "description". Otherwise null. Parts that refer to the figure set "usesFigure".
         - "kind": "OpenText" for show that / prove / sketch / describe / explain; otherwise "ShortAnswer".
-          "needsDrawing": true when the answer is a sketch or drawing.
+          "needsDrawing": true only when the STUDENT must answer by drawing ("Sketch the graph …", "On the diagram,
+          draw …", "Shade the region …", "Plot …"). A diagram or graph printed in the question for the student to use
+          ("The diagram shows a sketch of …") is a figure, not a drawing task: needsDrawing false.
         - "topic": the number of the ONE syllabus topic (from the list given) this subpart mainly assesses, and
           "topicConfidence": "high" or "low". Use null when no listed topic fits.
 
@@ -109,7 +111,9 @@ public class OpenRouterCambridgeReader : ICambridgeAiReader
           units and rounding instructions exactly.
         - "alternative": null for the main method; for rows under "Alternative method …" the heading text, e.g.
           "Alternative method 1". Alternative methods are never added to the main method.
-        - "final": true on the row that gives the subpart's final answer.
+        - "final": true on every row that states a result the subpart asks for. A subpart asking for two separate
+          results ("the gradients of CE and DE", "the coefficients of x^{2} and x^{3}") has two final rows. A second
+          way of reaching the same answer is an alternative method, not a second final row.
         - "unreadable": true when a formula or value in the row cannot be read reliably.
         - "page": the 1-based PDF page of the row.
 

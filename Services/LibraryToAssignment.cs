@@ -51,7 +51,8 @@ public static class LibraryToAssignment
                 visualState = q.VisualState,
                 marks       = q.Marks,
                 markScheme  = q.MarkScheme,
-                requireWork = q.SourceKey is not null,      // exam questions are marked on the working
+                requireWork = q.SourceKey is not null && !q.RequireDrawing,   // exam questions are marked on the working
+                requireDrawing = q.RequireDrawing,          // answered on the sketch pad over the shared figure
                 syllabusTopicId = q.SyllabusTopicId,        // the teacher's "Aligned to Cambridge" link travels with the question
             });
             // Keep a group's parts together, right after the shared question and its other parts.

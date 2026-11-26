@@ -100,12 +100,17 @@
         <div class="d-flex flex-wrap align-items-center gap-2 mb-3 pb-2 border-bottom">
           <h4 class="mb-0 me-2" id="detailNumber">@part.Number</h4>
           <span class="badge @StatusBadge(part) fs-6" id="detailStatus"><i class="bx @StatusIcon(part) me-1" aria-hidden="true"></i>@StatusText(part)</span>
-          <span class="ms-auto text-muted small">@(part.Marks is > 0 ? $"{part.Marks} marks" : "marks not printed")@(part.SchemeMarks is { } sm && sm != part.Marks ? $" · scheme {sm}" : "")</span>
+          <span class="ms-auto text-muted small">@(part.Marks is > 0 ? $"{part.Marks} mark{(part.Marks == 1 ? "" : "s")}" : "marks not printed")@(part.SchemeMarks is { } sm && sm != part.Marks ? $" · scheme {sm}" : "")</span>
         </div>
 
         @if (part.ReviewReason is not null && part.Status != ImportPartStatus.Saved)
         {
-          <div class="alert alert-warning small py-2" id="reviewReason"><i class="bx bx-error me-1" aria-hidden="true"></i>@part.ReviewReason</div>
+          <div class="alert alert-warning small py-2" id="reviewReason"><i class="bx bx-error me-1" aria-hidden="true"></i><span class="math-text">@part.ReviewReason</span></div>
+        }
+
+        @if (part.FormatQuestion is not null && part.Status != ImportPartStatus.Saved)
+        {
+          <div class="alert alert-warning small py-2" id="formatPending"><i class="bx bx-pencil me-1" aria-hidden="true"></i>Choose the answer format: drawn or written. <a href="#answerFormat">Answer format</a></div>
         }
 
         <!-- Topic -->
@@ -126,6 +131,34 @@
         @if (part.FigureKey is not null && figures.Contains(part.FigureKey))
         { <img class="ci-figure mb-2" id="detailFigure" src="/CambridgeImport/@Model.Id/Figure/@part.FigureKey" alt="Figure: @part.FigureDescription" /> }
         <div class="mb-3 math-text math-block" id="detailText">@part.Text</div>
+
+        <!-- Answer format: written, or drawn on the sketch pad (over the question's figure, when it has one) -->
+        @if (part.Status == ImportPartStatus.Saved)
+        {
+          <p class="small mb-3" id="answerFormat"><span class="fw-semibold me-2">Answer format</span>@(part.NeedsDrawing ? "Drawn on the sketch pad" : "Written")</p>
+        }
+        else
+        {
+          <form method="post" action="/CambridgeImport/@Model.Id/Format" id="answerFormat"
+                class="mb-3 @(part.FormatQuestion is not null ? "alert alert-warning py-2" : "")">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="partId" value="@part.Id" /><input type="hidden" name="filter" value="@filter" />
+            @if (part.FormatQuestion is not null)
+            { <div class="small mb-2" id="formatQuestion"><i class="bx bx-pencil me-1" aria-hidden="true"></i><span class="math-text">@part.FormatQuestion</span></div> }
+            <fieldset class="d-flex flex-wrap align-items-center gap-3">
+              <legend class="fw-semibold fs-6 mb-0 me-1 float-none w-auto">Answer format</legend>
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="radio" name="format" value="written" id="formatWritten" @(part.NeedsDrawing ? null : "checked") />
+                <label class="form-check-label" for="formatWritten">Written answer</label>
+              </div>
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="radio" name="format" value="drawn" id="formatDrawn" @(part.NeedsDrawing ? "checked" : null) />
+                <label class="form-check-label" for="formatDrawn">Drawn on the sketch pad@(part.FigureKey is not null ? " (over the figure)" : "")</label>
+              </div>
+              <button type="submit" class="btn btn-sm @(part.FormatQuestion is not null ? "btn-warning" : "btn-outline-secondary")" id="saveFormat">@(part.FormatQuestion is not null ? "Use this format" : "Change format")</button>
+            </fieldset>
+          </form>
+        }
 
         <!-- Answer key -->
         <h6 class="text-muted text-uppercase small mb-1">Answer key@(part.EditedByTeacher ? " (edited)" : part.Status == ImportPartStatus.Confirmed || part.Status == ImportPartStatus.Saved ? "" : " (draft)")</h6>
@@ -181,7 +214,8 @@
             <form method="post" action="/CambridgeImport/@Model.Id/Confirm" class="text-end">
               @Html.AntiForgeryToken()
               <input type="hidden" name="partId" value="@part.Id" /><input type="hidden" name="filter" value="@filter" />
-              <button type="submit" class="btn btn-outline-primary" id="confirmPart" disabled="@(pending is not null)"><i class="bx bx-check me-1" aria-hidden="true"></i>Confirm part</button>
+              <button type="submit" class="btn btn-outline-primary" id="confirmPart" disabled="@(pending is not null || part.FormatQuestion is not null)"
+                      title="@(part.FormatQuestion is not null ? "Choose the answer format first" : null)"><i class="bx bx-check me-1" aria-hidden="true"></i>Confirm part</button>
             </form>
           }
           else

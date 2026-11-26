@@ -358,6 +358,11 @@
                 <textarea class="form-control" id="examMarkScheme" name="markScheme" rows="5">@Model.MarkScheme</textarea>
               </div>
             </div>
+            <input type="hidden" name="requireDrawingField" value="1" />
+            <div class="form-check mt-3">
+              <input class="form-check-input" type="checkbox" id="examRequireDrawing" name="requireDrawing" value="true" @(Model.RequireDrawing ? "checked" : null) />
+              <label class="form-check-label" for="examRequireDrawing">The student draws the answer on the sketch pad (over the figure, when there is one)</label>
+            </div>
           </div>
         </div>
       }
