@@ -1,0 +1,52 @@
+/* Import Cambridge Paper wizard. Colours come from the theme (Bootstrap/Sneat variables) so dark mode follows. */
+.ci-stepper { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .5rem; list-style: none; padding: 0; margin: 0 0 1.5rem; }
+.ci-step { display: flex; align-items: center; gap: .5rem; padding: .35rem .75rem .35rem .35rem; border-radius: 2rem; color: var(--bs-secondary-color, #6c757d); }
+.ci-step a { color: inherit; text-decoration: none; }
+.ci-step a:hover .ci-step-name, .ci-step a:focus-visible .ci-step-name { text-decoration: underline; }
+.ci-step-mark { width: 2rem; height: 2rem; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  border: 2px solid currentColor; font-weight: 600; flex: none; background: var(--bs-body-bg, #fff); }
+.ci-step.is-done { color: var(--bs-body-color, #384551); }
+.ci-step.is-done .ci-step-mark { background: #71dd37; border-color: #71dd37; color: #fff; }
+.ci-step.is-current { background: rgba(105, 108, 255, .12); color: var(--bs-primary, #696cff); font-weight: 600; }
+.ci-step.is-current .ci-step-mark { background: var(--bs-primary, #696cff); border-color: var(--bs-primary, #696cff); color: #fff; }
+.ci-step-line { width: 2.5rem; height: 2px; background: var(--bs-border-color, #d9dee3); }
+.ci-step-line.is-done { background: #71dd37; }
+@media (max-width: 575.98px) { .ci-step-line { display: none; } .ci-step { padding-right: .5rem; } .ci-step-name { font-size: .85rem; } }
+
+.ci-figure { max-width: 100%; max-height: 22rem; border: 1px solid var(--bs-border-color, #d9dee3); border-radius: .375rem; background: #fff; }
+.ci-stem { border-left: 3px solid var(--bs-border-color, #d9dee3); padding-left: .75rem; }
+.ci-part { border-top: 1px solid var(--bs-border-color, #d9dee3); padding: .75rem 0; }
+.ci-part:first-of-type { border-top: 0; }
+.ci-topic { font-size: .875rem; }
+.math-block { white-space: pre-wrap; }
+
+/* Step 3: list and detail side by side on wide screens; one at a time on phones. */
+.ci-review { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 1rem; align-items: start; }
+.ci-list-table td, .ci-list-table th { vertical-align: middle; }
+.ci-list-table tr.is-selected { background: rgba(255, 171, 0, .10); box-shadow: inset 3px 0 0 #ffab00; }
+.ci-list-table a.ci-row-link { color: inherit; font-weight: 600; text-decoration: none; display: inline-block; min-width: 3.5rem; padding: .25rem 0; }
+.ci-list-table a.ci-row-link:focus-visible { outline: 2px solid var(--bs-primary, #696cff); outline-offset: 2px; }
+.ci-status { white-space: nowrap; }
+.ci-detail { position: sticky; top: 5rem; }
+.ci-source-links a { white-space: nowrap; }
+.ci-diff { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.ci-diff > div { border: 1px solid var(--bs-border-color, #d9dee3); border-radius: .375rem; padding: .5rem .75rem; }
+.ci-actionbar { position: sticky; bottom: 0; z-index: 5; background: var(--bs-body-bg, #fff); border-top: 1px solid var(--bs-border-color, #d9dee3);
+  padding: .75rem 0; margin-top: 1rem; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+@media (max-width: 991.98px) {
+  .ci-review { grid-template-columns: minmax(0, 1fr); }
+  .ci-review.has-part .ci-list { display: none; }
+  .ci-review:not(.has-part) .ci-detail { display: none; }
+  .ci-detail { position: static; }
+  .ci-diff { grid-template-columns: 1fr; }
+}
+@media (min-width: 992px) { .ci-back-to-list { display: none !important; } }
+
+/* The theme capitalises badges and table headings; statuses and part numbers read as written (as in the design). */
+.ci-review .badge, .ci-status, #detailStatus, .ci-list-table th, .ci-part .badge, #detailsUnchecked { text-transform: none; letter-spacing: normal; }
+.ci-list-table th { font-size: .8125rem; }
+/* The theme fades every card in on load; on the review screen each click reloads the page, so the list would fade in
+   again every time — show it at once instead. */
+.ci-review .card { animation: none; }
+/* Keep the main button clear of the floating chat button in the bottom-right corner. */
+.ci-actionbar { padding-right: 4.75rem; }

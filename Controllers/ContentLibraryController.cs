@@ -170,7 +170,8 @@ public class ContentLibraryController : Controller
         int?    page       = null,
         Guid?   syllabusVersion   = null,
         Guid?   syllabusComponent = null,
-        Guid?   syllabusTopic     = null)
+        Guid?   syllabusTopic     = null,
+        Guid?   cambridgeImport   = null)
     {
         // A teacher's own questions, plus anything another teacher chose to
         // share ("Make visible to other teachers" — IsPublic). Without this,
@@ -191,6 +192,16 @@ public class ContentLibraryController : Controller
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(q => q.Title.Contains(search));
 
+        // "View questions" after a Cambridge import: exactly the questions that import saved (the teacher's own).
+        if (cambridgeImport is { } importId)
+        {
+            var imp = await _db.CambridgeImports.Include(i => i.Parts)
+                .FirstOrDefaultAsync(i => i.Id == importId && i.OwnerId == CurrentUserId);
+            var savedIds = imp?.Parts.Where(p => p.SavedQuestionId != null).Select(p => p.SavedQuestionId!.Value).ToList() ?? new();
+            query = query.Where(q => savedIds.Contains(q.Id));
+            ViewBag.CambridgeImportFilter = imp?.Label ?? "an import";
+        }
+
         // Syllabus filters: only questions a teacher explicitly linked to a topic — a free-text subject such as
         // "Quadratics" does not count. The narrowest filter given wins.
         if (syllabusTopic.HasValue)
@@ -207,6 +218,10 @@ public class ContentLibraryController : Controller
         ViewBag.Page = pageInfo;
         ViewBag.SyllabusLabels = await Syllabus.LabelsAsync(questions.Where(q => q.SyllabusTopicId.HasValue).Select(q => q.SyllabusTopicId!.Value));
         ViewBag.SyllabusCatalog = await Syllabus.CatalogAsync();
+        if (assignmentId is null)
+            ViewBag.CambridgeDrafts = await _db.CambridgeImports.Include(i => i.Parts)
+                .Where(i => i.OwnerId == CurrentUserId && (!i.Parts.Any() || i.Parts.Any(p => p.Status != ImportPartStatus.Saved)))
+                .OrderByDescending(i => i.UpdatedAt ?? i.CreatedAt).Take(5).AsSplitQuery().ToListAsync();
         ViewBag.CurrentSyllabusVersion   = syllabusVersion;
         ViewBag.CurrentSyllabusComponent = syllabusComponent;
         ViewBag.CurrentSyllabusTopic     = syllabusTopic;
@@ -381,6 +396,14 @@ public class ContentLibraryController : Controller
         // the question text, its answer and marks are untouched by it.
         if (Request.HasFormContentType && Request.Form.ContainsKey("syllabusTopicId"))
             question.SyllabusTopicId = await LinkableTopicAsync(syllabusTopicId, question.SyllabusTopicId);
+        // Exam-paper fields are on the form only for such questions; an older form without them changes nothing.
+        if (Request.HasFormContentType)
+        {
+            if (Request.Form.TryGetValue("stem", out var stem)) question.Stem = string.IsNullOrWhiteSpace(stem) ? null : stem.ToString().Trim();
+            if (Request.Form.TryGetValue("markScheme", out var ms)) question.MarkScheme = string.IsNullOrWhiteSpace(ms) ? null : ms.ToString().Trim();
+            if (Request.Form.TryGetValue("marks", out var mk))
+                question.Marks = int.TryParse(mk, out var m) && m is > 0 and <= 100 ? m : null;
+        }
         question.UpdatedAt   = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -416,29 +439,20 @@ public class ContentLibraryController : Controller
     public async Task<IActionResult> AttachToAssignment(Guid questionId, Guid assignmentId)
     {
         var question   = await FindOwnedQuestionAsync(questionId);
-        var assignment = await _db.Assignments
-            .FirstOrDefaultAsync(a => a.Id == assignmentId
-                && (a.TeacherId == CurrentUserId
-                    || a.Class.TeacherId == CurrentUserId
-                    || a.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
+        var assignment = await _db.Assignments.AccessibleBy(CurrentUserId).FirstOrDefaultAsync(a => a.Id == assignmentId);
         if (question is null || assignment is null) return NotFound();
+        // Same rule as the assignment editor: once work has been handed in (or the assignment is closed) its
+        // questions are frozen.
+        var submitted = await _db.StudentResults.AnyAsync(r => r.AssignmentId == assignmentId && r.IsSubmitted);
+        if (!assignment.AllowsQuestionEditing(submitted))
+        {
+            TempData["Error"] = "This assignment's questions can no longer be changed.";
+            return RedirectToAction(nameof(Index), new { assignmentId });
+        }
 
         var list = JsonSerializer.Deserialize<List<JsonElement>>(assignment.Questions ?? "[]")
                    ?? new List<JsonElement>();
-
-        var qObj = new
-        {
-            id          = question.Id,
-            title       = question.Title,
-            type        = question.Type.ToString(),
-            difficulty  = question.Difficulty.ToString(),
-            answerKey   = question.AnswerKey,
-            options     = JsonSerializer.Deserialize<List<string>>(question.Options) ?? new List<string>(),
-            visualState = question.VisualState,
-            syllabusTopicId = question.SyllabusTopicId
-        };
-        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(qObj));
-        list.Add(doc.RootElement.Clone());
+        await LibraryToAssignment.AddAsync(_env, assignment.Id, list, new[] { question });
 
         assignment.Questions = JsonSerializer.Serialize(list);
         assignment.UpdatedAt = DateTime.UtcNow;
@@ -446,6 +460,18 @@ public class ContentLibraryController : Controller
 
         TempData["Success"] = $"'{question.Title}' added to assignment.";
         return RedirectToAction("Edit", "Assignments", new { id = assignmentId });
+    }
+
+    // ── GET /ContentLibrary/Figure/{id} — a library question's figure (own or shared questions only) ──────────
+
+    [HttpGet("/ContentLibrary/Figure/{id:guid}")]
+    public async Task<IActionResult> Figure(Guid id)
+    {
+        var path = await _db.Questions.UsableBy(CurrentUserEmail).Where(q => q.Id == id).Select(q => q.ImagePath).FirstOrDefaultAsync();
+        var bytes = SmartSchoolAI.Services.LibraryFileStorage.ReadLibraryFigure(_env, path);
+        if (bytes is null) return NotFound();
+        Response.Headers.CacheControl = "private, no-store";
+        return File(bytes, "image/png");
     }
 
     // ── GET /ContentLibrary/GetQuestions (JSON API for Assignment modal) ───────

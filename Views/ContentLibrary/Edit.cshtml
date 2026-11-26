@@ -333,6 +333,35 @@
         </div>
       </div>
 
+      @if (Model.SourceLabel is not null || Model.Stem is not null || Model.Marks is not null || Model.MarkScheme is not null)
+      {
+        <!-- Exam paper part: its shared stem, figure, marks and marking criteria -->
+        <div class="card mb-4" id="examPartCard">
+          <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+            <h6 class="mb-0 me-auto"><i class="bx bx-file me-2 text-primary"></i>Exam paper part</h6>
+            @if (Model.SourceLabel is not null) { <span class="badge bg-label-secondary" id="examSource">@Model.SourceLabel</span> }
+          </div>
+          <div class="card-body">
+            <label class="form-label small fw-semibold" for="examStem">Shared question text (stem)</label>
+            <textarea class="form-control mb-2" id="examStem" name="stem" rows="3">@Model.Stem</textarea>
+            @if (Model.ImagePath is not null)
+            {
+              <img src="@Model.ImagePath" alt="Figure of this question" class="img-fluid border rounded mb-3" style="max-height:18rem" id="examFigure" />
+            }
+            <div class="row g-2">
+              <div class="col-sm-3">
+                <label class="form-label small fw-semibold" for="examMarks">Marks</label>
+                <input class="form-control" id="examMarks" name="marks" type="number" min="1" max="100" value="@Model.Marks" />
+              </div>
+              <div class="col-sm-9">
+                <label class="form-label small fw-semibold" for="examMarkScheme">Marking criteria (used by the marker)</label>
+                <textarea class="form-control" id="examMarkScheme" name="markScheme" rows="5">@Model.MarkScheme</textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+      }
+
       <!-- Answer Key -->
       <div class="card mb-4" id="answerKeyCard">
         <div class="card-header">

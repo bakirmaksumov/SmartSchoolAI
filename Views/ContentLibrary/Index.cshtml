@@ -43,12 +43,45 @@
       </h4>
     }
   </div>
-  <div class="col-auto">
+  <div class="col-auto d-flex flex-wrap gap-2">
     <a href="/ContentLibrary/Create@(pickerMode ? $"?assignmentId={assignmentId}" : "")" class="btn btn-primary">
       <i class="bx bx-plus me-1"></i> @(pickerMode ? "Create new question" : "Add Question")
     </a>
+    @if (!pickerMode)
+    {
+      <a href="/CambridgeImport" class="btn btn-outline-primary" id="importCambridgeBtn">
+        <i class="bx bx-file me-1" aria-hidden="true"></i> Import Cambridge Paper
+      </a>
+    }
   </div>
 </div>
+
+@if (!pickerMode && ViewBag.CambridgeDrafts is List<SmartSchoolAI.Models.CambridgeImport> { Count: > 0 } drafts)
+{
+  <div class="card mb-4 border-primary-subtle" id="cambridgeDrafts">
+    <div class="card-body py-3">
+      <h6 class="mb-2"><i class="bx bx-time-five me-1" aria-hidden="true"></i>Cambridge paper imports in progress</h6>
+      <ul class="list-unstyled mb-0">
+        @foreach (var d in drafts)
+        {
+          var lastStep = d.LastCompletedStep == 0 ? "Not started yet" : $"Last completed: {SmartSchoolAI.Controllers.CambridgeImportController.StepNames[Math.Min(d.LastCompletedStep, 4) - 1]}";
+          <li class="d-flex flex-wrap align-items-center gap-2 py-1 border-top" data-draft="@d.Id">
+            <span class="fw-semibold me-auto">@d.Label <span class="text-muted fw-normal small">· @d.PaperFileName</span></span>
+            <span class="small text-muted" data-draft-step>@lastStep</span>
+            <a class="btn btn-sm btn-primary" href="/CambridgeImport/@d.Id/@SmartSchoolAI.Controllers.CambridgeImportController.ContinueAction(d)">Continue import</a>
+          </li>
+        }
+      </ul>
+    </div>
+  </div>
+}
+@if (ViewBag.CambridgeImportFilter is string importLabel)
+{
+  <div class="alert alert-info d-flex flex-wrap align-items-center gap-2" id="importedFilter">
+    <span class="me-auto">Showing the questions saved from <strong>@importLabel</strong>.</span>
+    <a href="/ContentLibrary" class="btn btn-sm btn-outline-secondary">Show all questions</a>
+  </div>
+}
 
 <!-- Filters -->
 <div class="card mb-4">
@@ -260,6 +293,10 @@ else
                 @if (q.SyllabusTopicId is { } stid && syllabusLabels.TryGetValue(stid, out var sl))
                 {
                   <span class="badge bg-label-info syllabus-chip d-inline-block mt-1" title="Aligned to Cambridge @sl.Code: @sl.Full" data-syllabus-label>@sl.Short</span>
+                }
+                @if (q.SourceLabel is not null)
+                {
+                  <span class="badge bg-label-secondary syllabus-chip d-inline-block mt-1" data-source-label>@q.SourceLabel@(q.Marks is > 0 ? $" · [{q.Marks}]" : "")</span>
                 }
               </td>
               <td>

@@ -1,0 +1,65 @@
+@{
+    ViewData["Title"] = "Import Cambridge Paper";
+    var drafts = ViewBag.Drafts as List<SmartSchoolAI.Models.CambridgeImport> ?? new();
+}
+<link rel="stylesheet" href="~/css/cambridge-import.css" asp-append-version="true" />
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb mb-1">
+    <li class="breadcrumb-item"><a href="/ContentLibrary">Content Library</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Import Cambridge Paper</li>
+  </ol>
+</nav>
+<h4 class="fw-bold mb-3">Import Cambridge Paper</h4>
+
+<ol class="ci-stepper" aria-label="Import steps" id="importSteps">
+  <li class="ci-step is-current" aria-current="step" data-step="1"><span class="ci-step-mark">1</span> <span class="ci-step-name">Question Paper</span></li>
+  <li class="ci-step-line" aria-hidden="true"></li>
+  <li class="ci-step" data-step="2"><span class="ci-step-mark">2</span> <span class="ci-step-name">Mark Scheme</span></li>
+  <li class="ci-step-line" aria-hidden="true"></li>
+  <li class="ci-step" data-step="3"><span class="ci-step-mark">3</span> <span class="ci-step-name">Review answer keys</span></li>
+  <li class="ci-step-line" aria-hidden="true"></li>
+  <li class="ci-step" data-step="4"><span class="ci-step-mark">4</span> <span class="ci-step-name">Finish</span></li>
+</ol>
+
+<div class="row g-4">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Question Paper</h5>
+        <p class="text-muted small mb-3">
+          Cambridge International AS &amp; A Level Mathematics (9709). The questions are read with AI, and each subpart gets
+          a suggested syllabus topic for you to check. You can add the Mark Scheme now or days later — the draft is kept.
+        </p>
+        <form method="post" action="/CambridgeImport/Start" enctype="multipart/form-data" id="paperUploadForm">
+          @Html.AntiForgeryToken()
+          <label class="form-label" for="paperFile">Question Paper (PDF)</label>
+          <input class="form-control mb-3" type="file" id="paperFile" name="paper" accept="application/pdf,.pdf" required />
+          <button type="submit" class="btn btn-primary"><i class="bx bx-upload me-1" aria-hidden="true"></i>Read the paper</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Your drafts</h5>
+        @if (drafts.Count == 0)
+        {
+          <p class="text-muted small mb-0">No import in progress.</p>
+        }
+        else
+        {
+          <ul class="list-unstyled mb-0" id="draftList">
+            @foreach (var d in drafts)
+            {
+              <li class="py-2 border-top d-flex flex-wrap gap-2 align-items-center">
+                <span class="me-auto"><strong>@d.Label</strong><br /><span class="small text-muted">@(d.LastCompletedStep == 0 ? "Not started yet" : "Last completed: " + SmartSchoolAI.Controllers.CambridgeImportController.StepNames[Math.Min(d.LastCompletedStep, 4) - 1])</span></span>
+                <a class="btn btn-sm btn-primary" href="/CambridgeImport/@d.Id/@SmartSchoolAI.Controllers.CambridgeImportController.ContinueAction(d)">Continue import</a>
+              </li>
+            }
+          </ul>
+        }
+      </div>
+    </div>
+  </div>
+</div>

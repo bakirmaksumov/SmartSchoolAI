@@ -1,0 +1,162 @@
+@model SmartSchoolAI.Models.CambridgeImport
+@using SmartSchoolAI.Models
+@{
+    ViewData["Title"] = "Import Cambridge Paper · Question Paper";
+    var figures = ViewBag.Figures as HashSet<string> ?? new();
+    var running = Model.PaperStage == ImportStage.Running || Model.PaperStage == ImportStage.NotStarted;
+    var components = new[] { "Pure Mathematics 1", "Pure Mathematics 2", "Pure Mathematics 3", "Mechanics", "Probability & Statistics 1", "Probability & Statistics 2" };
+    var sessions = new[] { "February/March", "May/June", "October/November", "Specimen" };
+    var questions = Model.Parts.GroupBy(p => p.QuestionNumber).OrderBy(g => g.Key).ToList();
+}
+<partial name="_Header" model="Model" />
+<partial name="_Stepper" model="Model" />
+
+@if (running)
+{
+  <div class="card mb-4" id="paperStatus" data-poll="paper" data-import="@Model.Id" role="status" aria-live="polite">
+    <div class="card-body d-flex align-items-center gap-3">
+      <span class="spinner-border text-primary" aria-hidden="true"></span>
+      <div>
+        <div class="fw-semibold">Reading the Question Paper…</div>
+        <div class="small text-muted">This usually takes a minute. You can leave this page — the draft is saved and the reading continues.</div>
+      </div>
+    </div>
+  </div>
+}
+else if (Model.PaperStage == ImportStage.Failed)
+{
+  <div class="alert alert-danger d-flex flex-wrap align-items-center gap-2" id="paperError" role="alert">
+    <span class="me-auto"><i class="bx bx-error-circle me-1" aria-hidden="true"></i>@Model.PaperError</span>
+    <form method="post" action="/CambridgeImport/@Model.Id/RetryPaper">@Html.AntiForgeryToken()<button class="btn btn-sm btn-danger" id="retryPaper">Try again</button></form>
+  </div>
+}
+
+<div class="card mb-4">
+  <div class="card-body">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+      <h5 class="mb-0 me-auto">Paper details</h5>
+      @if (!Model.DetailsChecked)
+      { <span class="badge bg-label-warning" id="detailsUnchecked">Detected — please check</span> }
+      else
+      { <span class="badge bg-label-success">Checked</span> }
+    </div>
+    <p class="small text-muted">Read from the paper's cover and page footers (<a href="/CambridgeImport/@Model.Id/File/paper" target="_blank" rel="noopener">open the PDF</a>). Correct anything that is wrong.</p>
+    <form method="post" action="/CambridgeImport/@Model.Id/Details" class="row g-3 align-items-end" id="detailsForm">
+      @Html.AntiForgeryToken()
+      <div class="col-4 col-md-1">
+        <label class="form-label small" for="dCode">Syllabus</label>
+        <input class="form-control" id="dCode" value="@Model.SyllabusCode" readonly />
+      </div>
+      <div class="col-6 col-md-3">
+        <label class="form-label small" for="dComponent">Component</label>
+        <select class="form-select" id="dComponent" name="component">
+          <option value="">Not detected</option>
+          @for (var c = 1; c <= 6; c++)
+          {
+            <option value="@c" selected="@(Model.Component == c)">Paper @c · @components[c - 1]</option>
+          }
+        </select>
+      </div>
+      <div class="col-4 col-md-1">
+        <label class="form-label small" for="dVariant">Variant</label>
+        <input class="form-control" id="dVariant" name="variant" value="@(Model.Variant ?? "")" maxlength="1" placeholder="—" />
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small" for="dSession">Session</label>
+        <select class="form-select" id="dSession" name="session">
+          <option value="">Not detected</option>
+          @foreach (var s in sessions) { <option value="@s" selected="@(Model.Session == s)">@s</option> }
+        </select>
+      </div>
+      <div class="col-4 col-md-2">
+        <label class="form-label small" for="dYear">Year</label>
+        <input class="form-control" id="dYear" name="year" type="number" min="2000" max="2100" value="@Model.Year" />
+      </div>
+      <div class="col-6 col-md-2">
+        <label class="form-label small" for="dSubject">Your subject</label>
+        <input class="form-control" id="dSubject" name="subject" value="@Model.Subject" maxlength="100" />
+      </div>
+      <div class="col-12 col-md-1">
+        <button type="submit" class="btn btn-outline-primary w-100 px-2" id="saveDetails">Save</button>
+      </div>
+    </form>
+    @if (Model.SyllabusVersionId is null)
+    {
+      <div class="alert alert-warning small mt-3 mb-0" id="noSyllabusVersion">
+        No published Cambridge @Model.SyllabusCode syllabus covers @(Model.Year?.ToString() ?? "this year"), so no topics are suggested.
+        Choose a topic for each part yourself, or ask an administrator to publish the right syllabus.
+      </div>
+    }
+  </div>
+</div>
+
+@if (Model.PaperStage == ImportStage.Done)
+{
+  <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">
+    <h5 class="mb-0 me-auto">Recognised questions</h5>
+    <span class="small text-muted" id="partCount">@questions.Count questions · @Model.Parts.Count parts · @Model.Parts.Count(p => p.SyllabusTopicId is null) without a topic</span>
+  </div>
+  @foreach (var g in questions)
+  {
+    var first = g.First();
+    <div class="card mb-3" data-question="@g.Key">
+      <div class="card-body">
+        <h6 class="mb-2">Question @g.Key</h6>
+        @if (first.Stem is not null) { <div class="ci-stem mb-2 math-text math-block">@first.Stem</div> }
+        @if (first.FigureKey is not null)
+        {
+          <figure class="mb-2" data-figure="@first.FigureKey">
+            @if (figures.Contains(first.FigureKey))
+            { <img class="ci-figure" src="/CambridgeImport/@Model.Id/Figure/@first.FigureKey" alt="Figure for question @g.Key: @first.FigureDescription" /> }
+            else
+            { <canvas class="ci-figure" data-crop data-import="@Model.Id" data-key="@first.FigureKey" data-box="@first.FigureBox" aria-label="Figure for question @g.Key"></canvas> }
+            <figcaption class="small text-muted">@first.FigureDescription · shared by every part of this question</figcaption>
+          </figure>
+        }
+        @foreach (var p in g)
+        {
+          <div class="ci-part" id="part-@p.Id" data-part="@p.Number">
+            <div class="d-flex flex-wrap gap-2 align-items-baseline">
+              <strong class="me-1">@p.Number</strong>
+              <span class="math-text flex-grow-1" style="min-width: 14rem">@p.Text</span>
+              @if (p.Marks is > 0) { <span class="badge bg-label-secondary">[@p.Marks]</span> }
+              @if (p.PaperPage is > 0) { <a class="small" href="/CambridgeImport/@Model.Id/File/paper#page=@p.PaperPage" target="_blank" rel="noopener">QP p.@p.PaperPage</a> }
+            </div>
+            <form method="post" action="/CambridgeImport/@Model.Id/Topic" class="ci-topic mt-1" data-topic-form>
+              @Html.AntiForgeryToken()
+              <input type="hidden" name="partId" value="@p.Id" />
+              @if (p.SyllabusTopic is { } t)
+              {
+                <span class="text-muted" data-topic-label>@Model.SyllabusCode · @t.Component.Title · @t.Title</span>
+                @if (p.TopicSource == "suggested") { <span class="badge bg-label-info ms-1">suggested</span> }
+                <button type="button" class="btn btn-sm btn-link p-0 ms-2" data-change-topic>Change topic</button>
+              }
+              else
+              {
+                <span class="text-warning" data-topic-label>No confident match — choose the topic manually.</span>
+                <button type="button" class="btn btn-sm btn-link p-0 ms-2" data-change-topic>Choose topic</button>
+              }
+              <div class="mt-1" data-picker-slot hidden>
+                <div data-syllabus-picker-lazy data-name="syllabusTopicId" data-value="@p.SyllabusTopicId"></div>
+              </div>
+            </form>
+          </div>
+        }
+      </div>
+    </div>
+  }
+}
+
+<div class="ci-actionbar">
+  <a href="/ContentLibrary" class="btn btn-outline-secondary"><i class="bx bx-arrow-back me-1" aria-hidden="true"></i>Back</a>
+  <span class="me-auto"></span>
+  <form method="post" action="/CambridgeImport/@Model.Id/Later">@Html.AntiForgeryToken()<button class="btn btn-outline-primary" id="saveDraftLater">Save draft &amp; finish later</button></form>
+  @if (Model.PaperStage == ImportStage.Done)
+  {
+    <a href="/CambridgeImport/@Model.Id/MarkScheme" class="btn btn-primary" id="continueToMarkScheme">Continue to Mark Scheme <i class="bx bx-right-arrow-alt ms-1" aria-hidden="true"></i></a>
+  }
+</div>
+
+@section Scripts {
+  <partial name="_ImportScripts" />
+}

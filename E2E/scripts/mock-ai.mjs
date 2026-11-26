@@ -11,7 +11,8 @@
 //   GET  /health             readiness probe
 //
 // Request kinds: tutor (streamed), ocr, eval (step grading), verify (second opinion),
-// answer (typed-answer / choice grading), sketch (marking a drawn answer), import (question import), other.
+// answer (typed-answer / choice grading), sketch (marking a drawn answer), import (question import),
+// cambridge-paper / cambridge-ms (reading a Cambridge question paper / mark scheme), other.
 //
 // Environment: E2E_MOCK_AI_PORT (default 5199), E2E_MOCK_AI_HOST (default 127.0.0.1; CI uses 0.0.0.0
 // so a container can reach it through host.docker.internal).
@@ -34,7 +35,10 @@ const defaults = () => ({
   evalStatus: null,   // the same for marking steps / a photographed solution (e.g. 503)
   tutorStatus: null,  // the same for the AI tutor's streamed reply (e.g. 503)
   sketchReply: null,  // { correct, marks, confidence, feedback } for a drawn answer
-  importReply: null   // the question list an import (PDF / photo) returns, as an array
+  importReply: null,  // the question list an import (PDF / photo) returns, as an array
+  cambridgePaperReply: null,   // { questions: [...] } for "Import Cambridge Paper" step 1
+  cambridgeSchemeReply: null,  // { rows: [...] } for step 2
+  cambridgeStatus: null        // an HTTP error status for both readings (e.g. 503): the AI is "down"
 });
 
 let script = defaults();
@@ -78,6 +82,8 @@ function describe(body) {
   else if (system.includes("exam moderator")) kind = "verify";
   else if (system.includes("grading students' typed answers")) kind = "answer";
   else if (system.includes("expert educator assistant")) kind = "import";
+  else if (system.includes("Cambridge Question Paper reader")) kind = "cambridge-paper";
+  else if (system.includes("Cambridge Mark Scheme reader")) kind = "cambridge-ms";
   return { kind, system, user, stream: body.stream === true };
 }
 
@@ -142,6 +148,12 @@ async function chatCompletions(req, res) {
   }
 
   if (seen.kind === "import") return json(res, 200, completion(JSON.stringify(script.importReply ?? [])));
+
+  if (seen.kind === "cambridge-paper" || seen.kind === "cambridge-ms") {
+    if (script.cambridgeStatus) return json(res, script.cambridgeStatus, { error: { message: "mock AI failure" } });
+    const reply = seen.kind === "cambridge-paper" ? script.cambridgePaperReply : script.cambridgeSchemeReply;
+    return json(res, 200, completion(JSON.stringify(reply ?? (seen.kind === "cambridge-paper" ? { questions: [] } : { rows: [] }))));
+  }
 
   return json(res, 200, completion("{}"));
 }

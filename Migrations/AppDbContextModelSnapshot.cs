@@ -381,6 +381,233 @@ namespace SmartSchoolAI.Migrations
                     b.ToTable("AuditLogs");
                 });
 
+            modelBuilder.Entity("SmartSchoolAI.Models.CambridgeImport", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Component")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("DetailsChecked")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("LastCompletedStep")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("MarkSchemeDetailsConfirmed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MarkSchemeDetailsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MarkSchemeError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MarkSchemeFileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MarkSchemeJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MarkSchemePages")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MarkSchemeSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MarkSchemeStage")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerEmail")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaperError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaperFileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaperJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PaperPages")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PaperSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaperStage")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Session")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("StageStartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SyllabusCode")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SyllabusVersionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Variant")
+                        .HasMaxLength(4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Year")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerId", "PaperSha256")
+                        .IsUnique()
+                        .HasFilter("\"DeletedAt\" IS NULL");
+
+                    b.ToTable("CambridgeImports");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.CambridgeImportPart", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AnswerKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Criteria")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("EditedByTeacher")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FigureBox")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FigureDescription")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FigureKey")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ImportId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Marks")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("NeedsDrawing")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Number")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("PaperPage")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PendingReplacement")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("QuestionNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ReviewReason")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SavedQuestionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("SchemeMarks")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SchemePages")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stem")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SyllabusTopicId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TopicSource")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SyllabusTopicId");
+
+                    b.HasIndex("ImportId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("CambridgeImportParts");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.ChatSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -638,7 +865,17 @@ namespace SmartSchoolAI.Migrations
                     b.Property<int?>("GradeLevel")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ImagePath")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IsPublic")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("MarkScheme")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("Marks")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Options")
@@ -647,6 +884,21 @@ namespace SmartSchoolAI.Migrations
 
                     b.Property<string>("SkillIds")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceGroupKey")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceKey")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceLabel")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stem")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Subject")
@@ -678,6 +930,10 @@ namespace SmartSchoolAI.Migrations
                     b.HasIndex("Subject");
 
                     b.HasIndex("SyllabusTopicId");
+
+                    b.HasIndex("CreatedByEmail", "SourceKey")
+                        .IsUnique()
+                        .HasFilter("\"SourceKey\" IS NOT NULL AND \"DeletedAt\" IS NULL");
 
                     b.ToTable("Questions");
                 });
@@ -1344,6 +1600,24 @@ namespace SmartSchoolAI.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("SmartSchoolAI.Models.CambridgeImportPart", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.CambridgeImport", "Import")
+                        .WithMany("Parts")
+                        .HasForeignKey("ImportId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmartSchoolAI.Models.SyllabusTopic", "SyllabusTopic")
+                        .WithMany()
+                        .HasForeignKey("SyllabusTopicId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Import");
+
+                    b.Navigation("SyllabusTopic");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.ChatSession", b =>
                 {
                     b.HasOne("SmartSchoolAI.Models.StudentResult", "StudentResult")
@@ -1563,6 +1837,11 @@ namespace SmartSchoolAI.Migrations
                     b.Navigation("AssignmentStudents");
 
                     b.Navigation("StudentResults");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.CambridgeImport", b =>
+                {
+                    b.Navigation("Parts");
                 });
 
             modelBuilder.Entity("SmartSchoolAI.Models.Class", b =>

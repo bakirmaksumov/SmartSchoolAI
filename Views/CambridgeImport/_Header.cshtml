@@ -1,0 +1,9 @@
+@model SmartSchoolAI.Models.CambridgeImport
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb mb-1">
+    <li class="breadcrumb-item"><a href="/ContentLibrary">Content Library</a></li>
+    <li class="breadcrumb-item active" aria-current="page">Import Cambridge Paper</li>
+  </ol>
+</nav>
+<h4 class="fw-bold mb-1">Import Cambridge Paper</h4>
+<p class="text-muted mb-3" id="importLabel">Cambridge Mathematics · @Model.PaperCode@(Model.Session is null ? "" : $" · {Model.Session}")@(Model.Year is null ? "" : $" {Model.Year}")</p>
