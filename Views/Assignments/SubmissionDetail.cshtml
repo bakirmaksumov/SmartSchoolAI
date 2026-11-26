@@ -521,7 +521,8 @@ else
 
   // Collect all per-question grade controls into the hidden gradesJson field
   // right before the form posts, so the controller receives one tidy array.
-  document.getElementById('gradeForm').addEventListener('submit', function () {
+  // The Activity tab has no grading form, so there is nothing to wire up there.
+  document.getElementById('gradeForm')?.addEventListener('submit', function () {
     const rows = {};
     const rowFor = i => (rows[i] ??= { questionIndex: +i });
 

@@ -169,6 +169,33 @@ test("teacher: Activity shows each action with its question, time and outcome; t
   await teacher.setViewportSize({ width: 1360, height: 900 });
 });
 
+test("the Activity tab has no grading form and no script error; grades still save on the review tab", async () => {
+  const errors: string[] = [];
+  const onError = (e: Error) => errors.push(e.message);
+  teacher.on("pageerror", onError);
+
+  // Activity: the page's scripts run without the grading form being there.
+  await teacher.goto(`/Assignments/SubmissionDetail?resultId=${resultId}&tab=activity`);
+  await expect(teacher.locator("#activityTable")).toBeVisible();
+  await expect(teacher.locator("#gradeForm")).toHaveCount(0);
+  await teacher.waitForLoadState("load");
+  expect(errors, "script errors on the Activity tab").toEqual([]);
+
+  // Review: the teacher marks question 1 and saves; the form still collects the per-question grades.
+  await teacher.goto(`/Assignments/SubmissionDetail?resultId=${resultId}`);
+  await expect(teacher.locator("#gradeForm")).toBeVisible();
+  await teacher.locator("#q0 .grade-correct[value=\"true\"]").check({ force: true });
+  await teacher.locator("#q0 .grade-points").fill("1");
+  await teacher.locator("#q0 .grade-comment").fill("Checked after the Activity fix.");
+  await teacher.getByRole("button", { name: "Save grades" }).click();
+  await expect(teacher.locator(".alert-success").first()).toBeVisible();
+  await teacher.goto(`/Assignments/SubmissionDetail?resultId=${resultId}`);
+  await expect(teacher.locator("#q0 .grade-points")).toHaveValue("1");
+  await expect(teacher.locator("#q0 .grade-comment")).toHaveValue("Checked after the Activity fix.");
+  expect(errors, "script errors on the review tab").toEqual([]);
+  teacher.off("pageerror", onError);
+});
+
 test("another teacher cannot read the attempt's activity", async () => {
   const other = await (await browserRef.newContext()).newPage();
   await register(other, "Other Teacher", `${stamp}.other@example.test`);
