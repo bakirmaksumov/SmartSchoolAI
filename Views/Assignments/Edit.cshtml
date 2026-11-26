@@ -1,9 +1,14 @@
 @model SmartSchoolAI.ViewModels.AssignmentEditViewModel
 @using System.Text.Json
+@inject SmartSchoolAI.Services.SyllabusService SyllabusLibrary
 @{
     var a = Model.Assignment;
     ViewData["Title"] = a.Title;
     var questions = JsonSerializer.Deserialize<List<JsonElement>>(a.Questions ?? "[]") ?? new();
+    // "Aligned to Cambridge 9709" labels for questions the teacher linked to a syllabus topic.
+    var syllabusLabels = await SyllabusLibrary.LabelsAsync(questions
+        .Select(q => q.TryGetProperty("syllabusTopicId", out var st) && st.ValueKind == JsonValueKind.String && Guid.TryParse(st.GetString(), out var g) ? g : Guid.Empty)
+        .Where(g => g != Guid.Empty));
     var classes = Model.Classes;
     // Allows deep-linking straight to the settings tab (/Assignments/Edit/{id}?tab=settings)
     var activeTab = Context.Request.Query["tab"].ToString() == "settings" ? "settings" : "questions";
@@ -198,6 +203,8 @@
                     var qRequireDrawing = q.TryGetProperty("requireDrawing", out var rd) && rd.ValueKind == System.Text.Json.JsonValueKind.True;
                     var qIsStem = !item.isChild && childrenOf.ContainsKey(idx);   // shared text above parts: nothing to answer or mark
                     var qMarks = MarksOf(q);
+                    var qSyllabus = q.TryGetProperty("syllabusTopicId", out var qst) && qst.ValueKind == JsonValueKind.String
+                        && Guid.TryParse(qst.GetString(), out var qstId) && syllabusLabels.TryGetValue(qstId, out var lbl) ? lbl : null;
 
                     <div class="card mb-3 question-card @(item.isChild ? "ms-4 border-start border-primary border-3" : "")" data-index="@idx">
                         <div class="card-body">
@@ -214,6 +221,10 @@
                                             {
                                                 <span class="badge bg-label-warning"><i class="bx bx-pencil me-1"></i>Drawing</span>
                                             }
+                                        }
+                                        @if (qSyllabus is not null)
+                                        {
+                                            <span class="badge bg-label-info syllabus-chip" title="Aligned to Cambridge @qSyllabus.Code: @qSyllabus.Full" data-syllabus-label>@qSyllabus.Short</span>
                                         }
                                     </div>
                                     @if (string.IsNullOrWhiteSpace(qTitle))
@@ -1020,6 +1031,9 @@
             <div class="form-text">One mark point per item. Without it the AI gives method marks for a correct method and accuracy marks for correct results.</div>
         </div>
 
+        <!-- Optional: aligned to a published syllabus topic (teacher metadata; students do not see it) -->
+        <partial name="_SyllabusTopicPicker" model="(Guid?)null" />
+
         <div id="eq_saveError" class="d-none alert alert-danger py-2 small mb-3"></div>
 
         <div class="d-flex gap-2">
@@ -1048,6 +1062,7 @@
 </div>
 
 @section Scripts {
+<script src="~/js/syllabus-topic-picker.js" asp-append-version="true"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
@@ -1259,6 +1274,8 @@ function openEditDrawer(idx) {
   document.getElementById('eq_title').value      = q.title      ?? '';
   document.getElementById('eq_answerKey').value  = q.answerKey  ?? '';
   document.getElementById('eq_markScheme').value = q.markScheme ?? '';
+  const sp = document.getElementById('syllabusPicker');
+  if (sp && window.SyllabusPicker) SyllabusPicker.mount(sp).set(q.syllabusTopicId || '');
   document.getElementById('eq_difficulty').value = q.difficulty ?? 'Medium';
   document.getElementById('eq_type').value       = String(q.type ?? 0);
   document.getElementById('eq_marks').value      = (parseInt(q.marks, 10) > 0) ? parseInt(q.marks, 10) : 1;
@@ -1457,6 +1474,8 @@ async function eqSave() {
     marks,
     requireDrawing,
     markScheme:         markScheme || null,
+    syllabusTopicId:    (window.SyllabusPicker && document.getElementById('syllabusPicker'))
+                          ? SyllabusPicker.mount(document.getElementById('syllabusPicker')).get() : (original.syllabusTopicId ?? null),
     explanation:        original.explanation ?? null,
     groupId:            original.groupId ?? null,
     // A diagram hint is only useful until the real image is attached; a

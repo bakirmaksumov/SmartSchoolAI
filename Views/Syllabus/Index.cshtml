@@ -1,0 +1,72 @@
+@model List<SmartSchoolAI.Models.SyllabusVersion>
+@using SmartSchoolAI.Models
+@{
+    ViewData["Title"] = "Syllabus library";
+}
+
+<div class="row mb-4">
+  <div class="col">
+    <h4 class="fw-bold py-3 mb-0"><span class="text-muted fw-light">Content Library /</span> Syllabus library</h4>
+    <p class="text-muted mb-0">Exam board syllabuses teachers can align their own questions to. Each version is imported once, checked, then published.</p>
+  </div>
+</div>
+
+@if (TempData["Info"] is string info)
+{
+  <div class="alert alert-info" id="syllabusInfo"><i class="bx bx-info-circle me-1" aria-hidden="true"></i>@info</div>
+}
+
+<div class="card mb-4">
+  <div class="card-header"><h5 class="mb-0"><i class="bx bx-upload me-2" aria-hidden="true"></i>Import a syllabus PDF</h5></div>
+  <div class="card-body">
+    <form method="post" action="/Syllabus/Import" enctype="multipart/form-data" class="row g-3 align-items-end" id="syllabusImportForm">
+      @Html.AntiForgeryToken()
+      <div class="col-md-5">
+        <label class="form-label fw-semibold" for="syllabusFile">Syllabus PDF</label>
+        <input type="file" class="form-control" id="syllabusFile" name="file" accept="application/pdf,.pdf" required />
+        <div class="form-text">The official syllabus document, e.g. Cambridge Mathematics 9709. Read locally — no AI is used.</div>
+      </div>
+      <div class="col-md-5">
+        <label class="form-label fw-semibold" for="syllabusSource">Source address <span class="text-muted fw-normal">(optional)</span></label>
+        <input type="url" class="form-control" id="syllabusSource" name="sourceUrl" placeholder="https://www.cambridgeinternational.org/…" />
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-primary w-100"><i class="bx bx-search-alt me-1" aria-hidden="true"></i>Preview</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><h5 class="mb-0">In the library (@Model.Count)</h5></div>
+  @if (Model.Count == 0)
+  {
+    <div class="card-body text-muted" id="syllabusEmpty">No syllabus has been imported yet.</div>
+  }
+  else
+  {
+    <div class="table-responsive">
+      <table class="table mb-0 align-middle" id="syllabusVersions">
+        <thead class="table-light"><tr><th>Programme</th><th>Exams</th><th>Components · topics</th><th>Status</th><th>Source</th><th></th></tr></thead>
+        <tbody>
+          @foreach (var v in Model)
+          {
+            <tr data-version="@v.Id">
+              <td><strong>@v.Program.Code</strong> <span class="text-muted small d-block">@v.Program.Title</span></td>
+              <td>@v.Years @if (v.DocumentVersion is not null) { <span class="text-muted small d-block">@v.DocumentVersion</span> }</td>
+              <td>@v.Components.Count · @v.Components.Sum(c => c.Topics.Count)</td>
+              <td>
+                @if (v.Status == SyllabusVersionStatus.Published)
+                { <span class="badge bg-label-success">Published</span> }
+                else
+                { <span class="badge bg-label-warning">Draft — not visible to teachers</span> }
+              </td>
+              <td class="small text-break">@v.SourceName</td>
+              <td class="text-end"><a class="btn btn-sm btn-outline-primary" href="/Syllabus/Review/@v.Id">@(v.Status == SyllabusVersionStatus.Draft ? "Review" : "Open")</a></td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+</div>

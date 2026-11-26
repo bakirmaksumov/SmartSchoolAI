@@ -69,4 +69,11 @@ public class Question : BaseEntity
 
     /// <summary>Email of the teacher who created this question (denormalised for simplicity).</summary>
     public string CreatedByEmail { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional: the syllabus topic the teacher aligned this question to ("Aligned to Cambridge 9709"). Set only by
+    /// the teacher's explicit choice — a free-text <see cref="Subject"/> such as "Quadratics" never implies it.
+    /// </summary>
+    public Guid?          SyllabusTopicId { get; set; }
+    public SyllabusTopic? SyllabusTopic   { get; set; }
 }

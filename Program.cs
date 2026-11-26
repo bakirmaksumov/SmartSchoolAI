@@ -22,6 +22,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Domain services
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<PdfImportService>();
+builder.Services.AddScoped<SyllabusService>();
 // Checking student work: photo reading (OpenRouter:Grading:RecognitionModel) and marking
 // (OpenRouter:Grading:GradingModel). Every call is logged with its tokens and cost; finished stages are stored.
 builder.Services.AddSingleton<GradingModels>();

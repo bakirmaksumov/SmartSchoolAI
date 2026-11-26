@@ -1690,17 +1690,28 @@ public class AssignmentsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ImportFromLibrary(Guid id, [FromForm] string questionIds)
     {
+        // The target: an assignment this teacher owns or co-teaches whose questions may still change.
         var assignment = await FindEditableAssignmentAsync(id);
         if (assignment is null)
-            return Json(new { error = "Assignment not found." });
+            return NotFound(new { error = "Assignment not found." });
 
-        var ids = JsonSerializer.Deserialize<List<Guid>>(questionIds) ?? new();
+        List<Guid> ids;
+        try { ids = (JsonSerializer.Deserialize<List<Guid>>(questionIds ?? "") ?? new()).Distinct().ToList(); }
+        catch (JsonException) { return BadRequest(new { error = "No questions selected." }); }
         if (!ids.Any())
             return Json(new { error = "No questions selected." });
 
+        // Every source question must be one the Content Library lets this teacher use (their own, or shared with
+        // all teachers). One that is not — another teacher's private question, deleted, or unknown — refuses the
+        // whole batch before anything is saved, so the assignment never ends up half-imported. Missing and private
+        // look the same, so the answer does not reveal that someone else's question exists.
         var questions = await _db.Questions
-            .Where(q => ids.Contains(q.Id) && q.DeletedAt == null)
+            .UsableBy(User.LibraryOwnerKey())
+            .Where(q => ids.Contains(q.Id))
             .ToListAsync();
+        if (questions.Count != ids.Count)
+            return NotFound(new { error = "Some of the selected questions are not available to you. Nothing was added." });
+        questions = ids.Select(i => questions.First(q => q.Id == i)).ToList();   // keep the teacher's order
 
         var list = JsonSerializer.Deserialize<List<JsonElement>>(assignment.Questions ?? "[]")
                    ?? new List<JsonElement>();
@@ -1726,7 +1737,8 @@ public class AssignmentsController : Controller
                 type       = (int)q.Type,
                 difficulty = q.Difficulty.ToString(),
                 answerKey  = q.AnswerKey,
-                options    = JsonSerializer.Deserialize<List<string>>(q.Options) ?? new List<string>()
+                options    = JsonSerializer.Deserialize<List<string>>(q.Options) ?? new List<string>(),
+                syllabusTopicId = q.SyllabusTopicId   // the teacher's "Aligned to Cambridge" link travels with the question
             };
             using var doc = JsonDocument.Parse(JsonSerializer.Serialize(qObj));
             list.Add(doc.RootElement.Clone());

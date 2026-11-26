@@ -1,0 +1,7 @@
+@model Guid?
+<link rel="stylesheet" href="~/css/syllabus.css" asp-append-version="true" />
+@* Optional link from a question to a published syllabus topic. Hidden when no syllabus is published. *@
+<div class="mb-3" data-sp-field hidden>
+  <div class="form-label fw-semibold mb-1">Cambridge syllabus <span class="text-muted fw-normal">(optional)</span></div>
+  <div data-syllabus-picker data-name="syllabusTopicId" data-value="@Model" id="syllabusPicker"></div>
+</div>

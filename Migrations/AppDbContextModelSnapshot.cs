@@ -653,6 +653,9 @@ namespace SmartSchoolAI.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("SyllabusTopicId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -673,6 +676,8 @@ namespace SmartSchoolAI.Migrations
                     b.HasIndex("CreatedByEmail");
 
                     b.HasIndex("Subject");
+
+                    b.HasIndex("SyllabusTopicId");
 
                     b.ToTable("Questions");
                 });
@@ -1087,6 +1092,147 @@ namespace SmartSchoolAI.Migrations
                     b.ToTable("SupportTickets");
                 });
 
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusComponent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SourcePage")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("VersionId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VersionId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("SyllabusComponents");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusProgram", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("SyllabusPrograms");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusTopic", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ComponentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Number")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SourcePage")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ComponentId", "Order");
+
+                    b.ToTable("SyllabusTopics");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DocumentVersion")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FirstExamYear")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("ImportedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ImportedById")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LastExamYear")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ProgramId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceSha256")
+                        .IsUnique();
+
+                    b.HasIndex("ProgramId", "FirstExamYear", "LastExamYear")
+                        .IsUnique();
+
+                    b.ToTable("SyllabusVersions");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1288,6 +1434,16 @@ namespace SmartSchoolAI.Migrations
                     b.Navigation("Student");
                 });
 
+            modelBuilder.Entity("SmartSchoolAI.Models.Question", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.SyllabusTopic", "SyllabusTopic")
+                        .WithMany()
+                        .HasForeignKey("SyllabusTopicId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("SyllabusTopic");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.QuestionReport", b =>
                 {
                     b.HasOne("SmartSchoolAI.Models.Assignment", "Assignment")
@@ -1358,6 +1514,39 @@ namespace SmartSchoolAI.Migrations
                     b.Navigation("Student");
                 });
 
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusComponent", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.SyllabusVersion", "Version")
+                        .WithMany("Components")
+                        .HasForeignKey("VersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Version");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusTopic", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.SyllabusComponent", "Component")
+                        .WithMany("Topics")
+                        .HasForeignKey("ComponentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Component");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusVersion", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.SyllabusProgram", "Program")
+                        .WithMany("Versions")
+                        .HasForeignKey("ProgramId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Program");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.User", b =>
                 {
                     b.HasOne("SmartSchoolAI.Models.Role", "Role")
@@ -1402,6 +1591,21 @@ namespace SmartSchoolAI.Migrations
                     b.Navigation("StepResults");
 
                     b.Navigation("StudentAnswers");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusComponent", b =>
+                {
+                    b.Navigation("Topics");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusProgram", b =>
+                {
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusVersion", b =>
+                {
+                    b.Navigation("Components");
                 });
 
             modelBuilder.Entity("SmartSchoolAI.Models.User", b =>

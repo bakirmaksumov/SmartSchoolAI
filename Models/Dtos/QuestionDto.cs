@@ -100,6 +100,13 @@ public class QuestionDto
     /// </summary>
     [JsonPropertyName("validationWarning")]
     public string? ValidationWarning { get; set; }
+
+    /// <summary>
+    /// Optional syllabus topic the teacher aligned this question to ("Aligned to Cambridge 9709"); see
+    /// <see cref="Question.SyllabusTopicId"/>. Teacher metadata only: students never see it, marking ignores it.
+    /// </summary>
+    [JsonPropertyName("syllabusTopicId")]
+    public Guid? SyllabusTopicId { get; set; }
 }
 
 /// <summary>

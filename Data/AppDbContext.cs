@@ -35,6 +35,10 @@ public class AppDbContext : DbContext
     public DbSet<AiCallLog>           AiCallLogs           { get; set; }
     public DbSet<AttemptActivity>        AttemptActivities        { get; set; }
     public DbSet<AttemptActivitySummary> AttemptActivitySummaries { get; set; }
+    public DbSet<SyllabusProgram>   SyllabusPrograms   { get; set; }
+    public DbSet<SyllabusVersion>   SyllabusVersions   { get; set; }
+    public DbSet<SyllabusComponent> SyllabusComponents { get; set; }
+    public DbSet<SyllabusTopic>     SyllabusTopics     { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -85,6 +89,7 @@ public class AppDbContext : DbContext
         ConfigureContentItem(modelBuilder);
         ConfigureAuditLog(modelBuilder);
         ConfigureQuestion(modelBuilder);
+        ConfigureSyllabus(modelBuilder);
         ConfigureStudentAnswer(modelBuilder);
         ConfigureAssignmentStudent(modelBuilder);
         ConfigureLateJoinRequest(modelBuilder);
@@ -384,7 +389,46 @@ public class AppDbContext : DbContext
             e.Property(q => q.CreatedByEmail).HasMaxLength(255).IsRequired();
             e.HasIndex(q => q.CreatedByEmail);
             e.HasIndex(q => q.Subject);
+            e.HasIndex(q => q.SyllabusTopicId);
+            // Optional link; a topic that still has questions cannot be removed from the library.
+            e.HasOne(q => q.SyllabusTopic).WithMany().HasForeignKey(q => q.SyllabusTopicId).OnDelete(DeleteBehavior.Restrict);
             e.HasQueryFilter(q => q.DeletedAt == null);
+        });
+    }
+
+    private static void ConfigureSyllabus(ModelBuilder mb)
+    {
+        mb.Entity<SyllabusProgram>(e =>
+        {
+            e.Property(p => p.Code).HasMaxLength(20).IsRequired();
+            e.Property(p => p.Title).HasMaxLength(200).IsRequired();
+            e.HasIndex(p => p.Code).IsUnique();
+        });
+        mb.Entity<SyllabusVersion>(e =>
+        {
+            e.Property(v => v.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(v => v.SourceName).HasMaxLength(260).IsRequired();
+            e.Property(v => v.SourceUrl).HasMaxLength(500);
+            e.Property(v => v.SourceSha256).HasMaxLength(64).IsRequired();
+            e.Property(v => v.DocumentVersion).HasMaxLength(40);
+            e.Ignore(v => v.Years);
+            // One edition per programme and exam years, and one version per file: importing again finds it.
+            e.HasIndex(v => new { v.ProgramId, v.FirstExamYear, v.LastExamYear }).IsUnique();
+            e.HasIndex(v => v.SourceSha256).IsUnique();
+            e.HasOne(v => v.Program).WithMany(p => p.Versions).HasForeignKey(v => v.ProgramId).OnDelete(DeleteBehavior.Cascade);
+        });
+        mb.Entity<SyllabusComponent>(e =>
+        {
+            e.Property(c => c.Title).HasMaxLength(200).IsRequired();
+            e.HasIndex(c => new { c.VersionId, c.Number }).IsUnique();
+            e.HasOne(c => c.Version).WithMany(v => v.Components).HasForeignKey(c => c.VersionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        mb.Entity<SyllabusTopic>(e =>
+        {
+            e.Property(t => t.Title).HasMaxLength(200).IsRequired();
+            e.Property(t => t.Number).HasMaxLength(20);
+            e.HasIndex(t => new { t.ComponentId, t.Order });
+            e.HasOne(t => t.Component).WithMany(c => c.Topics).HasForeignKey(t => t.ComponentId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 
