@@ -29,6 +29,32 @@ public sealed class LenientIntConverter : JsonConverter<int>
         => writer.WriteNumberValue(value);
 }
 
+/// <summary>Like <see cref="LenientIntConverter"/>, but null (or a value with no digits, such as "[ ]") stays null.</summary>
+public sealed class LenientNullableIntConverter : JsonConverter<int?>
+{
+    public override bool HandleNull => true;
+
+    public override int? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.Number:
+                return reader.TryGetInt32(out var whole) ? whole : (int)Math.Round(reader.GetDouble());
+            case JsonTokenType.String:
+                var digits = new string((reader.GetString() ?? "").SkipWhile(c => !char.IsDigit(c)).TakeWhile(char.IsDigit).ToArray());
+                return int.TryParse(digits, out var parsed) ? parsed : null;
+            default:
+                reader.Skip();
+                return null;
+        }
+    }
+
+    public override void Write(Utf8JsonWriter writer, int? value, JsonSerializerOptions options)
+    {
+        if (value is null) writer.WriteNullValue(); else writer.WriteNumberValue(value.Value);
+    }
+}
+
 /// <summary>Reads text from a string, number or boolean; anything structured is kept as raw JSON text.</summary>
 public sealed class LenientStringConverter : JsonConverter<string>
 {

@@ -74,7 +74,8 @@ test("attempt limit: two attempts are allowed, the third is refused", async () =
   const id = await draftWithQuestion(unique("E2E Two Attempts"), { maxAttempts: "2" });
 
   await answer(id, "0");
-  await expect(student.getByText("0%", { exact: true }).first()).toBeVisible();
+  // A wrong answer goes to the AI (none in this run), so it waits for the teacher: handed in, no score yet.
+  await expect(student.locator("#submittedConfirmation")).toBeVisible();
 
   await answer(id, "4");
   await expect(student.getByText("100%", { exact: true }).first()).toBeVisible();

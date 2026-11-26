@@ -59,7 +59,10 @@
         </div>
         <span class="fw-semibold d-block mb-1 mt-2">Submissions Today</span>
         <h3 class="card-title mb-2">@ViewBag.SubmissionsToday</h3>
-        <small class="text-warning fw-semibold">Awaiting review</small>
+        <a href="/Assignments/Review" class="small fw-semibold @((int)ViewBag.NeedsReview > 0 ? "text-warning" : "text-muted")" id="needsReviewLink">
+          <i class="bx bx-error-circle me-1"></i>Needs review: <span id="needsReviewCount">@ViewBag.NeedsReview</span>
+          <i class="bx bx-right-arrow-alt"></i>
+        </a>
       </div>
     </div>
   </div>
@@ -99,7 +102,7 @@
           <th>Type</th>
           <th>Status</th>
           <th>Deadline</th>
-          <th>Submissions</th>
+          <th>Submitted</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -121,7 +124,7 @@
                   @a.Status
                 </span>
               </td>
-              <td>@(a.Deadline?.ToString("dd MMM") ?? "—")</td>
+              <td>@SmartSchoolAI.Services.SchoolTime.Show((DateTime?)a.Deadline, "dd MMM")</td>
               <td>@a.SubmissionsCount / @a.TotalStudents</td>
               <td>
                 <a href="/Assignments/Details/@a.Id" class="btn btn-sm btn-icon btn-outline-primary"

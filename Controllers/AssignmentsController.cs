@@ -28,13 +28,15 @@ public class AssignmentsController : Controller
     private readonly GenerationJobTracker _jobs;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<AssignmentsController> _logger;
+    private readonly AssignmentDistributionService _distribution;
 
     public AssignmentsController(
         AppDbContext db, PdfImportService pdfImport, IWebHostEnvironment env,
         GenerationJobTracker jobs, IServiceScopeFactory scopeFactory,
-        ILogger<AssignmentsController> logger)
+        ILogger<AssignmentsController> logger, AssignmentDistributionService distribution)
     {
         _db           = db;
+        _distribution = distribution;
         _pdfImport    = pdfImport;
         _env          = env;
         _jobs         = jobs;
@@ -46,7 +48,7 @@ public class AssignmentsController : Controller
         Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
 
     // GET: /Assignments
-    public async Task<IActionResult> Index(Guid? classId = null, string? status = null)
+    public async Task<IActionResult> Index(Guid? classId = null, string? status = null, int? page = null)
     {
         var query = _db.Assignments
             .Include(a => a.Class)
@@ -60,9 +62,15 @@ public class AssignmentsController : Controller
             Enum.TryParse<AssignmentStatus>(status, ignoreCase: true, out var parsedStatus))
             query = query.Where(a => a.Status == parsedStatus);
 
+        // Ten per page, newest first; Id breaks ties so an item never shows on two pages.
+        var (assignments, pageInfo) = await query
+            .OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id)
+            .ToPageAsync(page);
+
         return View(new AssignmentListViewModel
         {
-            Assignments = await query.OrderByDescending(a => a.CreatedAt).ToListAsync(),
+            Assignments = assignments,
+            Page        = pageInfo,
             Classes = await _db.Classes
                 .AccessibleBy(CurrentUserId)
                 .OrderBy(c => c.Name)
@@ -72,10 +80,10 @@ public class AssignmentsController : Controller
         });
     }
 
-    // GET: /Assignments/Create
-    public async Task<IActionResult> Create()
+    // GET: /Assignments/Create?classId=…  — opened from a class page, that class is filled in.
+    public async Task<IActionResult> Create(Guid? classId = null)
     {
-        await PopulateClassesDropdownAsync();
+        await PopulateClassesDropdownAsync(classId);
         return View();
     }
 
@@ -84,12 +92,12 @@ public class AssignmentsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(
         string title, string? description, Guid classId,
-        AssignmentType type, DateTime? deadline, bool allowLateSubmission)
+        AssignmentType type, DateTime? deadline, bool allowLateSubmission, DateTime? availableFrom = null)
     {
         if (string.IsNullOrWhiteSpace(title))
         {
             ViewBag.Error = "Title is required.";
-            await PopulateClassesDropdownAsync();
+            await PopulateClassesDropdownAsync(classId);
             return View();
         }
 
@@ -110,7 +118,8 @@ public class AssignmentsController : Controller
             ClassId             = classId,
             TeacherId           = CurrentUserId,
             Type                = type,
-            Deadline            = deadline?.ToUniversalTime(),
+            Deadline            = SchoolTime.ToUtc(deadline),
+            AvailableFrom       = SchoolTime.ToUtc(availableFrom),
             AllowLateSubmission = allowLateSubmission,
             Status              = AssignmentStatus.Draft,
             Questions           = "[]"
@@ -138,7 +147,8 @@ public class AssignmentsController : Controller
         {
             Assignment       = assignment,
             Classes          = await TeacherClassesAsync(),
-            CanEditQuestions = assignment.AllowsQuestionEditing(await HasSubmissionsAsync(id))
+            CanEditQuestions = assignment.AllowsQuestionEditing(await HasSubmissionsAsync(id)),
+            AssignPanel      = await BuildAssignPanelAsync(assignment, "edit")
         });
     }
 
@@ -149,7 +159,8 @@ public class AssignmentsController : Controller
         Guid id, string title, string? description,
         Guid classId, AssignmentType type, DateTime? deadline,
         bool allowLateSubmission, bool allowSolutionReveal, bool allowInstantFeedback,
-        GradingType gradingType, int passThreshold, int maxAttempts, bool antiCopyPaste)
+        GradingType gradingType, int passThreshold, int maxAttempts, bool antiCopyPaste,
+        DateTime? availableFrom = null)
     {
         var assignment = await FindOwnedAssignmentAsync(id);
         if (assignment is null) return NotFound();
@@ -172,11 +183,22 @@ public class AssignmentsController : Controller
             return RedirectToAction(nameof(Edit), new { id, tab = "settings" });
         }
 
+        // Recipients and waiting requests belong to the current class; moving the work elsewhere would
+        // leave them pointing at students of another class.
+        if (classId != assignment.ClassId &&
+            (await _db.AssignmentStudents.AnyAsync(x => x.AssignmentId == id) ||
+             await _db.LateJoinRequests.AnyAsync(r => r.AssignmentId == id)))
+        {
+            TempData["Error"] = "This assignment has already been given to students of its class, so it can't be moved to another class.";
+            return RedirectToAction(nameof(Edit), new { id, tab = "settings" });
+        }
+
         assignment.Title                = title.Trim();
         assignment.Description          = description?.Trim();
         assignment.ClassId              = classId;
         assignment.Type                 = type;
-        assignment.Deadline             = deadline?.ToUniversalTime();
+        assignment.Deadline             = SchoolTime.ToUtc(deadline);
+        assignment.AvailableFrom        = SchoolTime.ToUtc(availableFrom);
         assignment.AllowLateSubmission  = allowLateSubmission;
         assignment.AllowSolutionReveal  = allowSolutionReveal;
         assignment.AllowInstantFeedback = allowInstantFeedback;
@@ -379,7 +401,17 @@ public class AssignmentsController : Controller
     // edit drawer), so it only ever needs to flip one field, not resend everything.
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> ToggleRequireWork(Guid id, int index)
+    public Task<IActionResult> ToggleRequireWork(Guid id, int index)
+        => ToggleQuestionFlagAsync(id, index, "requireWork");
+
+    // POST: /Assignments/ToggleRequireDrawing/id — flips whether the student answers this
+    // question by drawing on a sketch pad (e.g. "sketch the graph on this diagram").
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public Task<IActionResult> ToggleRequireDrawing(Guid id, int index)
+        => ToggleQuestionFlagAsync(id, index, "requireDrawing");
+
+    private async Task<IActionResult> ToggleQuestionFlagAsync(Guid id, int index, string flag)
     {
         var assignment = await FindEditableAssignmentAsync(id);
         if (assignment is null) return NotFound();
@@ -390,8 +422,9 @@ public class AssignmentsController : Controller
         if (index >= 0 && index < list.Count)
         {
             var node = System.Text.Json.Nodes.JsonNode.Parse(list[index].GetRawText())!.AsObject();
-            var current = node.TryGetPropertyValue("requireWork", out var rw) && rw is not null && rw.GetValue<bool>();
-            node["requireWork"] = !current;
+            var current = node.TryGetPropertyValue(flag, out var rw) && rw is not null
+                          && rw.GetValueKind() == JsonValueKind.True;
+            node[flag] = !current;
             list[index] = JsonDocument.Parse(node.ToJsonString()).RootElement.Clone();
 
             assignment.Questions = JsonSerializer.Serialize(list);
@@ -487,6 +520,35 @@ public class AssignmentsController : Controller
         return RedirectToAction(nameof(Edit), new { id });
     }
 
+    // POST: /Assignments/AddQuestionWithParts/id — adds a question with parts (a), (b), …
+    // in one step: a parent with no text yet and the given number of empty parts.
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> AddQuestionWithParts(Guid id, int parts = 2)
+    {
+        var assignment = await FindEditableAssignmentAsync(id);
+        if (assignment is null) return NotFound();
+
+        var list = JsonSerializer.Deserialize<List<JsonElement>>(assignment.Questions ?? "[]")
+                   ?? new List<JsonElement>();
+
+        // The parent holds the shared text, which may stay empty: many exam questions go straight into "(a)".
+        var parentId = Guid.NewGuid().ToString();
+        list.Add(JsonSerializer.SerializeToElement(new { id = parentId, title = "", type = "0", answerKey = "" }));
+        for (var p = 0; p < Math.Clamp(parts, 2, 8); p++)
+            list.Add(JsonSerializer.SerializeToElement(new
+            {
+                id = Guid.NewGuid().ToString(), title = "", type = "0", answerKey = "", marks = 1, groupId = parentId
+            }));
+
+        assignment.Questions = JsonSerializer.Serialize(list);
+        assignment.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        TempData["Success"] = "Question with parts added. Click Edit on each part to write it and set its marks.";
+        return RedirectToAction(nameof(Edit), new { id });
+    }
+
     // POST: /Assignments/AddSubpoint/id — adds a new subpoint (e.g. "2a") under
     // an existing question, inserted right after that question's last existing
     // subpoint (or right after the question itself if it has none yet).
@@ -559,10 +621,9 @@ public class AssignmentsController : Controller
         return View("~/Views/Student/TakeAssignment.cshtml", questions);
     }
 
-    // GET: /Assignments/Details/id
-    public async Task<IActionResult> Details(Guid id)
-    {
-        var assignment = await _db.Assignments
+    /// <summary>The assignment with everything its page and the live board need, if this teacher may see it.</summary>
+    private Task<Assignment?> LoadForProgressAsync(Guid id)
+        => _db.Assignments
             .Include(a => a.Class)
                 .ThenInclude(c => c.ClassStudents)
                     .ThenInclude(cs => cs.Student)
@@ -572,36 +633,226 @@ public class AssignmentsController : Controller
                 .ThenInclude(sr => sr.StudentAnswers)
             .Include(a => a.AssignmentStudents)
                 .ThenInclude(asn => asn.Student)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(a => a.Id == id && (a.TeacherId == CurrentUserId || a.Class.TeacherId == CurrentUserId || a.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
 
+    // GET: /Assignments/Details/id?tab=students|questions|details&filter=all|submitted|not-submitted|needs-review
+    // With fragment=live, only the counters and student rows (the live board swaps them in place).
+    public async Task<IActionResult> Details(Guid id, string tab = "students", string filter = "all", string? fragment = null)
+    {
+        var assignment = await LoadForProgressAsync(id);
         if (assignment is null) return NotFound();
 
-        var assignedIds  = assignment.AssignmentStudents.Select(a => a.StudentId).ToHashSet();
-        // A draft (opened but never submitted) must not count as "submitted" — it
-        // would otherwise hide a student from NotSubmitted and pool an incomplete
-        // attempt's answers into the class-wide solve-rate stats below.
-        var submittedResults = assignment.StudentResults.Where(r => r.IsSubmitted).ToList();
-        var submittedIds     = submittedResults.Select(r => r.StudentId).ToHashSet();
+        var progress = AssignmentProgress.Build(assignment);
+        var questions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment.Questions) ?? new();
 
-        return View(new AssignmentDetailsViewModel
+        var model = new AssignmentDetailsViewModel
+        {
+            Assignment       = assignment,
+            Progress         = progress,
+            Tab              = tab is "questions" or "details" ? tab : "students",
+            Filter           = filter is "submitted" or "not-submitted" or "needs-review" ? filter : "all",
+            CanEditQuestions = assignment.AllowsQuestionEditing(assignment.StudentResults.Any(r => r.IsSubmitted)),
+            QuestionCount    = questions.Count(q => string.IsNullOrEmpty(q.Id) || !questions.Any(x => x.GroupId == q.Id)),
+            TotalMarks       = GradingService.TotalMarks(questions)
+        };
+
+        if (fragment == "live")
+            return PartialView("_DetailsLive", model);
+
+        var members = assignment.Class.ClassStudents.Select(cs => cs.StudentId).ToHashSet();
+        model.PendingRequests = (await _db.LateJoinRequests
+            .Where(r => r.AssignmentId == id && r.Status == LateJoinRequestStatus.Pending)
+            .Select(r => r.StudentId)
+            .ToListAsync()).Count(members.Contains);
+        model.QuestionStats = BuildQuestionStatsForRecipients(questions, progress);
+        model.AssignPanel   = assignment.Status is AssignmentStatus.Draft or AssignmentStatus.Active
+                                  ? await BuildAssignPanelAsync(assignment, "details")
+                                  : null;
+        return View(model);
+    }
+
+    /// <summary>
+    /// How each question went, over the newest submitted attempt of each current recipient — so every student
+    /// counts once, a retake replaces the earlier try, and former recipients are left out. Shared stems are kept
+    /// as headings (nothing to answer) so parts read in context.
+    /// </summary>
+    public static List<QuestionStatDto> BuildQuestionStatsForRecipients(List<QuestionDto> questions, AssignmentProgress progress)
+    {
+        var layout  = QuestionLayout.Compute(questions);
+        var latest  = progress.Rows.Select(r => r.Latest).Where(r => r is not null).Cast<StudentResult>().ToList();
+
+        return questions.Select((q, idx) =>
+        {
+            var answers = latest
+                .Select(r => r.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == idx))
+                .Where(a => a is not null && (!string.IsNullOrWhiteSpace(a.AnswerValue)
+                                              || !string.IsNullOrEmpty(a.ImagePath) || !string.IsNullOrEmpty(a.SketchPath)))
+                .Cast<StudentAnswer>()
+                .ToList();
+            var correct = answers.Count(a => a.IsCorrect == true);
+            return new QuestionStatDto
+            {
+                Index     = idx,
+                Label     = layout.Labels[idx],
+                IsStem    = layout.IsStem[idx],
+                IsPart    = layout.ParentOf[idx] >= 0,
+                Title     = q.Title,
+                Students  = latest.Count,
+                Answered  = answers.Count,
+                Correct   = correct,
+                NotMarked = answers.Count(a => a.IsCorrect is null),
+                SolveRate = answers.Count > 0 ? (int)Math.Round(correct * 100.0 / answers.Count) : -1
+            };
+        }).ToList();
+    }
+
+    // POST: /Assignments/Assign/id — the single "Assign to N students" action: saves who gets the work and,
+    // for a draft, makes it active, all in one transaction. On an error nothing changes and the teacher's
+    // choices are shown again so they can retry.
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Assign(
+        Guid id, AssignmentAudience audience, List<Guid>? studentIds, LateJoinPolicy lateJoin,
+        DateTime? availableFrom, DateTime? deadline, string returnTo = "edit")
+    {
+        var request = new AssignmentDistributionService.AssignRequest(
+            audience, studentIds ?? new List<Guid>(), lateJoin,
+            SchoolTime.ToUtc(availableFrom), SchoolTime.ToUtc(deadline));
+
+        var outcome = await _distribution.AssignAsync(id, CurrentUserId, request);
+        returnTo = returnTo == "details" ? "details" : "edit";
+
+        if (!outcome.Success)
+        {
+            if (outcome.ClassId == Guid.Empty) return NotFound();
+
+            TempData["AssignError"]   = outcome.Error;
+            TempData["AssignAttempt"] = JsonSerializer.Serialize(new AssignAttemptDto
+            {
+                Audience      = audience,
+                StudentIds    = request.StudentIds.ToList(),
+                LateJoin      = lateJoin,
+                AvailableFrom = request.AvailableFrom,
+                Deadline      = request.Deadline
+            });
+            return Redirect(returnTo == "details"
+                ? $"/Assignments/Details/{id}?assign=open"
+                : $"/Assignments/Edit/{id}?assign=open");
+        }
+
+        ActivityLog.Record(_env, "AssignmentAssigned", "Teacher", CurrentUserId,
+            $"assignment={id} audience={audience} recipients={outcome.Recipients} added={outcome.Added}");
+
+        var who = outcome.Recipients == 1 ? "1 student" : $"{outcome.Recipients} students";
+        var message = outcome.Published
+            ? $"Assigned to {who} from {outcome.ClassName}."
+            : outcome.Added == 0
+                ? $"No one new to add — it is assigned to {who} from {outcome.ClassName}."
+                : $"Added {(outcome.Added == 1 ? "1 student" : $"{outcome.Added} students")} — now assigned to {who} from {outcome.ClassName}.";
+        if (outcome.OpensAt is { } opens)
+            message += $" Students can start on {SchoolTime.Show(opens)} ({SchoolTime.Label}).";
+
+        TempData["Success"] = message;
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    // POST: /Assignments/SetLateJoinPolicy/id — the explicit switch for students who join the class later.
+    // Affects future joins only; nobody already in the class is added by it.
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SetLateJoinPolicy(Guid id, LateJoinPolicy policy)
+    {
+        if (!await _distribution.SetLateJoinPolicyAsync(id, CurrentUserId, policy)) return NotFound();
+
+        TempData["Success"] = policy switch
+        {
+            LateJoinPolicy.AutoAssign      => "Students who join the class from now on get this assignment automatically.",
+            LateJoinPolicy.TeacherApproval => "Students who join the class from now on wait for your approval for this assignment.",
+            _                              => "Students who join the class later are no longer given this assignment."
+        };
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    // GET: /Assignments/Review — submissions needing review: the list behind the dashboard's counter.
+    public async Task<IActionResult> Review()
+        => View(new ReviewQueueViewModel
+        {
+            Results = await ReviewQueueQuery(_db, CurrentUserId)
+                .Include(r => r.Student)
+                .Include(r => r.StudentAnswers)
+                .Include(r => r.Assignment).ThenInclude(a => a.Class)
+                .OrderBy(r => r.SubmittedAt)
+                .ToListAsync()
+        });
+
+    /// <summary>Submissions waiting for this teacher's review; the dashboard counts the same query.</summary>
+    public static IQueryable<StudentResult> ReviewQueueQuery(AppDbContext db, Guid teacherId)
+        => db.StudentResults
+             .Where(ReviewRules.NeedsReview)
+             .Where(r => r.Assignment.DeletedAt == null
+                      && (r.Assignment.TeacherId == teacherId
+                          || r.Assignment.Class.TeacherId == teacherId
+                          || r.Assignment.Class.CoTeachers.Any(ct => ct.TeacherId == teacherId)));
+
+    /// <summary>
+    /// The assign panel's starting state. A draft nobody has been chosen for suggests the whole class and the
+    /// rule matching its type; a draft with chosen students (including one from before this panel existed)
+    /// shows exactly those; an active assignment shows who already has it. After a failed attempt the
+    /// teacher's own choices come back.
+    /// </summary>
+    private async Task<AssignPanelViewModel> BuildAssignPanelAsync(Assignment assignment, string returnTo)
+    {
+        var members = await _db.ClassStudents
+            .Where(cs => cs.ClassId == assignment.ClassId)
+            .Select(cs => cs.Student)
+            .OrderBy(u => u.FullName)
+            .ToListAsync();
+
+        var assigned = (await _db.AssignmentStudents
+            .Where(x => x.AssignmentId == assignment.Id)
+            .Select(x => x.StudentId)
+            .ToListAsync()).ToHashSet();
+
+        var neverAssigned = assignment.Status == AssignmentStatus.Draft && assigned.Count == 0;
+
+        var panel = new AssignPanelViewModel
         {
             Assignment    = assignment,
-            QuestionStats = BuildQuestionStats(assignment, submittedResults.SelectMany(r => r.StudentAnswers)),
-            TotalAssigned = assignment.AssignmentStudents.Count,
+            Members       = members,
+            AssignedIds   = assigned,
+            Audience      = neverAssigned ? AssignmentAudience.EntireClass : assignment.Audience,
+            SelectedIds   = assigned.ToHashSet(),
+            LateJoin      = assignment.LateJoinPolicy == LateJoinPolicy.Manual
+                                ? Assignment.SuggestedLateJoinPolicy(assignment.Type)
+                                : assignment.LateJoinPolicy,
+            AvailableFrom = assignment.AvailableFrom,
+            Deadline      = assignment.Deadline,
+            ReturnTo      = returnTo
+        };
 
-            NotSubmitted = assignment.AssignmentStudents
-                .Where(a => !submittedIds.Contains(a.StudentId))
-                .Select(a => a.Student)
-                .ToList(),
+        if (TempData["AssignError"] is string error)
+        {
+            panel.Error = error;
+            if (TempData["AssignAttempt"] is string json)
+            {
+                try
+                {
+                    var attempt = JsonSerializer.Deserialize<AssignAttemptDto>(json);
+                    if (attempt is not null)
+                    {
+                        panel.Audience      = attempt.Audience;
+                        panel.SelectedIds   = attempt.StudentIds.Concat(assigned).ToHashSet();
+                        panel.LateJoin      = attempt.LateJoin == LateJoinPolicy.Manual ? panel.LateJoin : attempt.LateJoin;
+                        panel.AvailableFrom = attempt.AvailableFrom;
+                        panel.Deadline      = attempt.Deadline;
+                    }
+                }
+                catch (JsonException) { /* fall back to the saved state */ }
+            }
+        }
 
-            // Class members this assignment has not been given to yet.
-            AvailableStudents = assignment.Class.ClassStudents
-                .Where(cs => !assignedIds.Contains(cs.StudentId))
-                .Select(cs => cs.Student)
-                .ToList(),
-
-            CanEditQuestions = assignment.AllowsQuestionEditing(submittedResults.Any())
-        });
+        return panel;
     }
 
     /// <summary>Same breakdown, scoped to a single result — one student's one
@@ -630,46 +881,41 @@ public class AssignmentsController : Controller
         }).ToList();
     }
 
-    // GET: /Assignments/ExportGrades/id  — download a gradebook-ready CSV of results.
+    // GET: /Assignments/ExportGrades/id — a gradebook-ready CSV: one row per current recipient (the same statuses
+    // and counts as the page), then work of students who are no longer recipients, marked as such.
     public async Task<IActionResult> ExportGrades(Guid id)
     {
-        var assignment = await _db.Assignments
-            .Include(a => a.AssignmentStudents)
-                .ThenInclude(asn => asn.Student)
-            .Include(a => a.StudentResults)
-                .ThenInclude(sr => sr.Student)
-            .FirstOrDefaultAsync(a => a.Id == id && (a.TeacherId == CurrentUserId || a.Class.TeacherId == CurrentUserId || a.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
-
+        var assignment = await LoadForProgressAsync(id);
         if (assignment is null) return NotFound();
 
-        // Latest SUBMITTED result per student (highest attempt) — an abandoned
-        // draft (opened but never turned in) must never outrank a real grade just
-        // because its AttemptNumber is higher.
-        var latestByStudent = assignment.StudentResults
-            .Where(r => r.IsSubmitted)
-            .GroupBy(r => r.StudentId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.AttemptNumber).First());
-
+        var p  = AssignmentProgress.Build(assignment);
         var sb = new StringBuilder();
-        sb.AppendLine("Student,Email,Score (%),Status,Submitted At,Graded By");
+        sb.AppendLine($"Student,Email,Recipient,Status,Score (%),Submitted at ({SchoolTime.ZoneId}),Submitted attempts,In progress,Needs review,Graded by,Due ({SchoolTime.ZoneId})");
 
-        foreach (var asn in assignment.AssignmentStudents.OrderBy(a => a.Student.FullName))
+        void Row(ProgressRow r, bool current)
         {
-            latestByStudent.TryGetValue(asn.StudentId, out var result);
-
-            var score       = result is null ? "" : result.Score.ToString();
-            var status      = result is null ? "Not submitted" : result.OverallStatus.ToString();
-            var submittedAt = result is null ? "" : result.SubmittedAt.ToString("yyyy-MM-dd HH:mm");
-            var gradedBy    = result is null ? ""
-                            : result.TeacherReviewedAt.HasValue ? "Teacher" : "AI";
-
-            sb.Append(Csv(asn.Student.FullName)).Append(',')
-              .Append(Csv(asn.Student.Email)).Append(',')
-              .Append(Csv(score)).Append(',')
-              .Append(Csv(status)).Append(',')
-              .Append(Csv(submittedAt)).Append(',')
-              .Append(Csv(gradedBy)).Append('\n');
+            var latest = r.Latest;
+            var status = r.State switch
+            {
+                SubmissionState.Submitted  => "Submitted",
+                SubmissionState.InProgress => "In progress",
+                _                          => "Not started"
+            };
+            sb.Append(Csv(r.Student.FullName)).Append(',')
+              .Append(Csv(r.Student.Email)).Append(',')
+              .Append(current ? "Current" : "Former").Append(',')
+              .Append(status).Append(',')
+              .Append(latest is null ? "" : latest.Score.ToString()).Append(',')
+              .Append(latest is null ? "" : SchoolTime.Show(latest.SubmittedAt, "yyyy-MM-dd HH:mm")).Append(',')
+              .Append(r.Submitted.Count).Append(',')
+              .Append(r.Draft is null ? "No" : "Yes").Append(',')
+              .Append(r.NeedsReview ? "Yes" : "No").Append(',')
+              .Append(latest is null ? "" : latest.TeacherReviewedAt.HasValue ? "Teacher" : latest.GradingPending ? "AI (checking)" : "AI").Append(',')
+              .Append(Csv(SchoolTime.Show(r.Due, "yyyy-MM-dd HH:mm", ""))).Append('\n');
         }
+
+        foreach (var r in p.Rows) Row(r, current: true);
+        foreach (var r in p.Former) Row(r, current: false);
 
         var fileName = $"grades-{Slug(assignment.Title)}-{DateTime.UtcNow:yyyyMMdd}.csv";
         var bytes    = new UTF8Encoding(true).GetBytes(sb.ToString()); // BOM so Excel reads UTF-8
@@ -714,51 +960,84 @@ public class AssignmentsController : Controller
         });
     }
 
-    public async Task<IActionResult> SubmissionDetail(Guid resultId)
+    public async Task<IActionResult> SubmissionDetail(Guid resultId, string? returnUrl = null, string? tab = null,
+                                                      string? kind = null, int? question = null, int page = 1)
     {
+        // Opened from a student's work page or the review queue: "Back" returns there (local paths only).
+        ViewBag.ReturnUrl = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? returnUrl : null;
+
         var result = await _db.StudentResults
             .Include(r => r.Assignment)
                 .ThenInclude(a => a.Class)
             .Include(r => r.Student)
             .Include(r => r.StudentAnswers)
             .Include(r => r.StepResults)
+            .Include(r => r.ChatSessions)
             .FirstOrDefaultAsync(r => r.Id == resultId && (r.Assignment.TeacherId == CurrentUserId || r.Assignment.Class.TeacherId == CurrentUserId || r.Assignment.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
 
         if (result is null) return NotFound();
 
+        // Activity: only for a teacher of this class (checked above, before anything of the attempt is read).
+        if (tab == "activity")
+        {
+            var log = HttpContext.RequestServices.GetRequiredService<ActivityLogService>();
+            // ("kind", not "action": that name is MVC's own route value.)
+            ViewBag.Activity = await log.TimelineAsync(result, kind is "copy" or "paste" or "hint" or "tutor" ? kind : null, question, page);
+            ViewBag.RetentionDays = log.RetentionDays;
+        }
+        ViewBag.Tab = tab == "activity" ? "activity" : "answers";
+
+        // Reads only what is stored: opening the page never calls the AI.
         return View(new SubmissionDetailViewModel
         {
             Result    = result,
-            Questions = JsonSerializer.Deserialize<List<QuestionDto>>(result.Assignment.Questions) ?? new()
+            Questions = JsonSerializer.Deserialize<List<QuestionDto>>(result.Assignment.Questions) ?? new(),
+            AiCosts   = await AiCostReport.ForResultAsync(_db, result)
         });
     }
 
-    // GET: /Assignments/LiveStatus/id  — lightweight polling for the live classroom board.
-    // Returns a signature the page compares against to auto-refresh when new
-    // submissions or grade changes arrive, plus current progress counts.
+    // POST: /Assignments/RetryAiMarking — runs the AI marking of one photographed / typed-steps answer again when it
+    // did not finish. Only the missing stage is paid for: a stored reading or grading is reused. A teacher's own mark
+    // is never replaced; the result reaches the student as before (nothing is published by this).
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("ai")]
+    public async Task<IActionResult> RetryAiMarking(Guid resultId, int questionIndex, string? returnUrl = null)
+    {
+        var allowed = await _db.StudentResults.AnyAsync(r => r.Id == resultId &&
+            (r.Assignment.TeacherId == CurrentUserId || r.Assignment.Class.TeacherId == CurrentUserId ||
+             r.Assignment.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
+        if (!allowed) return NotFound();
+
+        using var scope = _scopeFactory.CreateScope();
+        var outcome = await scope.ServiceProvider.GetRequiredService<GradingService>().RegradeAnswerAsync(resultId, questionIndex);
+        if (outcome.Success) TempData["Success"] = $"AI marking finished: {outcome.Marks:0.##} of {outcome.MaxMarks:0.##} marks.";
+        else                 TempData["Error"]   = outcome.Error ?? "AI marking did not finish. Please try again later.";
+
+        var back = $"/Assignments/SubmissionDetail?resultId={resultId}" +
+                   (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? $"&returnUrl={Uri.EscapeDataString(returnUrl)}" : "");
+        return Redirect(back + $"#q{questionIndex}");
+    }
+
+    // GET: /Assignments/LiveStatus/id — the live board polls this. The signature changes only when something a
+    // teacher sees in a row changes (a hand-in, a new attempt starting, a mark, recipients); saving a draft again
+    // does not, so the board never refreshes in a loop.
     [HttpGet]
     public async Task<IActionResult> LiveStatus(Guid id)
     {
-        var assignment = await _db.Assignments
-            .Include(a => a.StudentResults)
-            .Include(a => a.AssignmentStudents)
-            .FirstOrDefaultAsync(a => a.Id == id && (a.TeacherId == CurrentUserId || a.Class.TeacherId == CurrentUserId || a.Class.CoTeachers.Any(ct => ct.TeacherId == CurrentUserId)));
-
+        var assignment = await LoadForProgressAsync(id);
         if (assignment is null) return NotFound();
 
-        var results  = assignment.StudentResults.Where(r => r.IsSubmitted).ToList();
-        var lastTick = results.Any()
-            ? results.Max(r => (r.UpdatedAt ?? r.SubmittedAt)).Ticks
-            : 0L;
-
-        // Signature changes whenever a submission is added or (re)graded.
-        var signature = $"{results.Count}:{lastTick}";
-
+        var p = AssignmentProgress.Build(assignment);
         return Json(new
         {
-            signature,
-            submitted = results.Count,
-            total     = assignment.AssignmentStudents.Count
+            signature    = p.Signature,
+            assigned     = p.Assigned,
+            submitted    = p.SubmittedStudents,
+            notSubmitted = p.NotSubmitted,
+            attempts     = p.SubmittedAttempts,
+            needsReview  = p.NeedsReviewStudents,
+            total        = p.Assigned
         });
     }
 
@@ -890,8 +1169,8 @@ public class AssignmentsController : Controller
             AssignmentId      = assignmentId,
             StudentId         = studentId,
             AssignedAt        = DateTime.UtcNow,
-            StartDateOverride = startDate,
-            DueDateOverride   = dueDate
+            StartDateOverride = SchoolTime.ToUtc(startDate),
+            DueDateOverride   = SchoolTime.ToUtc(dueDate)
         });
 
         await _db.SaveChangesAsync();
@@ -914,8 +1193,8 @@ public class AssignmentsController : Controller
             .FirstOrDefaultAsync(a => a.AssignmentId == assignmentId && a.StudentId == studentId);
         if (record is null) return NotFound();
 
-        record.StartDateOverride = startDate;
-        record.DueDateOverride   = dueDate;
+        record.StartDateOverride = SchoolTime.ToUtc(startDate);
+        record.DueDateOverride   = SchoolTime.ToUtc(dueDate);
         await _db.SaveChangesAsync();
 
         TempData["Success"] = "Student's dates updated.";
@@ -1411,17 +1690,28 @@ public class AssignmentsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> ImportFromLibrary(Guid id, [FromForm] string questionIds)
     {
+        // The target: an assignment this teacher owns or co-teaches whose questions may still change.
         var assignment = await FindEditableAssignmentAsync(id);
         if (assignment is null)
-            return Json(new { error = "Assignment not found." });
+            return NotFound(new { error = "Assignment not found." });
 
-        var ids = JsonSerializer.Deserialize<List<Guid>>(questionIds) ?? new();
+        List<Guid> ids;
+        try { ids = (JsonSerializer.Deserialize<List<Guid>>(questionIds ?? "") ?? new()).Distinct().ToList(); }
+        catch (JsonException) { return BadRequest(new { error = "No questions selected." }); }
         if (!ids.Any())
             return Json(new { error = "No questions selected." });
 
+        // Every source question must be one the Content Library lets this teacher use (their own, or shared with
+        // all teachers). One that is not — another teacher's private question, deleted, or unknown — refuses the
+        // whole batch before anything is saved, so the assignment never ends up half-imported. Missing and private
+        // look the same, so the answer does not reveal that someone else's question exists.
         var questions = await _db.Questions
-            .Where(q => ids.Contains(q.Id) && q.DeletedAt == null)
+            .UsableBy(User.LibraryOwnerKey())
+            .Where(q => ids.Contains(q.Id))
             .ToListAsync();
+        if (questions.Count != ids.Count)
+            return NotFound(new { error = "Some of the selected questions are not available to you. Nothing was added." });
+        questions = ids.Select(i => questions.First(q => q.Id == i)).ToList();   // keep the teacher's order
 
         var list = JsonSerializer.Deserialize<List<JsonElement>>(assignment.Questions ?? "[]")
                    ?? new List<JsonElement>();
@@ -1447,7 +1737,8 @@ public class AssignmentsController : Controller
                 type       = (int)q.Type,
                 difficulty = q.Difficulty.ToString(),
                 answerKey  = q.AnswerKey,
-                options    = JsonSerializer.Deserialize<List<string>>(q.Options) ?? new List<string>()
+                options    = JsonSerializer.Deserialize<List<string>>(q.Options) ?? new List<string>(),
+                syllabusTopicId = q.SyllabusTopicId   // the teacher's "Aligned to Cambridge" link travels with the question
             };
             using var doc = JsonDocument.Parse(JsonSerializer.Serialize(qObj));
             list.Add(doc.RootElement.Clone());
@@ -1498,7 +1789,7 @@ public class AssignmentsController : Controller
     [HttpPost]
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> GradeSubmission(
-        Guid resultId, Guid assignmentId, string? gradesJson, decimal bonusPoints)
+        Guid resultId, Guid assignmentId, string? gradesJson, decimal bonusPoints, string? returnUrl = null)
     {
         var result = await _db.StudentResults
             .Include(r => r.Assignment)
@@ -1516,6 +1807,9 @@ public class AssignmentsController : Controller
                             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                         ?? new();
 
+        var allQuestions = JsonSerializer.Deserialize<List<SmartSchoolAI.Models.Dtos.QuestionDto>>(
+                               result.Assignment.Questions) ?? new();
+
         foreach (var ov in overrides)
         {
             var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == ov.QuestionIndex);
@@ -1532,8 +1826,12 @@ public class AssignmentsController : Controller
                 _db.StudentAnswers.Add(answer);
             }
 
+            // Marks stay within what the question is worth; extra credit goes through the bonus below.
+            var maxPoints = ov.QuestionIndex >= 0 && ov.QuestionIndex < allQuestions.Count
+                ? allQuestions[ov.QuestionIndex].MaxPoints : 1m;
+
             answer.IsCorrect         = ov.IsCorrect;
-            answer.PointsAwarded     = ov.Points;
+            answer.PointsAwarded     = Math.Clamp(ov.Points, 0m, maxPoints);
             answer.TeacherComment    = string.IsNullOrWhiteSpace(ov.Comment) ? null : ov.Comment.Trim();
             answer.TeacherOverridden = true;
             answer.UpdatedAt         = DateTime.UtcNow;
@@ -1551,16 +1849,18 @@ public class AssignmentsController : Controller
 
         // Only questions a student can answer count: a stem that other questions point to
         // through GroupId has no answer box and is excluded, exactly as when the work was first graded.
-        var allQuestions = JsonSerializer.Deserialize<List<SmartSchoolAI.Models.Dtos.QuestionDto>>(
-                               result.Assignment.Questions) ?? new();
         var totalQuestions = allQuestions.Count(q =>
             string.IsNullOrEmpty(q.Id) || !allQuestions.Any(x => x.GroupId == q.Id));
-        result.RecomputeScore(totalQuestions, result.Assignment.PassThreshold);
+        result.RecomputeScore(totalQuestions, result.Assignment.PassThreshold, GradingService.TotalMarks(allQuestions));
 
         await _db.SaveChangesAsync();
 
         TempData["Success"] = "Grades saved.";
-        return RedirectToAction(nameof(SubmissionDetail), new { resultId });
+        return RedirectToAction(nameof(SubmissionDetail), new
+        {
+            resultId,
+            returnUrl = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? returnUrl : null
+        });
     }
 
     // ── Private helpers ────────────────────────────────────────────────────────
@@ -1673,6 +1973,10 @@ public class AssignmentsController : Controller
             .OrderBy(c => c.Name)
             .ToListAsync();
 
-    private async Task PopulateClassesDropdownAsync()
-        => ViewBag.Classes = await TeacherClassesAsync();
+    private async Task PopulateClassesDropdownAsync(Guid? presetClassId = null)
+    {
+        var classes = await TeacherClassesAsync();
+        ViewBag.Classes     = classes;
+        ViewBag.PresetClass = presetClassId is { } cid ? classes.FirstOrDefault(c => c.Id == cid) : null;
+    }
 }

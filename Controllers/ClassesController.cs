@@ -17,13 +17,15 @@ namespace SmartSchoolAI.Controllers;
 [Authorize(Roles = "Teacher")]
 public class ClassesController : Controller
 {
-    private readonly AppDbContext           _db;
-    private readonly ClassStatisticsService _stats;
+    private readonly AppDbContext                  _db;
+    private readonly ClassStatisticsService        _stats;
+    private readonly AssignmentDistributionService _distribution;
 
-    public ClassesController(AppDbContext db, ClassStatisticsService stats)
+    public ClassesController(AppDbContext db, ClassStatisticsService stats, AssignmentDistributionService distribution)
     {
-        _db    = db;
-        _stats = stats;
+        _db           = db;
+        _stats        = stats;
+        _distribution = distribution;
     }
 
     private Guid CurrentUserId =>
@@ -165,7 +167,7 @@ public class ClassesController : Controller
     }
 
     // GET: /Classes/Students — every student across the teacher's classes.
-    public async Task<IActionResult> Students(Guid? classId = null, string? search = null)
+    public async Task<IActionResult> Students(Guid? classId = null, string? search = null, int? page = null)
     {
         var classes = await _db.Classes
             .AccessibleBy(CurrentUserId)
@@ -201,9 +203,14 @@ public class ClassesController : Controller
             }
         }
 
+        // Ten per page, by name; the class breaks ties so a student in two classes keeps a stable place.
+        var ordered  = rows.OrderBy(r => r.FullName).ThenBy(r => r.ClassName).ThenBy(r => r.StudentId).ToList();
+        var pageInfo = PageInfo.For(page, ordered.Count);
+
         return View(new StudentRosterViewModel
         {
-            Rows            = rows.OrderBy(r => r.FullName).ThenBy(r => r.ClassName).ToList(),
+            Rows            = ordered.Skip((pageInfo.Page - 1) * pageInfo.PageSize).Take(pageInfo.PageSize).ToList(),
+            Page            = pageInfo,
             Classes         = classes,
             SelectedClassId = classId,
             Search          = search
@@ -216,8 +223,8 @@ public class ClassesController : Controller
         || student.FullName.Contains(search, StringComparison.OrdinalIgnoreCase)
         || student.Email.Contains(search, StringComparison.OrdinalIgnoreCase);
 
-    // GET: /Classes/Details/id?tab=assignments|results|students|settings
-    public async Task<IActionResult> Details(Guid id, string tab = "assignments")
+    // GET: /Classes/Details/id?tab=assignments|results|students|settings[&returnUrl=/Assignments/Edit/…]
+    public async Task<IActionResult> Details(Guid id, string tab = "assignments", string? returnUrl = null)
     {
         var cls = await _db.Classes
             .AccessibleBy(CurrentUserId)
@@ -238,7 +245,145 @@ public class ClassesController : Controller
             Class           = cls,
             Tab             = allowed.Contains(tab) ? tab : "assignments",
             StudentStats    = await _stats.ForStudentsAsync(cls),
-            AssignmentStats = await _stats.ForAssignmentsAsync(cls)
+            AssignmentStats = await _stats.ForAssignmentsAsync(cls),
+            PendingRequests = await _distribution.PendingForClassAsync(cls.Id, CurrentUserId),
+            // Only a path inside this site: the "back to your draft" link must never lead elsewhere.
+            ReturnUrl       = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) ? returnUrl : null
+        });
+    }
+
+    // POST: /Classes/DecideRequests — the teacher's answer to students who joined after work was given out.
+    // decision=approve gives each chosen (student, assignment) pair the work, with a personal due date where
+    // the teacher changed it in that row (field "due_{requestId}"); decision=decline closes the chosen
+    // requests without giving the work. Requests not chosen stay waiting ("decide later").
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> DecideRequests(Guid classId, List<Guid>? requestIds, string decision)
+    {
+        if (await FindOwnedClassAsync(classId) is null) return NotFound();
+
+        var ids = (requestIds ?? new()).Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            TempData["Error"] = "Choose at least one student and assignment.";
+            return RedirectToAction(nameof(Details), new { id = classId, tab = "students" });
+        }
+
+        if (decision == "decline")
+        {
+            var declined = await _distribution.DeclineAsync(classId, CurrentUserId, ids);
+            TempData["Success"] = declined.Declined == 1 ? "1 request declined." : $"{declined.Declined} requests declined.";
+            return RedirectToAction(nameof(Details), new { id = classId, tab = "students" });
+        }
+
+        var decisions = ids.Select(rid =>
+        {
+            var raw = Request.Form[$"due_{rid}"].ToString();
+            DateTime? due = DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                                              System.Globalization.DateTimeStyles.None, out var parsed)
+                ? SchoolTime.ToUtc(parsed) : null;
+            return new AssignmentDistributionService.Decision(rid, due);
+        }).ToList();
+
+        var outcome = await _distribution.ApproveAsync(classId, CurrentUserId, decisions);
+
+        if (outcome.Approved > 0)
+        {
+            var students    = outcome.Students == 1 ? "1 student" : $"{outcome.Students} students";
+            var assignments = outcome.Assignments == 1 ? "1 assignment" : $"{outcome.Assignments} assignments";
+            TempData["Success"] = outcome.Assignments == 1
+                ? $"Assigned to {students}."
+                : $"Approved {(outcome.Approved == 1 ? "1 request" : $"{outcome.Approved} requests")}: {students} · {assignments}.";
+        }
+        if (outcome.Notes.Count > 0 || outcome.Approved == 0)
+            TempData["Error"] = outcome.Notes.Count > 0
+                ? "Not approved: " + string.Join(" ", outcome.Notes)
+                : "Nothing was approved.";
+
+        return RedirectToAction(nameof(Details), new { id = classId, tab = "students" });
+    }
+
+    // GET: /Classes/StudentWork?studentId=…[&classId=…][&returnUrl=…] — one student's assignments and work
+    // across the classes this teacher can see.
+    public async Task<IActionResult> StudentWork(Guid studentId, Guid? classId = null, string? returnUrl = null)
+    {
+        var classes = await _db.Classes
+            .AccessibleBy(CurrentUserId)
+            .Where(c => c.ClassStudents.Any(cs => cs.StudentId == studentId))
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+
+        // Only a student in one of this teacher's classes can be looked at.
+        if (classes.Count == 0) return NotFound();
+
+        var student = await _db.Users.FirstOrDefaultAsync(u => u.Id == studentId);
+        if (student is null) return NotFound();
+
+        var classIds = classes.Select(c => c.Id).ToList();
+        if (classId is { } cid && !classIds.Contains(cid)) classId = null;
+        var shownClassIds = classId is { } only ? new List<Guid> { only } : classIds;
+
+        var enrollments = await _db.AssignmentStudents
+            .Include(x => x.Assignment).ThenInclude(a => a.Class)
+            .Where(x => x.StudentId == studentId && shownClassIds.Contains(x.Assignment.ClassId))
+            .ToListAsync();
+
+        var pending = await _db.LateJoinRequests
+            .Include(r => r.Assignment).ThenInclude(a => a.Class)
+            .Where(r => r.StudentId == studentId && r.Status == LateJoinRequestStatus.Pending
+                     && shownClassIds.Contains(r.Assignment.ClassId))
+            .ToListAsync();
+
+        var assignmentIds = enrollments.Select(e => e.AssignmentId).ToList();
+        var results = await _db.StudentResults
+            .Include(r => r.StudentAnswers)
+            .Where(r => r.StudentId == studentId && assignmentIds.Contains(r.AssignmentId))
+            .ToListAsync();
+
+        var now  = DateTime.UtcNow;
+        var rows = enrollments.Select(e =>
+        {
+            var mine      = results.Where(r => r.AssignmentId == e.AssignmentId).OrderByDescending(r => r.AttemptNumber).ToList();
+            var latest    = mine.FirstOrDefault(r => r.IsSubmitted);
+            var needs     = mine.Any(ReviewRules.Needs);
+            var due       = e.DueDateOverride ?? e.Assignment.Deadline;
+            var opens     = e.StartDateOverride ?? e.Assignment.AvailableFrom;
+            var status    = needs                                                   ? "Needs review"
+                          : latest?.TeacherReviewedAt != null                       ? "Reviewed"
+                          : latest is not null                                      ? "Submitted"
+                          : e.Assignment.Status != AssignmentStatus.Active          ? "Closed"
+                          : mine.Any()                                              ? "In progress"
+                          : opens.HasValue && opens.Value > now                     ? "Not open yet"
+                          : due.HasValue && due.Value < now && !e.Assignment.AllowLateSubmission ? "Overdue"
+                          :                                                           "Assigned";
+            return new StudentWorkRow
+            {
+                Assignment  = e.Assignment,
+                Due         = due,
+                PersonalDue = e.DueDateOverride.HasValue,
+                Status      = status,
+                Latest      = latest,
+                NeedsReview = needs
+            };
+        })
+        .Concat(pending.Where(r => !assignmentIds.Contains(r.AssignmentId)).Select(r => new StudentWorkRow
+        {
+            Assignment = r.Assignment,
+            Due        = r.Assignment.Deadline,
+            Status     = "Awaiting approval"
+        }))
+        .OrderByDescending(r => r.Assignment.CreatedAt)
+        .ToList();
+
+        return View(new StudentWorkViewModel
+        {
+            Student   = student,
+            Rows      = rows,
+            Classes   = classes,
+            ClassId   = classId,
+            ReturnUrl = !string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl)
+                            ? returnUrl
+                            : classId is { } back ? $"/Classes/Details/{back}?tab=students" : "/Classes/Students"
         });
     }
 
@@ -450,9 +595,17 @@ public class ClassesController : Controller
     /// action came from there, otherwise the class page's Students tab.
     /// </summary>
     private IActionResult BackToStudents(Guid classId, string? returnTo)
-        => returnTo == "roster"
-            ? RedirectToAction(nameof(Students))
-            : RedirectToAction(nameof(Details), new { id = classId, tab = "students" });
+    {
+        if (returnTo != "roster")
+            return RedirectToAction(nameof(Details), new { id = classId, tab = "students" });
+
+        // Back to the same page and filters of the roster (a page left empty shows the one before it).
+        var back = Request.HasFormContentType ? Request.Form["returnUrl"].ToString() : null;
+        return !string.IsNullOrEmpty(back) && Url.IsLocalUrl(back) &&
+               back.StartsWith("/Classes/Students", StringComparison.OrdinalIgnoreCase)
+            ? LocalRedirect(back)
+            : RedirectToAction(nameof(Students));
+    }
 
     /// <summary>
     /// Loads a student only if they are enrolled in a class this teacher owns or

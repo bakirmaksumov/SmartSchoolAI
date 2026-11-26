@@ -22,6 +22,7 @@ public class GradingService
     private readonly AppDbContext               _db;
     private readonly AnswerGradingService       _grading;
     private readonly HandwritingAnalysisService _handwriting;
+    private readonly AiMarkingService           _marking;
     private readonly IWebHostEnvironment        _env;
     private readonly ILogger<GradingService>    _logger;
 
@@ -29,12 +30,14 @@ public class GradingService
         AppDbContext db,
         AnswerGradingService grading,
         HandwritingAnalysisService handwriting,
+        AiMarkingService marking,
         IWebHostEnvironment env,
         ILogger<GradingService> logger)
     {
         _db          = db;
         _grading     = grading;
         _handwriting = handwriting;
+        _marking     = marking;
         _env         = env;
         _logger      = logger;
     }
@@ -50,7 +53,8 @@ public class GradingService
 
     public record StepsGradeOutcome(
         bool Success, string? Error, Guid ResultId, string? Overall,
-        string? Summary, string? ExpectedAnswer, int Score, object? Steps, OptionVerdict? Option = null);
+        string? Summary, string? ExpectedAnswer, int Score, object? Steps, OptionVerdict? Option = null,
+        decimal? Marks = null, decimal? MaxMarks = null, bool CanRetry = false);
 
     // ── Access / load ────────────────────────────────────────────────────────────
 
@@ -175,8 +179,8 @@ public class GradingService
 
             var graded = await _grading.GradeAsync(new[]
             {
-                new AnswerGradingService.ItemToGrade(questionIndex, questionText, answerText, null)
-            });
+                new AnswerGradingService.ItemToGrade(questionIndex, questionText, answerText, null, question.MaxPoints)
+            }, new AiCallContext("answer-check"));
 
             if (graded.TryGetValue(questionIndex, out var verdict))
                 return new TypedCheckOutcome(true, null, verdict.Correct, verdict.Feedback);
@@ -192,10 +196,10 @@ public class GradingService
     // ── Step grading (photographed or typed) ─────────────────────────────────────
 
     /// <summary>
-    /// Grades a set of numbered steps against the question, gets a second opinion,
-    /// and persists both onto the student's in-progress result. Shared by the
-    /// handwritten (OCR) and typed-steps paths; they differ only in whether there is
-    /// an <paramref name="imagePath"/> to record.
+    /// Marks a solution the student gave as numbered steps — read from a photo (and confirmed by the student) or
+    /// typed — and stores the result on their in-progress attempt. For a photo the original goes to the grading
+    /// model next to the reading, so a misread line is marked as written. When the AI does not finish, the work is
+    /// kept as "not marked yet" (never as 0) and the stage can simply be run again: the reading is not repeated.
     /// </summary>
     public async Task<StepsGradeOutcome> EvaluateStepsAsync(
         Guid assignmentId, int questionIndex, Guid studentId, string? stepsJson, string imagePath,
@@ -205,77 +209,190 @@ public class GradingService
         if (error is not null)
             return new StepsGradeOutcome(false, error, Guid.Empty, null, null, null, 0, null);
 
-        // JS posts camelCase ({number, text}) — bind case-insensitively.
-        var steps = JsonSerializer.Deserialize<List<HandwritingStepDto>>(
-                        stepsJson ?? "[]",
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                    ?? new();
-
-        steps.RemoveAll(s => string.IsNullOrWhiteSpace(s.Text));
+        var steps = ParseSteps(stepsJson);
         if (steps.Count == 0)
             return new StepsGradeOutcome(false, "No steps to evaluate.", Guid.Empty, null, null, null, 0, null);
 
-        (byte[] bytes, string mime)? answerKeyImage = null;
-        var answerKeyImagePath = QuestionAttachmentStorage.ResolveFromWebPath(_env, question!.AnswerKeyImagePath);
-        if (answerKeyImagePath is not null)
-        {
-            answerKeyImage = (
-                await System.IO.File.ReadAllBytesAsync(answerKeyImagePath),
-                SubmissionStorage.ContentTypeFor(answerKeyImagePath));
-        }
-
-        HandwritingAnalysisDto analysis;
+        var result = await GetOrCreateSavedResultAsync(assignmentId, studentId);   // saved before the slow AI part
+        var mark   = await MarkStepsAsync(result, assignment!, question!, questionIndex, steps, imagePath);
         try
         {
-            analysis = await _handwriting.EvaluateStepsAsync(
-                question.Title, question.AnswerKey, steps, answerKeyImage);
+            await _db.SaveChangesAsync();
         }
-        catch (Exception ex)
+        catch (DbUpdateException)
         {
-            _logger.LogError(ex, "EvaluateStepsAsync failed for assignment {AssignmentId} q{QuestionIndex}", assignmentId, questionIndex);
-            return new StepsGradeOutcome(false, "Evaluation failed. Please try again.", Guid.Empty, null, null, null, 0, null);
+            // Another request wrote this question's answer meanwhile (a second check of the same question, the draft
+            // autosave). Read the attempt again and apply the marking to it: the reading and the grading are stored,
+            // so this costs no AI call.
+            _db.ChangeTracker.Clear();
+            result = await GetOrCreateSavedResultAsync(assignmentId, studentId);
+            mark   = await MarkStepsAsync(result, assignment!, question!, questionIndex, steps, imagePath);
+            await _db.SaveChangesAsync();
         }
 
-        // The student's own words are never replaced by the model's rewording of them.
-        analysis.Steps = AlignWithStudentSteps(analysis.Steps, steps);
-
-        // Second opinion: an independent pass re-solves the task and checks the grade.
-        // A single grading call can mark a correct solution wrong, so a disagreement
-        // or a low-confidence verdict is escalated to the teacher instead of standing.
-        var verification = await _handwriting.VerifyEvaluationAsync(
-            question.Title, question.AnswerKey, steps, analysis);
-
-        if (verification is not null && !verification.Agrees &&
-            !string.IsNullOrWhiteSpace(verification.Overall))
-        {
-            analysis.Overall = verification.Overall;   // the more rigorous pass wins
-        }
-
-        // The verifier marks every step on its own. A step it proves wrong is corrected together with
-        // its reason, even when it agrees with the overall verdict (a step wrongly passed by the
-        // first marker was the reported false green).
-        var correctedSteps = ApplyStepCorrections(analysis.Steps, verification);
-
-        var result          = await GetOrCreateResultAsync(assignmentId, studentId);
-        var questionCorrect = string.Equals(analysis.Overall, "correct", StringComparison.OrdinalIgnoreCase);
-
-        UpsertQuestionAnswer(result, question, questionIndex, imagePath, analysis, questionCorrect);
-        ApplyVerification(result, questionIndex, verification, correctedSteps);
-        ReplaceStepResults(result, questionIndex, analysis);
-
-        var allQuestions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment!.Questions) ?? new();
-        RecomputeResultScore(result, CountAnswerableQuestions(allQuestions), assignment.PassThreshold);
-
-        await _db.SaveChangesAsync();
+        if (!mark.Success)
+            return new StepsGradeOutcome(false, mark.Error, result.Id, null, null, null, result.Score, steps, CanRetry: true);
 
         // On a choice question the selected option is judged separately from the working: by the teacher's
         // key when there is one, otherwise by the AI with the full choices. Correct working can never make a
         // wrong option right, and a working error never makes a right option wrong.
-        var option = await JudgeSelectedOptionAsync(question, questionIndex, selectedAnswer);
+        var option = await JudgeSelectedOptionAsync(question!, questionIndex, selectedAnswer);
 
         return new StepsGradeOutcome(
-            true, null, result.Id, analysis.Overall, analysis.Summary,
-            analysis.ExpectedAnswer, result.Score, analysis.Steps, option);
+            true, null, result.Id, mark.Overall, mark.Summary, mark.ExpectedAnswer, result.Score, mark.Steps, option,
+            mark.Marks, question!.MaxPoints);
+    }
+
+    /// <summary>
+    /// Runs the AI marking of one photographed or typed-steps answer again — for the teacher's "Retry AI marking" and
+    /// for work handed in while the AI was unavailable. Only the unfinished stage costs anything: a stored reading or
+    /// grading is reused. A teacher's own mark is never replaced.
+    /// </summary>
+    public async Task<StepsGradeOutcome> RegradeAnswerAsync(Guid resultId, int questionIndex)
+    {
+        var result = await _db.StudentResults
+            .Include(r => r.StudentAnswers).Include(r => r.StepResults).Include(r => r.Assignment)
+            .FirstOrDefaultAsync(r => r.Id == resultId);
+        var answer = result?.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == questionIndex);
+        if (result is null || answer is null) return new StepsGradeOutcome(false, "Answer not found.", Guid.Empty, null, null, null, 0, null);
+
+        var questions = JsonSerializer.Deserialize<List<QuestionDto>>(result.Assignment.Questions) ?? new();
+        if (questionIndex < 0 || questionIndex >= questions.Count)
+            return new StepsGradeOutcome(false, "Invalid question index.", result.Id, null, null, null, result.Score, null);
+
+        var steps = StepsOf(answer, result);
+        if (steps.Count == 0)
+            return new StepsGradeOutcome(false, "There are no steps to mark for this answer.", result.Id, null, null, null, result.Score, null);
+
+        var mark = await MarkStepsAsync(result, result.Assignment, questions[questionIndex], questionIndex, steps, answer.ImagePath ?? "");
+        await _db.SaveChangesAsync();
+        return mark.Success
+            ? new StepsGradeOutcome(true, null, result.Id, mark.Overall, mark.Summary, mark.ExpectedAnswer, result.Score, mark.Steps, null, mark.Marks, questions[questionIndex].MaxPoints)
+            : new StepsGradeOutcome(false, mark.Error, result.Id, null, null, null, result.Score, null, CanRetry: true);
+    }
+
+    /// <summary>True for a photographed/typed-steps answer whose AI marking did not finish.</summary>
+    public static bool IsUnfinished(StudentAnswer a)
+        => !a.TeacherOverridden && a.GradingKey is null
+           && a.GradingJson is not null && a.GradingJson.Contains("\"unfinished\":true", StringComparison.Ordinal);
+
+    /// <summary>The student's steps kept on an answer whose marking did not finish (for the teacher's view).</summary>
+    public static List<HandwritingStepDto> PendingSteps(StudentAnswer answer)
+    {
+        try
+        {
+            var stored = JsonSerializer.Deserialize<AiMarkingService.Verdict>(answer.GradingJson ?? "{}", CaseInsensitive);
+            return stored?.StudentSteps?.Select(s => new HandwritingStepDto { Number = s.Number, Text = s.Text }).ToList() ?? new();
+        }
+        catch (JsonException) { return new(); }
+    }
+
+    private sealed record MarkOutcome(bool Success, string? Error, string? Overall, string? Summary, string? ExpectedAnswer,
+                                      decimal? Marks, List<HandwritingStepDto> Steps);
+
+    private static readonly JsonSerializerOptions CaseInsensitive = new() { PropertyNameCaseInsensitive = true };
+
+    private static List<HandwritingStepDto> ParseSteps(string? stepsJson)
+    {
+        // JS posts camelCase ({number, text}) — bind case-insensitively.
+        var steps = JsonSerializer.Deserialize<List<HandwritingStepDto>>(stepsJson ?? "[]", CaseInsensitive) ?? new();
+        steps.RemoveAll(s => string.IsNullOrWhiteSpace(s.Text));
+        return steps;
+    }
+
+    /// <summary>The student's own steps for an answer: from the stored marking, else from the step results (older work).</summary>
+    private static List<HandwritingStepDto> StepsOf(StudentAnswer answer, StudentResult result)
+    {
+        if (!string.IsNullOrEmpty(answer.GradingJson))
+        {
+            try
+            {
+                var stored = JsonSerializer.Deserialize<AiMarkingService.Verdict>(answer.GradingJson, CaseInsensitive);
+                if (stored?.StudentSteps is { Count: > 0 } own)
+                    return own.Select(s => new HandwritingStepDto { Number = s.Number, Text = s.Text }).ToList();
+            }
+            catch (JsonException) { /* fall back to the step results */ }
+        }
+        return result.StepResults.Where(s => s.QuestionIndex == answer.QuestionIndex).OrderBy(s => s.StepNumber)
+                     .Select(s => new HandwritingStepDto { Number = s.StepNumber, Text = s.StepText }).ToList();
+    }
+
+    private List<AiMarkingService.Page> LoadPhotos(Guid studentId, string? imagePath)
+    {
+        var pages = new List<AiMarkingService.Page>();
+        foreach (var web in SubmissionMedia.Paths(imagePath))
+        {
+            var file = SubmissionStorage.FindFile(_env, studentId, Path.GetFileName(web));
+            if (file is not null) pages.Add(new(System.IO.File.ReadAllBytes(file), SubmissionStorage.ContentTypeFor(file)));
+        }
+        return pages;
+    }
+
+    private async Task<AiMarkingService.Page?> LoadReferenceAsync(QuestionDto question)
+    {
+        var path = QuestionAttachmentStorage.ResolveFromWebPath(_env, question.AnswerKeyImagePath);
+        return path is null ? null : new(await System.IO.File.ReadAllBytesAsync(path), SubmissionStorage.ContentTypeFor(path));
+    }
+
+    /// <summary>
+    /// The marking itself: photo → reading (stored, reused) → grading with the original photo (stored, reused) →
+    /// the independent check (stored with the grading) → marks on the answer. An AI failure leaves the answer
+    /// marked as unfinished, with the photo and the student's steps kept.
+    /// </summary>
+    private async Task<MarkOutcome> MarkStepsAsync(
+        StudentResult result, Assignment assignment, QuestionDto question, int questionIndex,
+        List<HandwritingStepDto> steps, string imagePath)
+    {
+        var context = new AiCallContext("grading", null, result.StudentId, assignment.Id, result.Id, questionIndex.ToString());
+        var photos  = LoadPhotos(result.StudentId, imagePath);
+        var allQuestions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment.Questions) ?? new();
+
+        AiMarkingService.Recognition? recognition = null;
+        AiMarkingService.Verdict verdict;
+        try
+        {
+            if (photos.Count > 0)
+                recognition = await _marking.RecognizeAsync(photos, question.Title, context);
+
+            var request = new AiMarkingService.GradeRequest(
+                question.Title, question.MaxPoints, question.AnswerKey, question.MarkScheme,
+                steps, photos, recognition, await LoadReferenceAsync(question));
+
+            verdict = await _marking.GradeAsync(request, context, (v, key) =>
+                _handwriting.VerifyEvaluationAsync(question.Title, question.AnswerKey, steps,
+                    new HandwritingAnalysisDto { Steps = v.Steps, Overall = v.Overall, Summary = v.Summary },
+                    context with { CacheKey = key }));
+        }
+        catch (AiCallException ex)
+        {
+            _logger.LogWarning("AI marking did not finish ({Kind}) for result {ResultId} q{QuestionIndex}", ex.Kind, result.Id, questionIndex);
+            RecordUnfinished(result, question, questionIndex, imagePath, steps, recognition?.Key, ex.Kind);
+            RecomputeResultScore(result, allQuestions, assignment.PassThreshold);
+            var why = ex.Kind switch
+            {
+                "timeout"        => "the AI took too long",
+                "bad-response"   => "the AI's answer could not be read",
+                "not-configured" => "AI marking is not set up",
+                _                => "the AI service was not available"
+            };
+            return new MarkOutcome(false, $"Marking did not finish ({why}). Your work is saved — press Try again.",
+                                   null, null, null, null, steps);
+        }
+
+        verdict.StudentSteps = steps.Select(s => new AiMarkingService.RecognizedStep { Number = s.Number, Text = s.Text }).ToList();
+        var marked    = AlignWithStudentSteps(verdict.Steps, steps);
+        var corrected = ApplyStepCorrections(marked, verdict.Verification);
+        verdict.Steps = marked;
+        var points    = verdict.Points(question.MaxPoints);
+
+        UpsertMarkedAnswer(result, question, questionIndex, imagePath, verdict, points, recognition?.Key);
+        ApplyVerification(result, questionIndex, verdict.Verification, corrected);
+        ApplyTranscriptionFlags(result, questionIndex, verdict);
+        ReplaceStepResults(result, questionIndex, marked);
+        RecomputeResultScore(result, allQuestions, assignment.PassThreshold);
+
+        var overall = points >= question.MaxPoints ? "correct" : points > 0 ? "partial" : "incorrect";
+        return new MarkOutcome(true, null, overall, verdict.Summary, verdict.ExpectedAnswer, points, marked);
     }
 
     private async Task<OptionVerdict?> JudgeSelectedOptionAsync(QuestionDto question, int questionIndex, string? selectedAnswer)
@@ -310,6 +427,7 @@ public class GradingService
 
             if (answer is null || answer.TeacherOverridden)        continue;
             if (!string.IsNullOrEmpty(answer.ImagePath))           continue; // photo — already AI-graded
+            if (!string.IsNullOrEmpty(answer.SketchPath))          continue; // drawing — graded from the picture
             if (string.IsNullOrWhiteSpace(answer.AnswerValue))     continue; // no answer given
             if (answer.IsCorrect == true)                          continue; // already matched the key
 
@@ -318,29 +436,104 @@ public class GradingService
 
             items.Add(new AnswerGradingService.ItemToGrade(
                 i, q.Title, answer.AnswerValue,
-                string.IsNullOrWhiteSpace(q.AnswerKey) ? null : q.AnswerKey));
+                string.IsNullOrWhiteSpace(q.AnswerKey) ? null : q.AnswerKey,
+                q.MaxPoints, q.MarkScheme));
         }
 
         if (items.Count == 0) return;
 
+        Dictionary<int, AnswerGradingService.GradedItem> graded;
         try
         {
-            var graded = await _grading.GradeAsync(items);
-
-            foreach (var item in items)
-            {
-                if (!graded.TryGetValue(item.Index, out var verdict)) continue;
-
-                var answer = result.StudentAnswers.First(a => a.QuestionIndex == item.Index);
-                answer.IsCorrect     = verdict.Correct;
-                answer.PointsAwarded = verdict.Correct ? 1m : 0m;
-                answer.AiSummary     = verdict.Feedback;
-                answer.UpdatedAt     = DateTime.UtcNow;
-            }
+            graded = await _grading.GradeAsync(items,
+                new AiCallContext("typed-grading", null, result.StudentId, result.AssignmentId, result.Id));
         }
-        catch
+        catch (Exception ex)
         {
-            // Leave these answers ungraded (shown as N/A); the teacher can grade manually.
+            _logger.LogWarning("AI marking of {Count} answer(s) failed for result {ResultId} ({Kind})", items.Count, result.Id,
+                               (ex as AiCallException)?.Kind ?? ex.GetType().Name);
+            graded = new();
+        }
+
+        foreach (var item in items)
+        {
+            var answer = result.StudentAnswers.First(a => a.QuestionIndex == item.Index);
+            answer.UpdatedAt = DateTime.UtcNow;
+
+            if (graded.TryGetValue(item.Index, out var verdict))
+            {
+                var fromCriteria = verdict.Criteria.Count > 0
+                    ? new AiMarkingService.Verdict { Criteria = verdict.Criteria }.Points(item.MaxMarks)
+                    : (decimal?)null;
+                answer.PointsAwarded = fromCriteria ?? PointsFor(verdict.Correct, verdict.Marks, item.MaxMarks);
+                answer.IsCorrect     = fromCriteria is { } p ? p >= item.MaxMarks : verdict.Correct;
+                answer.AiSummary     = verdict.Feedback;
+                answer.GradingJson   = JsonSerializer.Serialize(new AiMarkingService.Verdict
+                {
+                    Criteria = verdict.Criteria, Summary = verdict.Feedback, Model = _marking.GradingModel,
+                    Overall  = answer.IsCorrect == true ? "correct" : answer.PointsAwarded > 0 ? "partial" : "incorrect"
+                });
+                continue;
+            }
+
+            // The AI failed or gave no verdict for this answer. The hand-in stands; the answer waits for the teacher
+            // in the review queue instead of silently staying unmarked.
+            answer.NeedsReview = true;
+            answer.ReviewNote  = "The AI could not mark this answer. Please mark it yourself.";
+        }
+    }
+
+    /// <summary>A drawn answer waiting to be marked: the saved picture and the question it answers.</summary>
+    public sealed record SketchToGrade(StudentAnswer Answer, QuestionDto Question, string QuestionText, byte[] Png);
+
+    /// <summary>
+    /// Marks drawn answers from the picture with a vision model. Judging a freehand sketch is far
+    /// less reliable than checking a typed answer, so the AI's mark is only a first guess: every
+    /// drawing stays flagged for the teacher to confirm. An AI failure leaves the answer unmarked.
+    /// </summary>
+    public async Task GradeSketchesAsync(IReadOnlyList<SketchToGrade> items)
+    {
+        if (items.Count == 0) return;
+
+        // The AI calls run side by side; only the results below touch the tracked entities.
+        var verdicts = await Task.WhenAll(items.Select(async item =>
+        {
+            try
+            {
+                return await _handwriting.GradeSketchAsync(
+                    item.QuestionText, item.Question.AnswerKey, item.Question.MaxPoints, item.Png, item.Answer.AnswerValue,
+                    new AiCallContext("sketch", null, null, null, item.Answer.StudentResultId, item.Answer.QuestionIndex.ToString()));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Sketch grading failed for question index {Index}", item.Answer.QuestionIndex);
+                return null;
+            }
+        }));
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var answer  = items[i].Answer;
+            var verdict = verdicts[i];
+            if (answer.TeacherOverridden) continue;
+
+            answer.NeedsReview = true;
+            answer.UpdatedAt   = DateTime.UtcNow;
+
+            if (verdict is null)
+            {
+                answer.IsCorrect     = null;
+                answer.PointsAwarded = null;
+                answer.AiConfidence  = null;
+                answer.ReviewNote    = "Drawn answer: the AI could not mark this drawing. Please mark it yourself.";
+                continue;
+            }
+
+            answer.IsCorrect     = verdict.Correct;
+            answer.PointsAwarded = PointsFor(verdict.Correct, verdict.Marks, items[i].Question.MaxPoints);
+            answer.AiSummary     = verdict.Feedback;
+            answer.AiConfidence  = verdict.Confidence;
+            answer.ReviewNote    = "Drawn answer: the AI's mark is only a first guess. Please look at the drawing and confirm the marks.";
         }
     }
 
@@ -386,6 +579,28 @@ public class GradingService
         return result;
     }
 
+    /// <summary>
+    /// The attempt in progress, created and saved now if there is none. Used where other requests can touch the same
+    /// attempt meanwhile (marking that waits seconds for the AI, the draft autosave): the attempt exists in the
+    /// database before the slow part, so a second request finds it instead of creating the same attempt number.
+    /// When two requests create it at the same moment, the loser takes the winner's attempt.
+    /// </summary>
+    public async Task<StudentResult> GetOrCreateSavedResultAsync(Guid assignmentId, Guid studentId)
+    {
+        var result = await GetOrCreateResultAsync(assignmentId, studentId);
+        if (_db.Entry(result).State != EntityState.Added) return result;
+        try
+        {
+            await _db.SaveChangesAsync();
+            return result;
+        }
+        catch (DbUpdateException)
+        {
+            _db.Entry(result).State = EntityState.Detached;
+            return await GetOrCreateResultAsync(assignmentId, studentId);
+        }
+    }
+
     /// <summary>Recomputes the aggregate score/status and refreshes the summary text.</summary>
     public void RecomputeResultScore(StudentResult result, int totalQuestions, int passThreshold)
     {
@@ -395,9 +610,45 @@ public class GradingService
         result.AiSummary = $"{correctCount} of {totalQuestions} questions correct.";
     }
 
+    /// <summary>
+    /// Recomputes the score as marks gained out of marks available, so a 4-mark question
+    /// weighs four times a 1-mark one. The summary names the marks once any question is
+    /// worth more than one.
+    /// </summary>
+    public void RecomputeResultScore(StudentResult result, List<QuestionDto> questions, int passThreshold)
+    {
+        var totalQuestions = CountAnswerableQuestions(questions);
+        var totalMarks     = TotalMarks(questions);
+        var correctCount   = result.StudentAnswers.Count(a => a.IsCorrect == true);
+
+        result.RecomputeScore(totalQuestions, passThreshold, totalMarks);
+        result.AiSummary = totalMarks == totalQuestions
+            ? $"{correctCount} of {totalQuestions} questions correct."
+            : $"{correctCount} of {totalQuestions} questions correct · " +
+              $"{FormatMarks(result.StudentAnswers.Sum(a => a.PointsAwarded ?? 0m))} of {FormatMarks(totalMarks)} marks.";
+    }
+
     /// <summary>Count of questions a student can actually answer — excludes group headers.</summary>
     public int CountAnswerableQuestions(List<QuestionDto> questions)
         => questions.Count(q => !IsGroupHeader(questions, q));
+
+    /// <summary>Marks available across the questions a student can answer; a shared stem carries none.</summary>
+    public static decimal TotalMarks(List<QuestionDto> questions)
+        => questions.Where(q => string.IsNullOrEmpty(q.Id) || !questions.Any(x => x.GroupId == q.Id))
+                    .Sum(q => q.MaxPoints);
+
+    /// <summary>
+    /// Points for an AI verdict: the marks the AI gave when it gave some, otherwise all or nothing,
+    /// never outside 0..max. A verdict of "correct" always earns full marks.
+    /// </summary>
+    public static decimal PointsFor(bool correct, decimal? marks, decimal maxMarks)
+    {
+        if (correct) return maxMarks;
+        return marks is { } m ? Math.Clamp(Math.Round(m * 2, MidpointRounding.AwayFromZero) / 2, 0m, maxMarks) : 0m;
+    }
+
+    private static string FormatMarks(decimal value)
+        => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// A question referenced by another question's GroupId (e.g. the "Q2" stem
@@ -410,44 +661,108 @@ public class GradingService
 
     // ── Internal helpers ─────────────────────────────────────────────────────────
 
-    /// <summary>Inserts or updates the per-question answer for a step submission.</summary>
-    private void UpsertQuestionAnswer(
-        StudentResult result, QuestionDto question, int questionIndex,
-        string imagePath, HandwritingAnalysisDto analysis, bool questionCorrect)
+    private StudentAnswer AnswerFor(StudentResult result, QuestionDto question, int questionIndex)
     {
-        var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == questionIndex);
+        var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == questionIndex)
+                     // Saved meanwhile by another request (the draft autosave while the AI was marking): use that row.
+                     ?? _db.StudentAnswers.FirstOrDefault(a => a.StudentResultId == result.Id && a.QuestionIndex == questionIndex);
         if (answer is null)
         {
-            answer = new StudentAnswer
-            {
-                QuestionIndex   = questionIndex,
-                StudentResultId = result.Id
-            };
+            answer = new StudentAnswer { QuestionIndex = questionIndex, StudentResultId = result.Id };
             result.StudentAnswers.Add(answer);
             _db.StudentAnswers.Add(answer);
         }
-
+        else if (!result.StudentAnswers.Contains(answer))
+        {
+            result.StudentAnswers.Add(answer);
+        }
         answer.QuestionId = question.Id ?? $"q{questionIndex}";
-        answer.ImagePath  = imagePath;
-        answer.AiSummary  = analysis.Summary;
         answer.UpdatedAt  = DateTime.UtcNow;
+        return answer;
+    }
+
+    /// <summary>Stores a finished marking on the answer: marks (partial ones too), the reasons and both stage keys.</summary>
+    private void UpsertMarkedAnswer(
+        StudentResult result, QuestionDto question, int questionIndex, string imagePath,
+        AiMarkingService.Verdict verdict, decimal points, string? recognitionKey)
+    {
+        var answer = AnswerFor(result, question, questionIndex);
+        answer.ImagePath      = imagePath;
+        answer.AiSummary      = verdict.Summary;
+        answer.RecognitionKey = recognitionKey;
+        answer.GradingKey     = verdict.Key;
+        answer.GradingJson    = JsonSerializer.Serialize(verdict);
 
         // On a choice question the photo is supporting work, not the answer:
         // the selected option and its grade must stay untouched.
         if (IsChoiceQuestion(question))
         {
-            answer.WorkText = string.Join("\n", analysis.Steps.Select(s => s.Text));
+            answer.WorkText = string.Join("\n", verdict.Steps.Select(s => s.Text));
             return;
         }
 
-        answer.AnswerValue = analysis.Steps.LastOrDefault()?.Text ?? string.Empty;
+        answer.AnswerValue = verdict.Steps.LastOrDefault()?.Text ?? string.Empty;
 
         // Don't clobber a teacher's manual grade when a student resubmits.
         if (!answer.TeacherOverridden)
         {
-            answer.IsCorrect     = questionCorrect;
-            answer.PointsAwarded = questionCorrect ? 1m : 0m;
+            answer.PointsAwarded = points;
+            answer.IsCorrect     = points >= question.MaxPoints;
         }
+    }
+
+    /// <summary>
+    /// The AI did not finish: the photo and the student's steps are kept, the answer is "not marked yet" (no marks,
+    /// not 0) and waits in the teacher's review queue with a way to run the marking again.
+    /// </summary>
+    private void RecordUnfinished(
+        StudentResult result, QuestionDto question, int questionIndex, string imagePath,
+        List<HandwritingStepDto> steps, string? recognitionKey, string failure)
+    {
+        var answer = AnswerFor(result, question, questionIndex);
+        answer.ImagePath      = imagePath;
+        answer.RecognitionKey = recognitionKey;
+        answer.GradingKey     = null;
+        answer.GradingJson    = JsonSerializer.Serialize(new
+        {
+            unfinished   = true,
+            failure,
+            studentSteps = steps.Select(s => new { number = s.Number, text = s.Text })
+        });
+        if (IsChoiceQuestion(question)) answer.WorkText = string.Join("\n", steps.Select(s => s.Text));
+        else                            answer.AnswerValue = steps.LastOrDefault()?.Text ?? string.Empty;
+
+        if (answer.TeacherOverridden) return;
+        if (!IsChoiceQuestion(question))
+        {
+            answer.IsCorrect     = null;
+            answer.PointsAwarded = null;
+        }
+        answer.AiSummary   = null;
+        answer.NeedsReview = true;
+        answer.ReviewNote  = recognitionKey is null && !string.IsNullOrEmpty(imagePath)
+            ? "AI marking did not finish: the photo has not been read yet. Press “Retry AI marking”, or mark it yourself."
+            : "AI marking did not finish (the photo was read; the marking was not). Press “Retry AI marking”, or mark it yourself.";
+    }
+
+    /// <summary>
+    /// A line whose reading decides marks and could not be read with confidence goes to the teacher, with the
+    /// marker's note ("Line 3: the sign before 4 is unclear. 1 mark depends on it.").
+    /// </summary>
+    private static void ApplyTranscriptionFlags(StudentResult result, int questionIndex, AiMarkingService.Verdict verdict)
+    {
+        var answer = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == questionIndex);
+        if (answer is null || answer.TeacherOverridden) return;
+
+        var doubtful = verdict.TranscriptionIssues.Where(i => !i.Certain && (i.MarksAffected ?? 0) > 0).ToList();
+        if (!verdict.NeedsTeacher && doubtful.Count == 0) return;
+
+        var note = !string.IsNullOrWhiteSpace(verdict.TeacherNote)
+            ? verdict.TeacherNote!
+            : string.Join(" ", doubtful.Select(i =>
+                $"Line {i.Step}: “{i.OnPhoto ?? i.Transcribed}” is unclear. {AiMarkingService.Marks(i.MarksAffected ?? 0)} mark(s) depend on it."));
+        answer.NeedsReview = true;
+        answer.ReviewNote  = string.IsNullOrWhiteSpace(answer.ReviewNote) ? note : $"{note} {answer.ReviewNote}";
     }
 
     /// <summary>
@@ -553,13 +868,13 @@ public class GradingService
     }
 
     /// <summary>Replaces all step results for a question with the latest evaluation.</summary>
-    private void ReplaceStepResults(StudentResult result, int questionIndex, HandwritingAnalysisDto analysis)
+    private void ReplaceStepResults(StudentResult result, int questionIndex, List<HandwritingStepDto> markedSteps)
     {
         var oldSteps = result.StepResults.Where(s => s.QuestionIndex == questionIndex).ToList();
         _db.StepResults.RemoveRange(oldSteps);
         foreach (var s in oldSteps) result.StepResults.Remove(s);
 
-        foreach (var s in analysis.Steps)
+        foreach (var s in markedSteps)
         {
             var step = new StepResult
             {
@@ -578,7 +893,7 @@ public class GradingService
     }
 
     /// <summary>True for multiple/single choice questions (answered by option letter).</summary>
-    private static bool IsChoiceQuestion(QuestionDto q)
+    public static bool IsChoiceQuestion(QuestionDto q)
         => q.Type is "1" or "MultipleChoice" or "4" or "SingleChoice";
 
     /// <summary>Reads a question's options, which are stored as a JSON array.</summary>

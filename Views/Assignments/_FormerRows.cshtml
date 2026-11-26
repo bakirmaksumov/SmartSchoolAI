@@ -1,0 +1,28 @@
+@model SmartSchoolAI.ViewModels.AssignmentDetailsViewModel
+@using SmartSchoolAI.Services
+@* Work by students who are no longer recipients: kept and openable, never counted in this class's numbers. *@
+@if (Model.Progress.Former.Any())
+{
+  <div class="former-recipients border-top px-3 py-3" id="formerRecipients">
+    <div class="small fw-semibold text-muted mb-2">
+      <i class="bx bx-history me-1"></i>Earlier recipients (removed from this task) — their work is kept and not counted above
+    </div>
+    <ul class="list-unstyled mb-0">
+      @foreach (var row in Model.Progress.Former)
+      {
+        <li class="d-flex flex-wrap align-items-center gap-2 py-1" data-former="@row.Student.Id" data-version="@row.Version">
+          <span class="fw-semibold js-anon">@row.Student.FullName</span>
+          <span class="badge bg-label-secondary">Former recipient</span>
+          @foreach (var r in row.Submitted)
+          {
+            <a href="/Assignments/SubmissionDetail?resultId=@r.Id" class="badge bg-label-primary text-decoration-none">Attempt @r.AttemptNumber · @r.Score% · @SchoolTime.Show(r.SubmittedAt, "dd MMM")</a>
+          }
+          @if (row.Draft is not null)
+          {
+            <span class="badge bg-label-info">attempt @row.Draft.AttemptNumber not submitted</span>
+          }
+        </li>
+      }
+    </ul>
+  </div>
+}

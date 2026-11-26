@@ -8,6 +8,15 @@ public sealed class TutorChatRequest
     /// <summary>The user's message text.</summary>
     public string Message { get; set; } = string.Empty;
 
+    /// <summary>One id per request the student made (a hint, a message, a mode button): the activity log counts it once.</summary>
+    public Guid? RequestId { get; set; }
+
+    /// <summary>hint | message | mode — what the student did; null from older pages (not logged).</summary>
+    public string? Kind { get; set; }
+
+    /// <summary>This request comes from the student opening the tutor (their click): the opening is logged with it.</summary>
+    public bool Opened { get; set; }
+
     /// <summary>Chat mode: "hint", "concept", or "solution".</summary>
     public string Mode { get; set; } = "hint";
 

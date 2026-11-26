@@ -162,6 +162,13 @@
 
             @if (User.IsInRole("Admin"))
             {
+              <!-- Syllabus library (import and publish syllabus topics) -->
+              <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Syllabus" ? "active" : "")">
+                <a href="/Syllabus" class="menu-link">
+                  <i class="menu-icon tf-icons bx bx-book-bookmark"></i>
+                  <div>Syllabus library</div>
+                </a>
+              </li>
               <!-- Admin Panel -->
               <li class="menu-item @(ViewContext.RouteData.Values["controller"]?.ToString() == "Admin" ? "active" : "")">
                 <a href="/Admin" class="menu-link">

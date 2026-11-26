@@ -22,6 +22,7 @@
     <form method="post" asp-controller="Classes" asp-action="EditStudent" class="modal-content">
       @Html.AntiForgeryToken()
       <input type="hidden" name="returnTo" value="@Model" />
+      <input type="hidden" name="returnUrl" value="@(Context.Request.Path + Context.Request.QueryString)" />
       <input type="hidden" name="classId"   id="editClassId" />
       <input type="hidden" name="studentId" id="editStudentId" />
 
@@ -53,6 +54,7 @@
     <form method="post" asp-controller="Classes" asp-action="ResetStudentPassword" class="modal-content">
       @Html.AntiForgeryToken()
       <input type="hidden" name="returnTo" value="@Model" />
+      <input type="hidden" name="returnUrl" value="@(Context.Request.Path + Context.Request.QueryString)" />
       <input type="hidden" name="classId"   id="resetClassId" />
       <input type="hidden" name="studentId" id="resetStudentId" />
 

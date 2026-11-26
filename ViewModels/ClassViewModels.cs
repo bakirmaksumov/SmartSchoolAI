@@ -21,6 +21,12 @@ public class ClassDetailsViewModel
     /// <summary>Keyed by assignment id.</summary>
     public Dictionary<Guid, ClassAssignmentStatDto> AssignmentStats { get; set; } = new();
 
+    /// <summary>Students who joined after an assignment was given out and wait for the teacher's decision.</summary>
+    public List<LateJoinRequest> PendingRequests { get; set; } = new();
+
+    /// <summary>Where the teacher came from (e.g. a draft that needed students); a local URL or null.</summary>
+    public string? ReturnUrl { get; set; }
+
     public ClassStudentStatDto StatsFor(Guid studentId) =>
         StudentStats.TryGetValue(studentId, out var stat) ? stat : new ClassStudentStatDto();
 
@@ -32,6 +38,8 @@ public class ClassDetailsViewModel
 public class StudentRosterViewModel
 {
     public List<StudentRosterRowDto> Rows            { get; set; } = new();
+    /// <summary>Which ten rows are shown, and how many students match in all.</summary>
+    public PageInfo                  Page            { get; set; } = new();
     public List<Class>               Classes         { get; set; } = new();
     public Guid?                     SelectedClassId { get; set; }
     public string?                   Search          { get; set; }

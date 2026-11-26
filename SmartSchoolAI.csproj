@@ -9,8 +9,17 @@
 
   <ItemGroup>
     <Compile Remove="E2E\**\*.cs" />
+    <Compile Remove="scripts\ImportStudents\**" />
+    <Content Remove="scripts\ImportStudents\**" />
+    <None Remove="scripts\ImportStudents\**" />
+    <EmbeddedResource Remove="scripts\ImportStudents\**" />
     <Content Remove="E2E\**\*" />
     <None Remove="E2E\**\*" />
+    <!-- The unit/integration test project lives in this folder too; it is built on its own, never into the web app. -->
+    <Compile Remove="SmartSchoolAI.Tests\**" />
+    <Content Remove="SmartSchoolAI.Tests\**" />
+    <None Remove="SmartSchoolAI.Tests\**" />
+    <EmbeddedResource Remove="SmartSchoolAI.Tests\**" />
   </ItemGroup>
 
   <ItemGroup>

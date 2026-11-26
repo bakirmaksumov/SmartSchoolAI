@@ -1,0 +1,106 @@
+@model SmartSchoolAI.ViewModels.AnalyticsViewModel
+@using SmartSchoolAI.ViewModels
+@using SmartSchoolAI.Services
+@{
+    var here = Uri.EscapeDataString(Context.Request.Path + Context.Request.QueryString);
+    var cell = Model.Work.ToDictionary(w => (w.StudentId, w.AssignmentId));
+}
+<div class="card mb-3" id="studentsTab">
+  <div class="card-header d-flex flex-wrap gap-2 align-items-center">
+    <div class="me-auto">
+      <h5 class="card-title mb-0">Students</h5>
+      <small class="text-muted">Averages are over graded work; the number of graded assignments is shown with each.</small>
+    </div>
+    <label class="visually-hidden" for="studentFilter">Search students by name</label>
+    <input type="search" class="form-control form-control-sm student-filter" id="studentFilter" placeholder="Search by name…" autocomplete="off" />
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0" id="studentTable">
+      <thead class="table-light">
+        <tr><th>Student</th><th class="text-center">Submitted</th><th class="text-center">Overdue</th>
+            <th>Classroom Practice</th><th>Homework</th></tr>
+      </thead>
+      <tbody>
+        @foreach (var s in Model.Students)
+        {
+          <tr data-student-row data-name="@s.FullName.ToLowerInvariant()">
+            <td>
+              <a class="fw-semibold js-anon" href="/Classes/StudentWork?studentId=@s.StudentId&classId=@Model.SelectedClassId&returnUrl=@here">@s.FullName</a>
+              @if (s.OverallAverage is { } o && o < AnalyticsService.StrugglingBelow)
+              {
+                <span class="badge bg-label-danger ms-1" title="Average of graded work below @AnalyticsService.StrugglingBelow%">below @AnalyticsService.StrugglingBelow%</span>
+              }
+              @if (s.Awaiting > 0) { <span class="badge bg-label-warning ms-1">@s.Awaiting to review</span> }
+            </td>
+            @if (s.Assigned == 0)
+            {
+              <td colspan="4" class="text-muted fst-italic">No assignments yet</td>
+            }
+            else
+            {
+              <td class="text-center"><a href="@Model.Link("work", studentId: s.StudentId)">@s.Submitted of @s.Assigned</a></td>
+              <td class="text-center">
+                @if (s.Overdue > 0) { <a class="badge bg-label-danger" href="@Model.Link("work", "overdue", studentId: s.StudentId)">@s.Overdue</a> }
+                else { <span class="text-muted">0</span> }
+              </td>
+              <td>
+                @if (s.PracticeAverage is { } p) { <strong>@p%</strong> <span class="small text-muted">· @AnalyticsService.Plural(s.PracticeGraded, "graded")</span> }
+                else { <span class="small text-muted">not graded yet</span> }
+              </td>
+              <td>
+                @if (s.HomeworkAverage is { } h) { <strong>@h%</strong> <span class="small text-muted">· @AnalyticsService.Plural(s.HomeworkGraded, "graded")</span> }
+                else { <span class="small text-muted">not graded yet</span> }
+              </td>
+            }
+          </tr>
+        }
+      </tbody>
+    </table>
+    <p class="text-muted small px-3 py-2 mb-0 d-none" id="studentFilterEmpty">No student matches this search.</p>
+  </div>
+</div>
+
+<!-- The full grid from the earlier analytics: every student × assignment, with CSV. -->
+<details class="card mb-4" id="scoreGrid">
+  <summary class="card-header fw-semibold">Score grid (student × assignment)</summary>
+  <div class="px-3 pt-2 d-flex justify-content-end">
+    <button type="button" class="btn btn-sm btn-outline-primary" id="exportGrid"><i class="bx bx-download me-1"></i>Export CSV</button>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-bordered table-sm mb-0 score-grid" id="scoreGridTable">
+      <thead class="table-light">
+        <tr>
+          <th class="sticky-col">Student</th>
+          @foreach (var a in Model.Assignments) { <th class="grid-head">@a.Title</th> }
+        </tr>
+      </thead>
+      <tbody>
+        @foreach (var s in Model.Students.Where(x => x.Assigned > 0))
+        {
+          <tr>
+            <th class="sticky-col fw-normal js-anon">@s.FullName</th>
+            @foreach (var a in Model.Assignments)
+            {
+              if (!cell.TryGetValue((s.StudentId, a.Id), out var w))
+              {
+                <td class="text-center text-muted" title="Not given this assignment">·</td>
+              }
+              else if (w.Status == AnalyticsWorkStatus.Graded)
+              {
+                <td class="text-center"><a href="/Assignments/SubmissionDetail?resultId=@w.LatestResultId&returnUrl=@here">@w.Score%</a></td>
+              }
+              else if (w.Status == AnalyticsWorkStatus.AwaitingReview)
+              {
+                <td class="text-center"><a class="text-warning" href="/Assignments/SubmissionDetail?resultId=@w.LatestResultId&returnUrl=@here">to review</a></td>
+              }
+              else
+              {
+                <td class="text-center small @(w.Overdue ? "text-danger" : "text-muted")">@(w.Overdue ? "overdue" : "not submitted")</td>
+              }
+            }
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</details>

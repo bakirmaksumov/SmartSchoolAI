@@ -1,0 +1,143 @@
+@model SmartSchoolAI.Models.StudentResult
+@using SmartSchoolAI.Models.Dtos
+@using SmartSchoolAI.Services
+@*
+  "Work submitted": the server has the attempt. Shown right after Submit, and whenever the result is not available
+  yet. It shows the student's own work only — answers, working, photos, drawings — never marks, keys or comments
+  before the result is available.
+*@
+@{
+    ViewData["Title"] = "Work submitted";
+    var questions = ViewBag.Questions as List<QuestionDto> ?? new();
+    var ready     = ViewBag.FeedbackReady as bool? ?? false;
+    var layout    = QuestionLayout.Compute(questions);
+    var waitingTeacher = Model.StudentAnswers.Any(a => a.NeedsReview || GradingService.IsUnfinished(a));
+    var resultUrl = $"/Student/AssignmentResult?assignmentId={Model.AssignmentId}&resultId={Model.Id}";
+    var photos    = Model.StudentAnswers.Count(a => !string.IsNullOrEmpty(a.ImagePath));
+}
+
+<div class="work-submitted mx-auto" id="workSubmitted" style="max-width: 880px;">
+  <div class="text-center mb-3">
+    <i class="bx bxs-check-circle text-success" style="font-size:3.5rem;" aria-hidden="true"></i>
+    <h4 class="fw-bold mt-2 mb-0">Work submitted</h4>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body">
+      <h5 class="fw-bold mb-1" id="submittedTitle">@Model.Assignment.Title</h5>
+      <div class="text-muted mb-2">@Model.Assignment.Class?.Name · Attempt @Model.AttemptNumber</div>
+
+      <!-- The hand-in is confirmed by the server: this page only exists for a saved submission. -->
+      <div class="d-flex align-items-center gap-2 mb-3" id="submittedConfirmation" role="status">
+        <i class="bx bx-calendar-check fs-5" aria-hidden="true"></i>
+        <span><strong>Submitted.</strong> Received @SchoolTime.Show(Model.SubmittedAt, "dd MMM yyyy · HH:mm") (@SchoolTime.Label)</span>
+      </div>
+
+      @if (ready)
+      {
+        <div class="alert alert-success d-flex flex-wrap align-items-center gap-2 mb-0" id="feedbackReady">
+          <i class="bx bx-message-square-check fs-4" aria-hidden="true"></i>
+          <span class="me-auto"><strong>Your result is ready:</strong> <span data-score>@Model.Assignment.FormatGrade(Model.Score)</span></span>
+          <a class="btn btn-success btn-sm" href="@resultUrl" id="viewFeedback"><i class="bx bx-show me-1" aria-hidden="true"></i>View feedback</a>
+        </div>
+      }
+      else if (Model.GradingPending)
+      {
+        <div class="alert alert-info d-flex align-items-center gap-2 mb-0" id="markingPending">
+          <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+          <span><strong>Being marked.</strong> Your work is saved; this page updates by itself.</span>
+        </div>
+        <script>setTimeout(function () { location.reload(); }, 8000);</script>
+      }
+      else if (waitingTeacher)
+      {
+        <div class="alert alert-info d-flex align-items-center gap-2 mb-0" id="awaitingReview">
+          <i class="bx bx-time-five fs-4" aria-hidden="true"></i>
+          <span><strong>Awaiting review.</strong> Your teacher will check your work. Your marks will appear here when they are ready.</span>
+        </div>
+      }
+    </div>
+  </div>
+
+  <!-- What was handed in -->
+  <div class="card mb-3">
+    <div class="card-header pb-2">
+      <h5 class="card-title mb-0">What you handed in</h5>
+      <small class="text-muted">@AnalyticsService.Plural(Model.StudentAnswers.Count(a => !string.IsNullOrWhiteSpace(a.AnswerValue) || !string.IsNullOrEmpty(a.ImagePath) || !string.IsNullOrEmpty(a.SketchPath)), "answer")@(photos > 0 ? $" · {AnalyticsService.Plural(photos, "photo")}" : "")</small>
+    </div>
+    <ul class="list-group list-group-flush">
+      @for (var i = 0; i < questions.Count; i++)
+      {
+        if (layout.IsStem[i]) { continue; }
+        var q = questions[i];
+        var a = Model.StudentAnswers.FirstOrDefault(x => x.QuestionIndex == i);
+        <li class="list-group-item py-3" data-submitted-question="@i">
+          <div class="fw-semibold mb-1">Question @layout.Labels[i]: <span class="math-render fw-normal">@q.Title</span></div>
+          @if (a is null || (string.IsNullOrWhiteSpace(a.AnswerValue) && string.IsNullOrEmpty(a.ImagePath) && string.IsNullOrEmpty(a.SketchPath) && string.IsNullOrWhiteSpace(a.WorkText)))
+          {
+            <div class="text-muted small">Not answered</div>
+          }
+          else
+          {
+            @if (!string.IsNullOrEmpty(a.ImagePath))
+            {
+              <div class="d-flex flex-wrap gap-2 mb-2">
+                @foreach (var p in SubmissionMedia.Paths(a.ImagePath))
+                {
+                  <a href="@p" target="_blank" rel="noopener" class="submitted-photo" data-submitted-photo>
+                    <img src="@p" alt="Your photo for question @layout.Labels[i]" loading="lazy" />
+                  </a>
+                }
+              </div>
+              <a class="btn btn-outline-primary btn-sm" href="@SubmissionMedia.Paths(a.ImagePath).First()" target="_blank" rel="noopener" data-view-photo>
+                <i class="bx bx-image me-1" aria-hidden="true"></i>View submitted photo
+              </a>
+            }
+            else if (!string.IsNullOrWhiteSpace(a.AnswerValue))
+            {
+              <div class="math-text" data-answer>@a.AnswerValue</div>
+            }
+            @if (!string.IsNullOrWhiteSpace(a.WorkText) && string.IsNullOrEmpty(a.ImagePath))
+            {
+              <div class="small text-muted mt-1">Your working:</div>
+              <div class="math-text math-block small">@a.WorkText</div>
+            }
+            @if (!string.IsNullOrEmpty(a.SketchPath))
+            {
+              <a href="@a.SketchPath" target="_blank" rel="noopener" class="submitted-photo d-inline-block mt-1"><img src="@a.SketchPath" alt="Your drawing for question @layout.Labels[i]" loading="lazy" /></a>
+            }
+          }
+        </li>
+      }
+    </ul>
+  </div>
+
+  <div class="d-flex flex-wrap gap-2 mb-4">
+    <a class="btn btn-primary" href="/Student" id="backToMyWork"><i class="bx bx-arrow-back me-1" aria-hidden="true"></i>Back to my work</a>
+    @if (ready)
+    {
+      <a class="btn btn-outline-success" href="@resultUrl">View feedback</a>
+    }
+  </div>
+</div>
+
+<style>
+  .submitted-photo img { max-height: 220px; max-width: 100%; border-radius: .5rem; border: 1px solid var(--bs-border-color, #e7e7e8); }
+  @@media (max-width: 575.98px) { .work-submitted .btn { width: 100%; } }
+</style>
+
+@section Scripts {
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+  <script src="~/js/math-text.js" asp-append-version="true"></script>
+  <script src="~/js/math-display.js" asp-append-version="true"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      if (typeof renderMathInElement !== 'function') return;
+      document.querySelectorAll('.math-render').forEach(function (el) {
+        renderMathInElement(el, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }], throwOnError: false });
+      });
+    });
+  </script>
+}

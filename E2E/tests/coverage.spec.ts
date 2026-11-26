@@ -10,7 +10,8 @@ import {
   signIn,
   signInAs,
   submitAssignment,
-  unique
+  unique,
+  expandStudent
 } from "./helpers";
 
 test.describe.configure({ mode: "serial" });
@@ -69,7 +70,7 @@ test("setup: class, published assignment, one correct submission", async () => {
 
 test("student result page shows the score and is reachable from the assignment list", async () => {
   await student.goto(`/Student/Assignments?classId=${classId}`);
-  await student.getByRole("link", { name: /View My Result/ }).first().click();
+  await student.getByRole("link", { name: /View feedback/ }).first().click();
   await expect(student).toHaveURL(/\/Student\/AssignmentResult/i);
   await expect(student.getByText("100%", { exact: true }).first()).toBeVisible();
 });
@@ -136,7 +137,8 @@ test("a second student who was not assigned cannot open the assignment or the fi
 
 test("teacher sees one student's history and the submission detail", async () => {
   await teacher.goto(`/Assignments/Details/${assignmentId}`);
-  await teacher.locator('a[href*="/Assignments/StudentStats"]').first().click();
+  await expandStudent(teacher);
+  await teacher.locator('.collapse.show a[href*="/Assignments/StudentStats"]').first().click();
   await expect(teacher).toHaveURL(/\/Assignments\/StudentStats/i);
   await expect(teacher.locator("body")).toContainText("E2E Student");
   await expect(teacher.locator("body")).toContainText("100");
@@ -230,17 +232,25 @@ test("question editor: move, require-work toggle, subpoint, duplicate, remove", 
   }).toPass();
 });
 
-test("analytics dashboard loads for the class on both tabs", async () => {
-  for (const tab of ["practice", "assessment"]) {
+test("analytics loads for the class, old Practice/Assessment links included, and every section opens", async () => {
+  // The old tabs were the assignment type: they now open the overview filtered to that type.
+  for (const [tab, type] of [["practice", "practice"], ["assessment", "homework"]]) {
     const response = await teacher.goto(`/Analytics?classId=${classId}&tab=${tab}`);
     expect(response?.status(), tab).toBeLessThan(400);
-    await expect(teacher.getByRole("heading", { name: /Analytics Dashboard/ })).toBeVisible();
-    await expect(teacher.locator("#classSelector")).toHaveValue(classId);
-    await expect(teacher.locator("#analyticsTabs .nav-link.active")).toHaveText(new RegExp(tab, "i"));
+    await expect(teacher.getByRole("heading", { name: /Class analytics/ })).toBeVisible();
+    await expect(teacher.locator("#fClass")).toHaveValue(classId);
+    await expect(teacher.locator("#fType")).toHaveValue(type);
+    await expect(teacher.locator('#analyticsTabs .nav-link.active')).toHaveAttribute("data-tab", "overview");
   }
 
-  await teacher.locator("#classSelector").selectOption(classId);
+  for (const tab of ["assignments", "students", "questions"]) {
+    await teacher.locator(`#analyticsTabs [data-tab="${tab}"]`).click();
+    await expect(teacher).toHaveURL(new RegExp(`tab=${tab}`));
+    await expect(teacher.locator("body")).not.toContainText(/An error occurred while processing your request/i);
+  }
+  await teacher.locator("#fType").selectOption("all");
   await expect(teacher).toHaveURL(new RegExp(`classId=${classId}`));
+  await expect(teacher).not.toHaveURL(/type=/);
 });
 
 test("admin can search teachers and the reset-password server check rejects short passwords", async ({ browser }) => {

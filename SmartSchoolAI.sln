@@ -5,7 +5,7 @@ VisualStudioVersion = 17.14.36310.24
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmartSchoolAI", "SmartSchoolAI.csproj", "{8BF9ED55-1AB1-4712-B581-436470ED1CD5}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmartSchoolAI.Tests", "..\SmartSchoolAI.Tests\SmartSchoolAI.Tests.csproj", "{E83EA5CB-3C0E-482D-B191-C7DA78472FB3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SmartSchoolAI.Tests", "SmartSchoolAI.Tests\SmartSchoolAI.Tests.csproj", "{E83EA5CB-3C0E-482D-B191-C7DA78472FB3}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

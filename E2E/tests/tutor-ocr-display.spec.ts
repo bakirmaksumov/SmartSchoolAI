@@ -197,7 +197,10 @@ test("Solve with photo shows readable maths, and a student's edit reaches the gr
   expect(gradedSteps[2]).toBe("3. $y_{1,2} = \\pm 2$");
   expect(gradedSteps[3]).toBe("4. $2x - 3 = 2 \\quad 2x - 3 = -2$");
   expect(gradedSteps[5], "the edited step").toBe(`6. ${edited}`);
-  expect(sent, "the replaced value is gone").not.toContain("2.5");
+  // The marker gets the student's edit as their step, and the original reading separately (with the photo), so it
+  // can tell an honest correction from a changed answer.
+  expect(sent.split("Student's steps:")[1], "the replaced value is gone from the student's steps").not.toContain("2.5");
+  expect(sent.split("Student's steps:")[0], "the reading from the photo is kept apart").toContain("Lines as read from the photo");
 
   // The results are readable too.
   const results = (await student.locator("#hwResults").innerText()).replace(/[ \t]+/g, " ");

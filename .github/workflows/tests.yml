@@ -1,0 +1,75 @@
+name: Tests
+
+# Unit and integration tests (xUnit, real SQLite files) and the browser tests (Playwright, no AI calls: the
+# AI-backed checks use the deterministic mock or are skipped). Runs on every branch, so a pushed branch is
+# checked before any pull request exists. Docker CI (docker-ci.yml) checks the container separately.
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Release build (web app and tests)
+        run: dotnet build SmartSchoolAI.sln -c Release
+      - name: Unit and integration tests
+        run: dotnet test SmartSchoolAI.Tests/SmartSchoolAI.Tests.csproj -c Release --no-build --logger "trx;LogFileName=tests.trx"
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: SmartSchoolAI.Tests/TestResults
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: E2E/package-lock.json
+      - name: Install the browser test tooling
+        working-directory: E2E
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Browser tests (all projects, no AI)
+        working-directory: E2E
+        env:
+          E2E_AI: "0"
+          E2E_SHOT_DIR: ${{ runner.temp }}/screenshots
+        # "github" adds each failure as an annotation on the run, readable without downloading the log.
+        run: npm test -- --reporter=list,github
+      - name: Upload screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-evidence
+          path: |
+            ${{ runner.temp }}/screenshots
+            E2E/test-results
+          if-no-files-found: ignore
+          retention-days: 7

@@ -66,11 +66,11 @@ export async function createClass(page: Page, name: string): Promise<string> {
 
 export async function joinClass(page: Page, inviteCode: string, className: string): Promise<void> {
   await page.goto("/Student");
-  await page.getByRole("button", { name: /Join a Class/ }).first().click();
+  await page.getByRole("button", { name: /Join a class/i }).first().click();
   const modal = page.locator("#joinClassModal");
   await modal.locator('input[name="inviteCode"]').fill(inviteCode);
   await modal.getByRole("button", { name: "Join Class" }).click();
-  await expect(page.getByText(className, { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: className, exact: true }).first()).toBeVisible();
 }
 
 export async function createDraftAssignment(page: Page, title: string, className: string): Promise<string> {
@@ -79,7 +79,7 @@ export async function createDraftAssignment(page: Page, title: string, className
   await page.locator('textarea[name="description"]').fill("Created by the E2E suite.");
   await page.locator("#classSelect").selectOption({ label: className });
   await page.locator("#typeSelect").selectOption("0");
-  await page.getByRole("button", { name: "Save as Draft" }).click();
+  await page.getByRole("button", { name: "Save and add questions" }).click();
   await expect(page).toHaveURL(/\/Assignments\/Edit\/[0-9a-f-]+/i);
   await page.waitForLoadState("load");
   return page.url().match(/\/Assignments\/Edit\/([0-9a-f-]+)/i)![1];
@@ -138,15 +138,72 @@ export async function addQuestion(page: Page, q: QuestionSpec): Promise<void> {
   await page.waitForLoadState("load");
 }
 
-export async function publishAndAssignAll(page: Page, assignmentId: string): Promise<void> {
-  page.once("dialog", dialog => dialog.accept());
-  await page.getByRole("button", { name: /^Assign/ }).click();
+export interface AssignOptions {
+  /** Whole class (default) or only these students, by full name. */
+  students?: string[];
+  /** For the whole class: what happens to students who join later. Default: the suggestion for the type. */
+  lateJoin?: "auto" | "approval";
+  /** For a draft: when students may start / the due date, as datetime-local values ("2099-01-01T10:00"). */
+  opens?: string;
+  due?: string;
+}
+
+/**
+ * The teacher's single "Assign to N students" action from the assignment editor (or the assignment page for
+ * an active one). Returns the success message, e.g. "Assigned to 3 students from Year 12 IT."
+ */
+export async function assignTo(page: Page, assignmentId: string, options: AssignOptions = {}): Promise<string> {
+  if (!new RegExp(`/Assignments/(Edit|Details)/${assignmentId}`, "i").test(page.url())) {
+    await page.goto(`/Assignments/Edit/${assignmentId}`);
+  }
+  await page.locator("#openAssignBtn").click();
+  const modal = page.locator("#assignModal");
+  await expect(modal).toBeVisible();
+
+  if (options.students) {
+    await modal.locator("#audSelected").check();
+    for (const name of options.students) {
+      await modal.locator(".assign-student", { hasText: name }).locator('input[type="checkbox"]').check();
+    }
+  } else {
+    await modal.locator("#audEntire").check();
+    if (options.lateJoin === "auto") await modal.locator("#lateAuto").check();
+    if (options.lateJoin === "approval") await modal.locator("#lateApproval").check();
+  }
+  if (options.opens !== undefined) await modal.locator("#assignOpens").fill(options.opens);
+  if (options.due !== undefined) await modal.locator("#assignDue").fill(options.due);
+
+  await modal.locator("#assignSubmit").click();
   await expect(page).toHaveURL(new RegExp(`/Assignments/Details/${assignmentId}`, "i"));
-  await page.getByRole("button", { name: "Assign All" }).click();
-  await expect(page.getByRole("heading", { name: /Assigned Students \(\d+\)/ })).toBeVisible();
+  const success = page.locator(".alert-success").first();
+  await expect(success).toContainText(/(Assigned to|Added|No one new)/);
+  return (await success.innerText()).trim();
+}
+
+/**
+ * Assigns a draft to the whole class in one action (formerly Assign, then Assign All). Like Assign All, it gives
+ * the work to the students in the class now; students who join later only get a request for the teacher, never
+ * the work itself, so tests that add a student afterwards still see an unassigned student.
+ */
+export async function publishAndAssignAll(page: Page, assignmentId: string): Promise<void> {
+  await assignTo(page, assignmentId, { lateJoin: "approval" });
+  await expect(page.locator("#liveCounters")).toBeVisible();
+}
+
+/**
+ * On the assignment page, opens a student's row so their attempts, dates and extra actions (statistics, reset,
+ * remove) are visible. Without a name, the first student.
+ */
+export async function expandStudent(page: Page, name?: string): Promise<void> {
+  const row = name
+    ? page.locator("#recipientTable tbody.recipient", { hasText: name }).first()
+    : page.locator("#recipientTable tbody.recipient").first();
+  const toggle = row.locator(".attempt-toggle");
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click();
+  await expect(row.locator(".collapse.show")).toBeVisible();
 }
 
 export async function submitAssignment(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Submit Assignment" }).click();
-  await page.locator("#submitConfirmModal").getByRole("button", { name: "Yes, submit" }).click();
+  await page.locator("#confirmSubmitBtn").click();
 }

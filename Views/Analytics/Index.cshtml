@@ -1,394 +1,339 @@
 @model SmartSchoolAI.ViewModels.AnalyticsViewModel
+@using SmartSchoolAI.ViewModels
+@using SmartSchoolAI.Services
 @{
     ViewData["Title"] = "Analytics";
-
-    var classes         = Model.Classes;
-    var selectedClassId = Model.SelectedClassId;
-    var hasData         = Model.HasData;
-    var tab             = Model.Tab;
-    var assignments     = Model.Assignments;
+    var here = Context.Request.Path + Context.Request.QueryString;
+    var hereEnc = Uri.EscapeDataString(here);
+    var cls = Model.SelectedClass;
+    string Pct(int part, int whole) => whole == 0 ? "0%" : $"{Math.Round(part * 100.0 / whole)}%";
+    string Due(DateTime? d) => SchoolTime.Show(d, "dd MMM yyyy, HH:mm", "No due date");
+    var tabs = new[] { ("overview", "Overview", "bx-grid-alt"), ("assignments", "Assignments", "bx-task"),
+                       ("students", "Students", "bx-group"), ("questions", "Questions", "bx-help-circle") };
 }
 
-<!-- EduSchool AI Hero Banner for Analytics -->
-<div class="wiut-hero-card mb-4">
-  <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
-    <div>
-      <h3 class="fw-bold text-white mb-1"><i class="bx bx-bar-chart-alt-2 me-2"></i>EduSchool AI Analytics Dashboard</h3>
-      <p class="text-white-50 mb-0">Performance Insights & Mastery Metrics for Students and Classes</p>
-    </div>
-  </div>
+<div class="analytics-page" id="analyticsPage" data-tab="@Model.Tab">
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <h4 class="fw-bold py-2 mb-0 me-auto">
+    <span class="text-muted fw-light">SmartSchool AI /</span> Class analytics
+  </h4>
 </div>
 
-<!-- ── CLASS SELECTOR + TABS ────────────────────────────────────────────── -->
-@if (classes.Any())
+@if (!Model.Classes.Any())
 {
-  <div class="d-flex align-items-center gap-3 mb-3 flex-wrap border-bottom pb-3">
-    <!-- Class dropdown -->
-    <select class="form-select form-select-sm" style="width:220px;" id="classSelector"
-            onchange="navigateAnalytics()">
-      @foreach (var cls in classes)
-      {
-        if (selectedClassId == cls.Id)
-        {
-          <option value="@cls.Id" selected>@cls.Name</option>
-        }
-        else
-        {
-
-          <option value="@cls.Id">@cls.Name</option>
-        }
-      }
-    </select>
-
-    <!-- Practice / Assessment tabs -->
-    <ul class="nav nav-underline mb-0" id="analyticsTabs">
-      <li class="nav-item">
-        <a class="nav-link fw-semibold @(tab == "practice" ? "active" : "")"
-           href="#" onclick="switchAnalyticsTab('practice'); return false;">Practice</a>
-      </li>
-      <li class="nav-item">
-        <a class="nav-link fw-semibold @(tab == "assessment" ? "active" : "")"
-           href="#" onclick="switchAnalyticsTab('assessment'); return false;">Assessment</a>
-      </li>
-    </ul>
-
-    <div class="ms-auto">
-      <button class="btn btn-sm btn-icon btn-outline-secondary" onclick="navigateAnalytics()"
-              data-bs-toggle="tooltip" title="Refresh">
-        <i class="bx bx-refresh"></i>
-      </button>
-    </div>
-  </div>
-}
-
-@if (!classes.Any())
-{
-  <!-- No classes -->
   <div class="card">
     <div class="card-body text-center py-5">
-      <i class="bx bx-bar-chart-alt-2" style="font-size:3rem; color:#696cff;"></i>
+      <i class="bx bx-bar-chart-alt-2 empty-icon" aria-hidden="true"></i>
       <h5 class="mt-3">No classes yet</h5>
-      <p class="text-muted">Create a class and assign students to start seeing analytics.</p>
-      <a href="/Classes/Create" class="btn btn-primary btn-sm"><i class="bx bx-plus me-1"></i>Create Class</a>
-    </div>
-  </div>
-}
-else if (!hasData)
-{
-  <!-- No submissions -->
-  <div class="card">
-    <div class="card-body text-center py-5">
-      <i class="bx bx-bar-chart-alt-2" style="font-size:3rem; color:#696cff;"></i>
-      <h5 class="mt-3">No analytics data yet</h5>
-      <p class="text-muted">Analytics will appear here once students start submitting assignments.</p>
+      <p class="text-muted">Create a class and give its students work to start seeing analytics.</p>
+      <a href="/Classes/Create" class="btn btn-primary btn-sm"><i class="bx bx-plus me-1"></i>Create class</a>
     </div>
   </div>
 }
 else
 {
-  <!-- ══ RESULTS HEADER ═══════════════════════════════════════════════════ -->
-  <h5 class="fw-bold mb-3">Results</h5>
-
-  <!-- ── SUMMARY CARDS ────────────────────────────────────────────────── -->
-  <div class="row mb-4">
-    <div class="col-md-3 mb-3">
-      <div class="card h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">Average score</p>
-          <h3 class="fw-bold mb-0">@Model.AverageScore%</h3>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3 mb-3">
-      <div class="card h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">Median score</p>
-          <h3 class="fw-bold mb-0">@Model.MedianScore%</h3>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3 mb-3">
-      <div class="card h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">Total submissions</p>
-          <h3 class="fw-bold mb-0">@Model.TotalSubmissions</h3>
-        </div>
-      </div>
-    </div>
-    <div class="col-md-3 mb-3">
-      <div class="card h-100">
-        <div class="card-body">
-          <p class="text-muted small mb-1">Total learning time</p>
-          <h3 class="fw-bold mb-0">@(Model.TotalHours)h @(Model.TotalMinutes)m</h3>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── ASSIGNMENT CHART + STRUGGLING STUDENTS ───────────────────────── -->
-  <div class="row mb-4">
-    <div class="col-lg-8 mb-3">
-      <div class="card h-100">
-        <div class="card-header d-flex justify-content-between align-items-center">
-          <h6 class="mb-0 fw-bold">Assignment results</h6>
-          <select class="form-select form-select-sm" style="width:160px;" id="chartSort" onchange="updateChart()">
-            <option value="creation">Creation date</option>
-            <option value="score-asc">Score (low → high)</option>
-            <option value="score-desc">Score (high → low)</option>
-          </select>
-        </div>
-        <div class="card-body">
-          @if (assignments.Any())
+  <!-- Filters: class, type, period. Changing one reloads with the choice in the address. -->
+  <form method="get" action="/Analytics" class="card mb-3" id="analyticsFilters" aria-label="Analytics filters">
+    <div class="card-body py-3 d-flex flex-wrap gap-2 align-items-end">
+      <input type="hidden" name="tab" value="@(Model.Tab == "work" ? "overview" : Model.Tab)" />
+      <div class="filter-field">
+        <label class="form-label small text-muted mb-1" for="fClass">Class</label>
+        <select class="form-select" id="fClass" name="classId" data-autosubmit>
+          @foreach (var c in Model.Classes)
           {
-            <div id="assignmentChart" style="min-height:300px;"></div>
+            <option value="@c.Id" selected="@(c.Id == Model.SelectedClassId)">@c.Name</option>
           }
-          else
-          {
-            <div class="text-center text-muted py-5">
-              <i class="bx bx-bar-chart" style="font-size:2rem;"></i>
-              <p class="mt-2">No assignment data to chart yet.</p>
+        </select>
+      </div>
+      <div class="filter-field">
+        <label class="form-label small text-muted mb-1" for="fType">Assignment type</label>
+        <select class="form-select" id="fType" name="type" data-autosubmit>
+          <option value="all" selected="@(Model.Type == "all")">All assignment types</option>
+          <option value="practice" selected="@(Model.Type == "practice")">Classroom Practice</option>
+          <option value="homework" selected="@(Model.Type == "homework")">Homework</option>
+        </select>
+      </div>
+      <div class="filter-field">
+        <label class="form-label small text-muted mb-1" for="fPeriod">Given to students</label>
+        <select class="form-select" id="fPeriod" name="period" data-autosubmit
+                title="Work counts in a period by the date it was given to each student (a student who joined later counts from their own date).">
+          <option value="all" selected="@(Model.Period == "all")">Any time</option>
+          <option value="7d" selected="@(Model.Period == "7d")">Last 7 days</option>
+          <option value="30d" selected="@(Model.Period == "30d")">Last 30 days</option>
+          <option value="90d" selected="@(Model.Period == "90d")">Last 90 days</option>
+        </select>
+      </div>
+      <noscript><button type="submit" class="btn btn-primary">Apply</button></noscript>
+      @if (Model.FiltersActive)
+      {
+        <a class="btn btn-outline-secondary" id="resetFilters" href="@Model.Link(Model.Tab == "work" ? "overview" : Model.Tab, type: "all", period: "all")">
+          <i class="bx bx-x me-1"></i>Reset filters
+        </a>
+      }
+    </div>
+  </form>
+
+  <ul class="nav nav-tabs analytics-tabs mb-3" id="analyticsTabs" role="tablist" aria-label="Analytics sections">
+    @foreach (var (key, label, icon) in tabs)
+    {
+      var on = Model.Tab == key || (Model.Tab == "work" && key == "overview");
+      <li class="nav-item" role="presentation">
+        <a class="nav-link @(on ? "active" : "")" href="@Model.Link(key)" data-tab="@key" role="tab"
+           aria-selected="@(on ? "true" : "false")" aria-current="@(on ? "page" : null)">
+          <i class="bx @icon me-1" aria-hidden="true"></i>@label
+        </a>
+      </li>
+    }
+  </ul>
+
+  <div class="analytics-body">
+  @if (Model.ClassAssignmentCount == 0)
+  {
+    <div class="card" id="emptyNoAssignments">
+      <div class="card-body text-center py-5">
+        <i class="bx bx-task empty-icon" aria-hidden="true"></i>
+        <h5 class="mt-3">No assignments in @cls?.Name yet</h5>
+        <p class="text-muted mb-3">Once you give the class an assignment, this page shows who has it, who handed it in and what needs your review.</p>
+        <a href="/Assignments/Create?classId=@Model.SelectedClassId" class="btn btn-primary btn-sm"><i class="bx bx-plus me-1"></i>Create an assignment</a>
+      </div>
+    </div>
+  }
+  else if (Model.Assigned == 0)
+  {
+    <div class="card" id="emptyFiltered">
+      <div class="card-body text-center py-5">
+        <i class="bx bx-filter-alt empty-icon" aria-hidden="true"></i>
+        @if (Model.FiltersActive)
+        {
+          <h5 class="mt-3">Nothing matches these filters</h5>
+          <p class="text-muted mb-3">No work of this type was given to students in this period.</p>
+          <a href="@Model.Link(Model.Tab == "work" ? "overview" : Model.Tab, type: "all", period: "all")" class="btn btn-primary btn-sm">Reset filters</a>
+        }
+        else
+        {
+          <h5 class="mt-3">No work has been given to students yet</h5>
+          <p class="text-muted mb-3">The class has assignments, but none has been assigned to a student.</p>
+          <a href="/Classes/Details/@Model.SelectedClassId?tab=assignments" class="btn btn-primary btn-sm">Open the class's assignments</a>
+        }
+      </div>
+    </div>
+  }
+  else if (Model.Tab == "work")
+  {
+    @await Html.PartialAsync("_WorkList", Model)
+  }
+  else if (Model.Tab == "assignments")
+  {
+    @await Html.PartialAsync("_AssignmentsTab", Model)
+  }
+  else if (Model.Tab == "students")
+  {
+    @await Html.PartialAsync("_StudentsTab", Model)
+  }
+  else if (Model.Tab == "questions")
+  {
+    @await Html.PartialAsync("_QuestionsTab", Model)
+  }
+  else
+  {
+    <!-- ── Overview ─────────────────────────────────────────────────────── -->
+    var avg = Model.AverageScore;
+    <div class="row g-3 mb-3" id="overviewCards">
+      <div class="col-6 col-xl-3">
+        <a class="card h-100 stat-card" href="@Model.Link("work")" data-card="assigned"
+           aria-label="Assigned: @Model.Assigned. Open the list.">
+          <div class="card-body d-flex gap-3 align-items-center">
+            <span class="stat-icon bg-label-primary" aria-hidden="true"><i class="bx bx-calendar"></i></span>
+            <div class="min-w-0">
+              <div class="stat-label">Assigned</div>
+              <div class="stat-value" data-value>@Model.Assigned</div>
+              <div class="stat-note">to @AnalyticsService.Plural(Model.Work.Select(w => w.StudentId).Distinct().Count(), "student")</div>
             </div>
-          }
-        </div>
+          </div>
+        </a>
       </div>
-    </div>
-    <div class="col-lg-4 mb-3">
-      <div class="card h-100">
-        <div class="card-header">
-          <h6 class="mb-0 fw-bold">Struggling students</h6>
-          <small class="text-muted">Students with average below 50%</small>
-        </div>
-        <div class="card-body" style="max-height:350px; overflow-y:auto;">
-          @if (Model.StrugglingStudents.Any())
-          {
-            <div class="list-group list-group-flush">
-              @foreach (var s in Model.StrugglingStudents)
+      <div class="col-6 col-xl-3">
+        <a class="card h-100 stat-card" href="@Model.Link("work", "submitted")" data-card="submitted"
+           aria-label="Submitted: @Model.Submitted of @Model.Assigned. Open the list.">
+          <div class="card-body d-flex gap-3 align-items-center">
+            <span class="stat-icon bg-label-success" aria-hidden="true"><i class="bx bx-check-circle"></i></span>
+            <div class="min-w-0">
+              <div class="stat-label">Submitted</div>
+              <div class="stat-value"><span data-value>@Model.Submitted</span> <span class="stat-of">/ @Model.Assigned</span></div>
+              <div class="stat-note">@Pct(Model.Submitted, Model.Assigned) handed in</div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <div class="col-6 col-xl-3">
+        <a class="card h-100 stat-card" href="@Model.Link("work", "awaiting")" data-card="awaiting"
+           aria-label="Needs review: @Model.AwaitingReview. Open the work to review.">
+          <div class="card-body d-flex gap-3 align-items-center">
+            <span class="stat-icon bg-label-warning" aria-hidden="true"><i class="bx bx-error"></i></span>
+            <div class="min-w-0">
+              <div class="stat-label">Needs review</div>
+              <div class="stat-value" data-value>@Model.AwaitingReview</div>
+              <div class="stat-note">@(Model.AwaitingReview == 0 ? "nothing waiting" : "open to review")</div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <div class="col-6 col-xl-3">
+        <a class="card h-100 stat-card" href="@Model.Link("work", "graded")" data-card="average"
+           title="Mean of the graded scores (newest submitted attempt of each student). Work still awaiting review and work not handed in are not included; a graded 0% is."
+           aria-label="Average score: @(avg is null ? "no graded work yet" : $"{avg}% over {Model.Graded} graded"). Open the graded work.">
+          <div class="card-body d-flex gap-3 align-items-center">
+            <span class="stat-icon bg-label-info" aria-hidden="true"><i class="bx bx-award"></i></span>
+            <div class="min-w-0">
+              <div class="stat-label">Average score</div>
+              @if (avg is null)
               {
-                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
-                  <div class="d-flex align-items-center gap-2">
-                    <div class="avatar avatar-xs">
-                      <span class="avatar-initial rounded-circle bg-label-danger">@s.FullName[0]</span>
-                    </div>
-                    <span class="fw-semibold small">@s.FullName</span>
-                  </div>
-                  <span class="badge bg-label-danger">@s.AverageScore%</span>
-                </div>
+                <div class="stat-empty" data-value>No graded work yet</div>
+              }
+              else
+              {
+                <div class="stat-value" data-value>@avg%</div>
+                <div class="stat-note">@Model.Graded graded · median @Model.MedianScore%</div>
               }
             </div>
-          }
-          else
-          {
-            <div class="text-center text-muted py-4">
-              <i class="bx bx-happy-heart-eyes" style="font-size:2rem; color:#71dd37;"></i>
-              <p class="mt-2 mb-0 small">All students are doing well!</p>
-            </div>
-          }
-        </div>
+          </div>
+        </a>
       </div>
     </div>
-  </div>
 
-  <!-- ── STUDENT RESULTS GRID ──────────────────────────────────────────── -->
-  <div class="card mb-4">
-    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
-      <h6 class="mb-0 fw-bold">Student results</h6>
-      <div class="d-flex gap-2">
-        <button class="btn btn-sm btn-icon btn-outline-secondary" id="fullscreenBtn"
-                onclick="toggleFullscreen()" data-bs-toggle="tooltip" title="Fullscreen">
-          <i class="bx bx-fullscreen"></i>
-        </button>
-        <button class="btn btn-sm btn-outline-primary" onclick="exportCsv()">
-          <i class="bx bx-download me-1"></i>Export CSV
-        </button>
-      </div>
-    </div>
-    <div class="table-responsive" id="studentGridWrap">
-      <table class="table table-bordered table-hover mb-0" id="studentGridTable" style="font-size:.85rem;">
-        <thead class="table-light">
-          <tr>
-            <th style="min-width:140px; position:sticky; left:0; background:#f5f5f9; z-index:2;">Student</th>
-            <th style="min-width:90px;">Average score</th>
-            @foreach (var a in assignments)
+    <div class="row g-3 mb-3">
+      <!-- Average score by assignment: one bar per assignment; a bar opens its graded work. -->
+      <div class="col-lg-7">
+        <div class="card h-100">
+          <div class="card-header pb-2">
+            <h5 class="card-title mb-0">Average score by assignment</h5>
+            <small class="text-muted">Graded work only · the number of graded students is next to each bar</small>
+          </div>
+          <div class="card-body" id="scoreBars">
+            @foreach (var a in Model.Assignments)
             {
-              <th style="min-width:120px;">
-                <div class="fw-semibold" style="max-width:120px; white-space:normal; line-height:1.3;">
-                  @(a.Title.Length > 35 ? a.Title[..35] + "…" : a.Title)
-                </div>
-                <small class="text-muted">@a.CreatedAt.ToString("MMM dd, yyyy")</small>
-              </th>
-            }
-          </tr>
-        </thead>
-        <tbody>
-          @foreach (var row in Model.StudentRows)
-          {
-            <tr>
-              <td style="position:sticky; left:0; background:#fff; z-index:1;">
-                <strong>@row.FullName</strong>
-              </td>
-              <td>
-                @if (row.AverageScore >= 0)
-                {
-                  <span class="fw-semibold @(row.AverageScore >= 70 ? "text-success" : row.AverageScore >= 50 ? "text-warning" : "text-danger")">
-                    @row.AverageScore%
-                  </span>
-                }
-                else
-                {
-                  <span class="text-muted">—</span>
-                }
-              </td>
-              @foreach (var cell in row.Cells)
-              {
-                <td class="text-center">
-                  @if (cell.Score.HasValue)
+              var width = a.AverageScore is { } s ? Math.Clamp(s, 0, 100) : 0;
+              <a class="score-bar-row" href="@Model.Link("work", "graded", assignmentId: a.Id)" data-assignment="@a.Id"
+                 aria-label="@a.Title: @(a.AverageScore is null ? "no grades yet" : $"average {a.AverageScore}% over {a.Graded} graded")">
+                <span class="score-bar-title">@a.Title</span>
+                <span class="score-bar-track @(a.AverageScore is null ? "is-empty" : "")" aria-hidden="true">
+                  @if (a.AverageScore is not null)
                   {
-                    var score   = cell.Score.Value;
-                    var bgColor = score >= 70 ? "#71dd37" : score >= 50 ? "#ffab00" : "#ff3e1d";
-                    <a href="/Assignments/SubmissionDetail?resultId=@cell.ResultId"
-                       class="badge text-white px-3 py-2 text-decoration-none"
-                       style="background-color:@bgColor; font-size:.8rem;"
-                       data-bs-toggle="tooltip" title="Click to view details">
-                      @score%
-                    </a>
+                    <span class="score-bar-fill" style="width:@width%"></span>
+                  }
+                </span>
+                <span class="score-bar-figure">
+                  @if (a.AverageScore is { } sc)
+                  {
+                    <strong>@sc%</strong> <span class="text-muted">· @a.Graded graded</span>
                   }
                   else
                   {
-                    <span class="text-muted">—</span>
+                    <span class="text-muted fst-italic">No grades yet</span>
+                    <span class="text-muted d-block small">@a.Submitted of @a.Recipients submitted</span>
+                  }
+                </span>
+              </a>
+            }
+            <div class="score-axis" aria-hidden="true">
+              <span></span>
+              <span class="score-axis-ticks"><span>0%</span><span>20%</span><span>40%</span><span>60%</span><span>80%</span><span>100%</span></span>
+              <span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Submission status: three states that never overlap; a segment and its legend line open the same list. -->
+      <div class="col-lg-5">
+        <div class="card h-100">
+          <div class="card-header pb-2">
+            <h5 class="card-title mb-0">Submission status</h5>
+            <small class="text-muted">Each piece of work is in exactly one state</small>
+          </div>
+          <div class="card-body">
+            @{
+              var segments = new[]
+              {
+                ("not-submitted", "Not submitted",   Model.NotSubmitted,   "#8592a3"),
+                ("awaiting",      "Awaiting review", Model.AwaitingReview, "#f0a93b"),
+                ("graded",        "Graded",          Model.Graded,         "#1f9d8b")
+              };
+            }
+            <div class="d-flex flex-wrap align-items-center gap-3 status-wrap">
+              <div id="statusDonut" class="status-donut" role="img"
+                   aria-label="@Model.Assigned assigned: @Model.NotSubmitted not submitted, @Model.AwaitingReview awaiting review, @Model.Graded graded"
+                   data-series="@System.Text.Json.JsonSerializer.Serialize(segments.Select(s => s.Item3))"
+                   data-labels="@System.Text.Json.JsonSerializer.Serialize(segments.Select(s => s.Item2))"
+                   data-colors="@System.Text.Json.JsonSerializer.Serialize(segments.Select(s => s.Item4))"
+                   data-links="@System.Text.Json.JsonSerializer.Serialize(segments.Select(s => Model.Link("work", s.Item1)))"
+                   data-total="@Model.Assigned"></div>
+              <ul class="list-unstyled mb-0 status-legend" id="statusLegend">
+                @foreach (var (key, label, count, color) in segments)
+                {
+                  <li>
+                    <a href="@Model.Link("work", key)" data-segment="@key" class="status-legend-item">
+                      <span class="legend-swatch" style="background:@color" aria-hidden="true"></span>
+                      <span><strong><span data-count>@count</span> @label.ToLowerInvariant()</strong>
+                        <span class="text-muted d-block small">@Pct(count, Model.Assigned)</span></span>
+                    </a>
+                  </li>
+                }
+              </ul>
+            </div>
+            <table class="visually-hidden">
+              <caption>Submission status</caption>
+              <thead><tr><th>State</th><th>Count</th><th>Share</th></tr></thead>
+              <tbody>
+                @foreach (var (_, label, count, _) in segments)
+                {
+                  <tr><td>@label</td><td>@count</td><td>@Pct(count, Model.Assigned)</td></tr>
+                }
+                <tr><td>Assigned</td><td>@Model.Assigned</td><td>100%</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Teacher actions -->
+    <div class="card mb-4" id="teacherActions">
+      <div class="card-header pb-2"><h5 class="card-title mb-0">Teacher actions</h5></div>
+      <div class="table-responsive">
+        <table class="table mb-0 align-middle actions-table">
+          <thead class="table-light"><tr><th>Action</th><th>Details</th><th class="text-end"><span class="visually-hidden">Open</span></th></tr></thead>
+          <tbody>
+            @foreach (var act in Model.Actions)
+            {
+              <tr>
+                <td class="fw-semibold"><i class="bx @act.Icon text-@act.Tone me-2 fs-5 align-middle" aria-hidden="true"></i>@act.Title</td>
+                <td>@act.Detail</td>
+                <td class="text-end">
+                  @if (!string.IsNullOrEmpty(act.Href))
+                  {
+                    <a class="btn btn-sm btn-primary text-nowrap" href="@act.Href">@act.Button</a>
                   }
                 </td>
-              }
-            </tr>
-          }
-        </tbody>
-      </table>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
     </div>
+  }
   </div>
 }
+</div>
 
 @section Scripts {
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
   <script src="~/sneat/vendor/libs/apex-charts/apexcharts.js"></script>
-  <script>
-    // ── Navigation helpers ──────────────────────────────────────────────────
-    function navigateAnalytics() {
-      var classId = document.getElementById('classSelector')?.value || '';
-      var activeTab = document.querySelector('#analyticsTabs .nav-link.active');
-      var tab = activeTab?.textContent?.trim().toLowerCase() === 'assessment' ? 'assessment' : 'practice';
-      window.location.href = '/Analytics?classId=' + classId + '&tab=' + tab;
-    }
-
-    function switchAnalyticsTab(tab) {
-      var classId = document.getElementById('classSelector')?.value || '';
-      window.location.href = '/Analytics?classId=' + classId + '&tab=' + tab;
-    }
-
-    // ── Chart data ──────────────────────────────────────────────────────────
-    var chartLabels = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.ChartLabel)));
-    var chartScores = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.AverageScore)));
-    var chartDates  = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.CreatedAt.ToString("MMM dd, yyyy"))));
-    var chartSubs   = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(assignments.Select(a => a.Submissions)));
-    var chartInstance = null;
-
-    function buildChart(labels, scores) {
-      if (chartInstance) chartInstance.destroy();
-      var el = document.getElementById('assignmentChart');
-      if (!el) return;
-
-      var colors = scores.map(function(s) {
-        return s >= 70 ? '#696cff' : s >= 50 ? '#ffab00' : '#ff3e1d';
-      });
-
-      chartInstance = new ApexCharts(el, {
-        chart: { type: 'bar', height: 300, toolbar: { show: false } },
-        series: [{ name: 'Avg Score', data: scores }],
-        xaxis: {
-          categories: labels,
-          labels: { rotate: -30, style: { fontSize: '11px' }, maxHeight: 80 }
-        },
-        yaxis: { min: 0, max: 100, labels: { formatter: function(v) { return v + '%'; } } },
-        plotOptions: {
-          bar: { borderRadius: 4, columnWidth: '55%', distributed: true }
-        },
-        colors: colors,
-        legend: { show: false },
-        dataLabels: {
-          enabled: true,
-          formatter: function(v) { return v + '%'; },
-          style: { fontSize: '11px' }
-        },
-        tooltip: {
-          custom: function({ seriesIndex, dataPointIndex }) {
-            return '<div class="p-2">' +
-              '<strong>' + chartLabels[dataPointIndex] + '</strong><br/>' +
-              'Avg Score: <b>' + chartScores[dataPointIndex] + '%</b><br/>' +
-              'Submissions: ' + chartSubs[dataPointIndex] + '<br/>' +
-              '<small class="text-muted">' + chartDates[dataPointIndex] + '</small>' +
-              '</div>';
-          }
-        }
-      });
-      chartInstance.render();
-    }
-
-    function updateChart() {
-      var sort = document.getElementById('chartSort').value;
-      var indices = chartLabels.map(function(_, i) { return i; });
-
-      if (sort === 'score-asc') {
-        indices.sort(function(a, b) { return chartScores[a] - chartScores[b]; });
-      } else if (sort === 'score-desc') {
-        indices.sort(function(a, b) { return chartScores[b] - chartScores[a]; });
-      }
-      // default: creation order (original)
-
-      var sortedLabels = indices.map(function(i) { return chartLabels[i]; });
-      var sortedScores = indices.map(function(i) { return chartScores[i]; });
-      buildChart(sortedLabels, sortedScores);
-    }
-
-    // Initialize chart on load
-    if (chartLabels.length > 0) {
-      document.addEventListener('DOMContentLoaded', function() {
-        buildChart(chartLabels, chartScores);
-      });
-    }
-
-    // ── Fullscreen toggle ───────────────────────────────────────────────────
-    function toggleFullscreen() {
-      var wrap = document.getElementById('studentGridWrap');
-      if (!wrap) return;
-      if (!document.fullscreenElement) {
-        wrap.requestFullscreen().catch(function() {});
-        wrap.style.background = '#fff';
-        wrap.style.padding = '1rem';
-      } else {
-        document.exitFullscreen();
-      }
-    }
-
-    // ── CSV Export ──────────────────────────────────────────────────────────
-    function exportCsv() {
-      var table = document.getElementById('studentGridTable');
-      if (!table) return;
-
-      var rows = [];
-      table.querySelectorAll('tr').forEach(function(tr) {
-        var cols = [];
-        tr.querySelectorAll('th, td').forEach(function(td) {
-          var text = td.innerText.replace(/"/g, '""').trim();
-          cols.push('"' + text + '"');
-        });
-        rows.push(cols.join(','));
-      });
-
-      var csv = rows.join('\n');
-      var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = 'student_results.csv';
-      a.click();
-      URL.revokeObjectURL(url);
-    }
-  </script>
+  <link rel="stylesheet" href="~/css/analytics.css" asp-append-version="true" />
+  <script src="~/js/analytics.js" asp-append-version="true"></script>
+  <script src="~/js/math-text.js" asp-append-version="true"></script>
+  <script src="~/js/math-display.js" asp-append-version="true"></script>
 }

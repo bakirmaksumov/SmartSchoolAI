@@ -4,7 +4,26 @@
     var subjects     = (List<string>)(ViewBag.Subjects ?? new List<string>());
     var assignmentId = ViewBag.AssignmentId as Guid?;
     var pickerMode   = assignmentId.HasValue;
+    var pageInfo     = ViewBag.Page as SmartSchoolAI.ViewModels.PageInfo ?? new SmartSchoolAI.ViewModels.PageInfo { Total = Model.Count };
+    var hereUrl      = Context.Request.Path + Context.Request.QueryString;
+    var syllabusLabels  = ViewBag.SyllabusLabels as Dictionary<Guid, SmartSchoolAI.Services.SyllabusService.TopicLabel> ?? new();
+    var syllabusCatalog = ViewBag.SyllabusCatalog as List<SmartSchoolAI.Services.SyllabusService.CatalogVersion> ?? new();
+    var curVersion   = ViewBag.CurrentSyllabusVersion as Guid?;
+    var curComponent = ViewBag.CurrentSyllabusComponent as Guid?;
+    var curTopic     = ViewBag.CurrentSyllabusTopic as Guid?;
+    // A chosen topic or component also tells which version it belongs to.
+    var spVersion = syllabusCatalog.FirstOrDefault(v => v.Id == curVersion)
+        ?? syllabusCatalog.FirstOrDefault(v => v.Components.Any(c => c.Id == curComponent || c.Topics.Any(t => t.Id == curTopic)))
+        ?? (syllabusCatalog.Count == 1 ? syllabusCatalog[0] : null);
+    var spComponent = spVersion?.Components.FirstOrDefault(c => c.Id == curComponent || (curComponent == null && c.Topics.Any(t => t.Id == curTopic)));
+    var spTopics = spComponent is not null
+        ? spComponent.Topics.Select(t => (t, c: spComponent)).ToList()
+        : spVersion?.Components.SelectMany(c => c.Topics.Select(t => (t, c))).ToList() ?? new();
+    var filtered = !string.IsNullOrEmpty(ViewBag.CurrentSearch as string) || !string.IsNullOrEmpty(ViewBag.CurrentSubject as string)
+        || ViewBag.CurrentGrade != null || !string.IsNullOrEmpty(ViewBag.CurrentDifficulty as string)
+        || curVersion.HasValue || curComponent.HasValue || curTopic.HasValue;
 }
+<link rel="stylesheet" href="~/css/syllabus.css" asp-append-version="true" />
 
 <div class="row mb-4 align-items-center">
   <div class="col">
@@ -34,7 +53,7 @@
 <!-- Filters -->
 <div class="card mb-4">
   <div class="card-body">
-    <form method="get" class="row g-3 align-items-end">
+    <form method="get" class="row g-3 align-items-end" id="libraryFilters">
       @if (pickerMode)
       {
         <input type="hidden" name="assignmentId" value="@assignmentId" />
@@ -102,10 +121,44 @@
         <button type="submit" class="btn btn-primary flex-grow-1">
           <i class="bx bx-filter-alt me-1"></i> Filter
         </button>
-        <a href="/ContentLibrary" class="btn btn-outline-secondary" title="Clear filters">
+        <a href="/ContentLibrary@(pickerMode ? $"?assignmentId={assignmentId}" : "")" class="btn btn-outline-secondary" title="Clear filters" aria-label="Clear filters" id="clearFilters">
           <i class="bx bx-x"></i>
         </a>
       </div>
+      @if (syllabusCatalog.Count > 0)
+      {
+        <!-- Optional: questions the teacher aligned to a published syllabus. Combine with the filters above. -->
+        <div class="col-12 col-md-4">
+          <label class="form-label small fw-semibold" for="filterSyllabusVersion">Cambridge syllabus</label>
+          <select class="form-select" name="syllabusVersion" id="filterSyllabusVersion" data-sp-reset="filterSyllabusComponent,filterSyllabusTopic">
+            <option value="">Any (or none)</option>
+            @foreach (var v in syllabusCatalog)
+            {
+              <option value="@v.Id" selected="@(curVersion == v.Id)">@v.Label</option>
+            }
+          </select>
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label small fw-semibold" for="filterSyllabusComponent">Component</label>
+          <select class="form-select" name="syllabusComponent" id="filterSyllabusComponent" data-sp-reset="filterSyllabusTopic" disabled="@(spVersion is null)">
+            <option value="">@(spVersion is null ? "Choose a syllabus first" : "All components")</option>
+            @foreach (var c in spVersion?.Components ?? new())
+            {
+              <option value="@c.Id" selected="@(spComponent?.Id == c.Id && curComponent.HasValue)">@c.Number · @c.Title</option>
+            }
+          </select>
+        </div>
+        <div class="col-12 col-md-4">
+          <label class="form-label small fw-semibold" for="filterSyllabusTopic">Topic</label>
+          <select class="form-select" name="syllabusTopic" id="filterSyllabusTopic" disabled="@(spVersion is null)">
+            <option value="">All topics</option>
+            @foreach (var (t, c) in spTopics)
+            {
+              <option value="@t.Id" selected="@(curTopic == t.Id)">@t.Title@(spComponent is null ? $" · {c.Title}" : "")</option>
+            }
+          </select>
+        </div>
+      }
     </form>
   </div>
 </div>
@@ -118,7 +171,18 @@
   </div>
 }
 
-@if (!Model.Any())
+@if (!Model.Any() && filtered)
+{
+  <div class="card" id="libraryNoMatch">
+    <div class="card-body text-center py-5">
+      <i class="bx bx-search-alt" style="font-size:3rem; color:#696cff;" aria-hidden="true"></i>
+      <h5 class="mt-3">No questions match these filters</h5>
+      <p class="text-muted">Change a filter, or clear them to see every question.</p>
+      <a href="/ContentLibrary@(pickerMode ? $"?assignmentId={assignmentId}" : "")" class="btn btn-outline-primary">Clear filters</a>
+    </div>
+  </div>
+}
+else if (!Model.Any())
 {
   <div class="card">
     <div class="card-body text-center py-5">
@@ -136,7 +200,7 @@ else
   <div class="card">
     <div class="card-header d-flex align-items-center justify-content-between py-3">
       <span class="text-muted small">
-        <strong>@Model.Count</strong> question@(Model.Count != 1 ? "s" : "") found
+        <strong>@pageInfo.Total</strong> question@(pageInfo.Total != 1 ? "s" : "") found
       </span>
     </div>
     <div class="table-responsive">
@@ -193,6 +257,10 @@ else
                 {
                   <small class="text-muted">Grade @q.GradeLevel</small>
                 }
+                @if (q.SyllabusTopicId is { } stid && syllabusLabels.TryGetValue(stid, out var sl))
+                {
+                  <span class="badge bg-label-info syllabus-chip d-inline-block mt-1" title="Aligned to Cambridge @sl.Code: @sl.Full" data-syllabus-label>@sl.Short</span>
+                }
               </td>
               <td>
                 <span class="badge bg-label-@diffColor">@diffEmoji @diffLabel</span>
@@ -220,6 +288,7 @@ else
                   <form method="post" action="/ContentLibrary/Delete/@q.Id"
                         onsubmit="return confirm('Delete this question?')">
                     @Html.AntiForgeryToken()
+                    <input type="hidden" name="returnUrl" value="@hereUrl" />
                     <button type="submit" class="btn btn-sm btn-icon btn-outline-danger" title="Delete">
                       <i class="bx bx-trash"></i>
                     </button>
@@ -231,5 +300,14 @@ else
         </tbody>
       </table>
     </div>
+    <partial name="_Pager" model="pageInfo" />
   </div>
 }
+
+<script>
+  // Syllabus filters narrow step by step: changing the syllabus or component clears the narrower choices, then applies.
+  document.querySelectorAll('#libraryFilters select[name^="syllabus"]').forEach(sel => sel.addEventListener('change', () => {
+    (sel.dataset.spReset || '').split(',').filter(Boolean).forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    sel.form.requestSubmit();
+  }));
+</script>

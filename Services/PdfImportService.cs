@@ -72,9 +72,24 @@ public class PdfImportService
           information, "the curve shown below", what "A" refers to — identical in every part. Put
           the diagram description (hasDiagram/diagramHint) on the shared question, not on one part.
           When a question has no parts, set "part" and "stem" to null.
+        - The stem is ONLY the text before the first part. Text printed BETWEEN parts — e.g. "It is
+          now given that k = −1.", "The function g is defined by …", "The result of translating the
+          graph … is the graph of y = g(x)." — belongs to the part(s) after it: put it at the start
+          of the "title" of the next part, and repeat it at the start of every later part of the
+          same question that depends on it. Never move it into the stem and never drop it.
+        - Some questions go straight into their parts with no shared text at all (e.g. "3. (a) …
+          (b) …"). Those are still parts: set "part" as usual and set "stem" to null. This is
+          normal and needs no "validationWarning".
         - Do NOT guess a grouping. If you cannot tell whether some text is a shared stem or a
           separate question, or a part's siblings are missing, leave "part" and "stem" null and set
           "validationWarning" to say so, so a teacher can decide.
+        - Marks: exam papers print the marks for a question or part in square brackets at the
+          end, e.g. "[4]" or "[1]". Set "marks" to that whole number for the question or part it
+          follows, and do not include the bracket in the title. When no marks are printed, set
+          "marks" to null.
+        - Drawing: when the student must answer by drawing — "sketch", "draw", "plot", "shade",
+          "construct", "on this diagram …", "on the grid …", "complete the graph" — set
+          "needsDrawing" to true and use the type "OpenText". Otherwise set it to false.
         - Write ALL mathematics as LaTeX wrapped in $...$ delimiters, preserving exact
           structure: nth roots as \sqrt[n]{...}, fractions as \frac{a}{b}, powers as x^{2},
           subscripts as x_{1}, integrals as \int, and keep every "=", operator and sign
@@ -102,6 +117,8 @@ public class PdfImportService
             "options": ["option A text", "option B text", ...],
             "answerKey": "<correct answer or empty string>",
             "difficulty": "Easy|Medium|Hard",
+            "marks": null,
+            "needsDrawing": false,
             "part": null,
             "stem": null,
             "hasDiagram": false,
@@ -359,8 +376,9 @@ public class PdfImportService
     // ── Parts of one question ────────────────────────────────────────────────
     // The model reports each part of a numbered question with its label and the shared stem. Parts are only
     // treated as one question when that is clear: at least two parts, consecutive in the paper, with distinct
-    // labels, one question number, and a stem. Anything else stays as listed, with a warning for the teacher,
-    // so nothing is silently regrouped.
+    // labels and one question number. A stem is not required — many papers go straight into "(a)" with no
+    // shared text; such parts are grouped under a question with no text of its own. Anything else stays as
+    // listed, with a warning for the teacher, so nothing is silently regrouped.
     private static readonly System.Text.RegularExpressions.Regex PartLabelStart =
         new(@"^\s*\(?\s*([a-hA-H]|i{1,3}|iv|v)\s*\)", System.Text.RegularExpressions.RegexOptions.Compiled);
 
@@ -380,12 +398,12 @@ public class PdfImportService
             var distinctLabels = run.Select(p => p.Part!.Trim().ToLowerInvariant()).Distinct().Count() == run.Count;
             var stem = run.Select(p => p.Stem).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s))?.Trim();
 
-            if (run.Count >= 2 && distinctLabels && stem is not null)
+            if (run.Count >= 2 && distinctLabels)
             {
                 foreach (var part in run)
                 {
                     part.GroupKey = $"q{q.Number}";
-                    part.Stem = stem;
+                    part.Stem = stem;   // null when the question has no shared text before its parts
                     part.Part = part.Part!.Trim();
                 }
             }
@@ -393,9 +411,7 @@ public class PdfImportService
             {
                 foreach (var part in run) FlagUngrouped(part, run.Count < 2
                     ? "This looks like one part of a larger question, but its other parts were not found."
-                    : stem is null
-                        ? "These look like parts of one question, but the shared question text was not found."
-                        : "These look like parts of one question, but their labels repeat.");
+                    : "These look like parts of one question, but their labels repeat.");
             }
             i = j + 1;
         }
@@ -469,6 +485,14 @@ public class ParsedQuestion
     public string        AnswerKey  { get; set; } = string.Empty;
     [JsonConverter(typeof(LenientStringConverter))]
     public string        Difficulty { get; set; } = "Medium";
+
+    /// <summary>Marks printed for this question or part ("[4]"); null when the paper shows none.</summary>
+    [JsonConverter(typeof(LenientNullableIntConverter))]
+    public int?          Marks      { get; set; }
+
+    /// <summary>True when the student must answer by drawing (sketch a graph, draw on the diagram).</summary>
+    [JsonConverter(typeof(LenientBoolConverter))]
+    public bool          NeedsDrawing { get; set; }
 
     /// <summary>The part's own label ("a", "b", "i") when this is one part of a numbered question; otherwise null.</summary>
     [JsonConverter(typeof(LenientStringConverter))]

@@ -1,7 +1,10 @@
 # Run:  cp .env.example .env   (fill in the keys)   then   docker compose up -d --build
 services:
   web:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}   # recorded as the image's revision label
     image: smartschoolai:latest
     restart: unless-stopped
     environment:

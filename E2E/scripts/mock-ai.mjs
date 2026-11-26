@@ -11,7 +11,7 @@
 //   GET  /health             readiness probe
 //
 // Request kinds: tutor (streamed), ocr, eval (step grading), verify (second opinion),
-// answer (typed-answer / choice grading), import (question import), other.
+// answer (typed-answer / choice grading), sketch (marking a drawn answer), import (question import), other.
 //
 // Environment: E2E_MOCK_AI_PORT (default 5199), E2E_MOCK_AI_HOST (default 127.0.0.1; CI uses 0.0.0.0
 // so a container can reach it through host.docker.internal).
@@ -30,6 +30,10 @@ const defaults = () => ({
   evalReply: null,    // { steps: [{ number, text?, status, explanation }], overall, expectedAnswer, summary }
   verifyReply: null,  // { overall, agrees, confidence, notes, steps?: [{ number, status, explanation }] }
   answerReply: null,  // { correct, feedback } — or an array, one entry per call (the last repeats)
+  answerStatus: null, // an HTTP error status for typed-answer grading (e.g. 500): the AI "fails"
+  evalStatus: null,   // the same for marking steps / a photographed solution (e.g. 503)
+  tutorStatus: null,  // the same for the AI tutor's streamed reply (e.g. 503)
+  sketchReply: null,  // { correct, marks, confidence, feedback } for a drawn answer
   importReply: null   // the question list an import (PDF / photo) returns, as an array
 });
 
@@ -49,7 +53,12 @@ const json = (res, status, value) => {
   res.end(JSON.stringify(value));
 };
 
-const completion = content => ({ choices: [{ message: { role: "assistant", content } }] });
+// Like OpenRouter with usage reporting on: tokens and a cost for every reply.
+const completion = content => ({
+  id: "gen-mock-" + Math.random().toString(36).slice(2, 10),
+  choices: [{ message: { role: "assistant", content } }],
+  usage: { prompt_tokens: 1000, completion_tokens: 200, cost: 0.002 }
+});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function describe(body) {
@@ -64,6 +73,7 @@ function describe(body) {
   let kind = "other";
   if (body.stream === true) kind = "tutor";
   else if (hasImage && system.includes("OCR engine")) kind = "ocr";
+  else if (hasImage && system.includes("marking a student's sketch")) kind = "sketch";
   else if (system.includes("expert math teacher")) kind = "eval";
   else if (system.includes("exam moderator")) kind = "verify";
   else if (system.includes("grading students' typed answers")) kind = "answer";
@@ -86,6 +96,7 @@ async function chatCompletions(req, res) {
   requests.push(seen);
 
   if (seen.kind === "tutor") {
+    if (script.tutorStatus) return json(res, script.tutorStatus, { error: { message: "mock AI failure" } });
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
     for (const piece of script.tutorChunks) {
       res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`);
@@ -103,6 +114,7 @@ async function chatCompletions(req, res) {
 
   if (seen.kind === "eval") {
     await sleep(script.evalDelayMs);
+    if (script.evalStatus) return json(res, script.evalStatus, { error: { message: "mock AI failure" } });
     if (script.evalReply) return json(res, 200, completion(JSON.stringify(script.evalReply)));
     const steps = parseSteps(seen.user).map(s => ({ ...s, status: "correct", explanation: "" }));
     return json(res, 200, completion(JSON.stringify({
@@ -116,11 +128,17 @@ async function chatCompletions(req, res) {
   }
 
   if (seen.kind === "answer") {
+    if (script.answerStatus) return json(res, script.answerStatus, { error: { message: "mock AI failure" } });
     // "Item 2:" -> the question index the app is asking about.
     const index = Number(/Item (\d+):/.exec(seen.user)?.[1] ?? 0);
     const replies = Array.isArray(script.answerReply) ? script.answerReply : [script.answerReply ?? { correct: true, feedback: "That is right." }];
     const reply = replies[Math.min(answerCalls++, replies.length - 1)];
     return json(res, 200, completion(JSON.stringify([{ index, ...reply }])));
+  }
+
+  if (seen.kind === "sketch") {
+    const reply = script.sketchReply ?? { correct: true, marks: 1, confidence: 0.9, feedback: "The sketch shows the right shape." };
+    return json(res, 200, completion(JSON.stringify(reply)));
   }
 
   if (seen.kind === "import") return json(res, 200, completion(JSON.stringify(script.importReply ?? [])));

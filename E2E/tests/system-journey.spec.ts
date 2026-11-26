@@ -36,7 +36,8 @@ test.afterAll(async () => {
   for (const page of [admin, teacher, student]) await page.context().close();
 });
 
-const detailsRow = () => teacher.getByRole("row").filter({ has: teacher.locator('a[href*="SubmissionDetail"]') });
+// The student's main row (attempts sit in a separate, collapsible row under it).
+const detailsRow = () => teacher.locator("#recipientTable tr.recipient-main").filter({ has: teacher.locator('a[href*="SubmissionDetail"]') });
 
 test("a new teacher registers, and the admin finds them and resets their password", async () => {
   test.setTimeout(120_000);
@@ -116,7 +117,7 @@ test("the teacher creates a class and a published assignment", async () => {
   await teacher.locator('textarea[name="description"]').fill("Created by the system journey.");
   await teacher.locator("#classSelect").selectOption({ label: className });
   await teacher.locator("#typeSelect").selectOption("0");
-  await teacher.getByRole("button", { name: "Save as Draft" }).click();
+  await teacher.getByRole("button", { name: "Save and add questions" }).click();
   await expect(teacher).toHaveURL(/\/Assignments\/Edit\/[0-9a-f-]+/i);
   await teacher.waitForLoadState("load");
   assignmentId = teacher.url().match(/\/Assignments\/Edit\/([0-9a-f-]{36})/i)![1];
@@ -142,7 +143,7 @@ test("the student signs in, finds the assignment and submits one right and one w
   test.setTimeout(180_000);
   await signIn(student, studentEmail, studentPassword);
   await expect(student).toHaveURL(/\/Student\/?$/);
-  await expect(student.getByText(className, { exact: true }).first()).toBeVisible();
+  await expect(student.getByRole("link", { name: className, exact: true }).first()).toBeVisible();
 
   await student.goto("/Student/Classes");
   await student.locator('a[href*="/Student/Assignments?classId="]').first().click();
@@ -194,11 +195,14 @@ test("after the change every page agrees on 100%: student, teacher, CSV and anal
   expect(csv).not.toContain(",50,");
 
   await teacher.goto(`/Classes/Details/${classId}?tab=students`);
-  await expect(teacher.locator("strong.d-block", { hasText: studentName })).toBeVisible();
+  await expect(teacher.locator("#students a.student-link", { hasText: studentName })).toBeVisible();
 
   await teacher.goto(`/Analytics?classId=${classId}`);
-  await expect(teacher.locator("#classSelector")).toBeVisible();
+  await expect(teacher.locator("#fClass")).toHaveValue(classId);
   await expect(teacher.locator("body")).not.toContainText(/An error occurred while processing your request/i);
+  // Analytics shows the same 100% for this student as the other pages.
+  await teacher.goto(`/Analytics?classId=${classId}&tab=students`);
+  await expect(teacher.locator("[data-student-row]", { hasText: studentName })).toContainText("100%");
 
   // The teacher's dashboard counts the student and the assignment.
   await teacher.goto("/");

@@ -1,0 +1,172 @@
+@model SmartSchoolAI.ViewModels.SubmissionDetailViewModel
+@using SmartSchoolAI.Services
+@*
+  The attempt's activity: what the student did while working and after handing in. The totals are counted from the
+  same rows the list shows, after the same filters, so they always agree.
+*@
+@{
+    var result = Model.Result;
+    var t = ViewBag.Activity as ActivityLogService.Timeline ?? new ActivityLogService.Timeline { State = "none" };
+    var retention = ViewBag.RetentionDays as int? ?? 365;
+    var layout = QuestionLayout.Compute(Model.Questions);
+    string Q(int? i) => i is { } x && x >= 0 && x < layout.Labels.Length ? $"Q{layout.Labels[x]}" : "Work as a whole";
+    var baseUrl = $"/Assignments/SubmissionDetail?resultId={result.Id}&tab=activity" +
+                  (ViewBag.ReturnUrl is string ru ? $"&returnUrl={Uri.EscapeDataString(ru)}" : "");
+    string PageLink(int p) => baseUrl + (t.Action is null ? "" : $"&kind={t.Action}") + (t.Question is null ? "" : $"&question={t.Question}") + (p > 1 ? $"&page={p}" : "");
+    var afterShown = false;
+}
+
+<div id="activityTab">
+  <div class="d-flex flex-wrap align-items-baseline gap-2 mb-3">
+    <h5 class="fw-bold mb-0 me-auto">Student activity</h5>
+    <span class="text-muted small">@result.Student.FullName · @result.Assignment.Title · Attempt @result.AttemptNumber</span>
+  </div>
+
+  @if (t.State == "not-collected")
+  {
+    <div class="alert alert-secondary" id="activityNotCollected">
+      <i class="bx bx-history me-1" aria-hidden="true"></i>Activity was not collected for this work: it was started before the activity log existed.
+    </div>
+  }
+  else if (t.State == "purged" || t.Summary is not null)
+  {
+    var s = t.Summary!;
+    <div class="alert alert-secondary" id="activityPurged">
+      <i class="bx bx-time me-1" aria-hidden="true"></i>Details older than @retention days were removed (before @SchoolTime.Show(s.PurgedBefore, "dd MMM yyyy")).
+      Totals kept: @s.Copies copy · @s.Pastes paste (@s.PastesBlocked blocked) · hints @s.HintsReceived / @s.HintsRequested · AI Tutor @s.TutorRequests requests, @s.TutorOpened openings.
+    </div>
+  }
+
+  @if (t.State is "events" or "none")
+  {
+    <!-- Totals for the filtered list -->
+    <div class="row g-3 mb-3" id="activityCards">
+      <div class="col-6 col-xl-3">
+        <div class="card h-100"><div class="card-body d-flex gap-3 align-items-center">
+          <span class="stat-icon bg-label-primary" aria-hidden="true"><i class="bx bx-copy"></i></span>
+          <div><div class="small text-muted">Copy attempts</div><div class="fs-3 fw-bold" data-count="copy">@t.Copies</div></div>
+        </div></div>
+      </div>
+      <div class="col-6 col-xl-3">
+        <div class="card h-100"><div class="card-body d-flex gap-3 align-items-center">
+          <span class="stat-icon bg-label-warning" aria-hidden="true"><i class="bx bx-paste"></i></span>
+          <div><div class="small text-muted">Paste attempts</div><div class="fs-3 fw-bold" data-count="paste">@t.Pastes</div>
+            @if (t.PastesBlocked > 0) { <div class="small text-muted">@t.PastesBlocked blocked</div> }</div>
+        </div></div>
+      </div>
+      <div class="col-6 col-xl-3">
+        <div class="card h-100"><div class="card-body d-flex gap-3 align-items-center">
+          <span class="stat-icon bg-label-success" aria-hidden="true"><i class="bx bx-bulb"></i></span>
+          <div><div class="small text-muted">Hints received</div>
+            <div class="fs-3 fw-bold" data-count="hints"><span>@t.HintsReceived</span> <span class="fs-6 fw-normal text-muted">/ @t.HintsRequested requested</span></div></div>
+        </div></div>
+      </div>
+      <div class="col-6 col-xl-3">
+        <div class="card h-100"><div class="card-body">
+          <div class="d-flex gap-3 align-items-center">
+            <span class="stat-icon bg-label-info" aria-hidden="true"><i class="bx bx-message-rounded-dots"></i></span>
+            <div><div class="small text-muted">AI Tutor requests</div><div class="fs-3 fw-bold" data-count="tutor">@t.TutorRequests</div></div>
+          </div>
+          <details class="small mt-2" id="tutorDetails">
+            <summary class="text-muted">Openings and outcomes</summary>
+            <ul class="list-unstyled mb-0 mt-1">
+              <li>Opened: <strong data-count="tutor-opened">@t.TutorOpened</strong></li>
+              <li>Requests while working: <strong>@(t.TutorRequests - t.TutorRequestsAfterSubmission)</strong></li>
+              <li>Requests after submission: <strong data-count="tutor-after">@t.TutorRequestsAfterSubmission</strong></li>
+              @foreach (var (outcome, n) in t.TutorOutcomes) { <li>@outcome: <strong>@n</strong></li> }
+            </ul>
+          </details>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header d-flex flex-wrap gap-2 align-items-end">
+        <h6 class="mb-0 me-auto fw-bold">Activity timeline</h6>
+        <form method="get" action="/Assignments/SubmissionDetail" class="d-flex flex-wrap gap-2 align-items-end" id="activityFilters">
+          <input type="hidden" name="resultId" value="@result.Id" />
+          <input type="hidden" name="tab" value="activity" />
+          @if (ViewBag.ReturnUrl is string back) { <input type="hidden" name="returnUrl" value="@back" /> }
+          <div>
+            <label class="visually-hidden" for="activityAction">Action</label>
+            <select class="form-select form-select-sm" id="activityAction" name="kind" onchange="this.form.submit()">
+              <option value="" selected="@(t.Action is null)">All actions</option>
+              <option value="copy" selected="@(t.Action == "copy")">Copy</option>
+              <option value="paste" selected="@(t.Action == "paste")">Paste</option>
+              <option value="hint" selected="@(t.Action == "hint")">Hints</option>
+              <option value="tutor" selected="@(t.Action == "tutor")">AI Tutor</option>
+            </select>
+          </div>
+          <div>
+            <label class="visually-hidden" for="activityQuestion">Question</label>
+            <select class="form-select form-select-sm" id="activityQuestion" name="question" onchange="this.form.submit()">
+              <option value="" selected="@(t.Question is null)">All questions</option>
+              @foreach (var q in t.Questions) { <option value="@q" selected="@(t.Question == q)">@Q(q)</option> }
+            </select>
+          </div>
+          <noscript><button class="btn btn-sm btn-outline-primary">Show</button></noscript>
+          <span class="small text-muted" title="All times are in school time"><i class="bx bx-calendar me-1" aria-hidden="true"></i>@SchoolTime.Label</span>
+        </form>
+      </div>
+
+      @if (!t.Rows.Any(r => !r.IsSubmission))
+      {
+        <div class="card-body text-muted" id="activityEmpty">
+          @(t.Action is null && t.Question is null ? "No actions were recorded for this attempt (0 events)." : "No actions match these filters.")
+        </div>
+      }
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0 activity-table" id="activityTable">
+          <thead class="table-light"><tr><th>Time</th><th>Action</th><th>Question</th><th>Outcome</th></tr></thead>
+          <tbody>
+            @foreach (var r in t.PageRows)
+            {
+              if (r.AfterSubmission && !afterShown)
+              {
+                afterShown = true;
+                <tr class="activity-divider"><td colspan="4" class="fw-semibold small text-uppercase text-muted">After submission — studying the result</td></tr>
+              }
+              <tr class="@(r.IsSubmission ? "activity-submission" : "")" data-activity-row data-kind="@r.Kind" data-after="@(r.AfterSubmission ? "1" : "0")">
+                <td class="text-nowrap" data-label="Time">@SchoolTime.Show(r.At, "dd MMM HH:mm:ss")
+                  @if (r.OrderUncertain) { <span class="badge bg-label-secondary ms-1" title="Reported by the browser so close to the hand-in that its exact order is not certain.">order uncertain</span> }
+                </td>
+                <td data-label="Action"><i class="bx @r.Icon me-1" aria-hidden="true"></i>@r.Action
+                  @if (r.FromBrowser) { <span class="visually-hidden">(seen in the page)</span> }</td>
+                <td data-label="Question">@(r.IsSubmission ? "—" : Q(r.Question))</td>
+                <td data-label="Outcome"><span class="badge bg-label-@r.Tone">@r.Outcome</span></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      @if (t.TotalPages > 1)
+      {
+        <div class="d-flex justify-content-between align-items-center px-3 py-2 border-top small">
+          <span class="text-muted">Page @t.Page of @t.TotalPages</span>
+          <span class="d-flex gap-2">
+            @if (t.Page > 1) { <a class="btn btn-sm btn-outline-secondary" href="@PageLink(t.Page - 1)">Previous</a> }
+            @if (t.Page < t.TotalPages) { <a class="btn btn-sm btn-outline-secondary" href="@PageLink(t.Page + 1)">Next</a> }
+          </span>
+        </div>
+      }
+      <div class="px-3 py-2 small text-muted border-top">
+        Copy and paste are what the page observed: "Allowed" means the page did not block it — not what was copied or
+        pasted. Nothing here changes a mark.
+      </div>
+    </div>
+  }
+</div>
+
+<style>
+  #activityTab .stat-icon { width: 2.5rem; height: 2.5rem; border-radius: .5rem; display: inline-flex; align-items: center; justify-content: center; font-size: 1.35rem; flex: none; }
+  .activity-submission td { background: rgba(105, 108, 255, .06); font-weight: 600; }
+  .activity-divider td { background: var(--bs-gray-100, #f5f5f9); }
+  @@media (max-width: 575.98px) {
+    .activity-table thead { display: none; }
+    .activity-table tr { display: grid; grid-template-columns: auto 1fr; gap: .1rem .6rem; padding: .5rem .75rem; border-bottom: 1px solid var(--bs-border-color, #e7e7e8); }
+    .activity-table td { border: 0; padding: 0; }
+    .activity-table td[data-label="Time"] { grid-column: 1 / -1; font-size: .8rem; color: var(--bs-secondary-color, #8592a3); }
+    .activity-table .activity-divider td { grid-column: 1 / -1; }
+    #activityTab .stat-icon { display: none; }
+  }
+</style>

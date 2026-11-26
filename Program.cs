@@ -8,6 +8,9 @@ using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Every date is typed and shown on the school's clock, whatever time zone the server runs in.
+SchoolTime.Configure(builder.Configuration["School:TimeZone"]);
+
 // ── Services ──────────────────────────────────────────────────────────────────
 
 builder.Services.AddControllersWithViews();
@@ -19,12 +22,30 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 // Domain services
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<PdfImportService>();
+builder.Services.AddScoped<SyllabusService>();
+// Checking student work: photo reading (OpenRouter:Grading:RecognitionModel) and marking
+// (OpenRouter:Grading:GradingModel). Every call is logged with its tokens and cost; finished stages are stored.
+builder.Services.AddSingleton<GradingModels>();
+builder.Services.AddSingleton(sp => new AiUsageRecorder(
+    () => new AppDbContext(new DbContextOptionsBuilder<AppDbContext>()
+              .UseSqlite(builder.Configuration.GetConnectionString("Default")).Options),
+    sp.GetRequiredService<ILogger<AiUsageRecorder>>()));
+builder.Services.AddScoped<OpenRouterClient>();
+builder.Services.AddScoped<AiMarkingService>();
 builder.Services.AddScoped<HandwritingAnalysisService>();
 builder.Services.AddScoped<AnswerGradingService>();
 builder.Services.AddScoped<TranslationService>();
 builder.Services.AddScoped<GradingService>();
 builder.Services.AddScoped<AnalyticsService>();
 builder.Services.AddScoped<ClassStatisticsService>();
+builder.Services.AddScoped<AssignmentDistributionService>();
+builder.Services.AddScoped<SubmissionService>();
+// The student's actions per attempt (copy / paste, hints, the AI tutor) for the teacher's Activity tab, and the daily
+// clean-up of details past ActivityLog:DetailRetentionDays.
+builder.Services.AddScoped<ActivityLogService>();
+builder.Services.AddHostedService<ActivityRetentionSweep>();
+// Marks submissions whose AI marking was cut short by a restart (GradingPending still set).
+builder.Services.AddHostedService<PendingMarkingSweep>();
 builder.Services.AddScoped<ReCaptchaService>();
 builder.Services.AddSingleton<GenerationJobTracker>();
 builder.Services.AddHttpClient();
@@ -54,6 +75,34 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
+    // A tutor request refused by the "ai" limit is still a request the student made: it goes to the attempt's
+    // activity as "Limit reached". The page sends the request's id and context in headers for this.
+    options.OnRejected = async (context, _) =>
+    {
+        var http = context.HttpContext;
+        if (!http.Request.Path.StartsWithSegments("/Student/ChatStream") || !http.User.IsInRole("Student")) return;
+        var h = http.Request.Headers;
+        if (!Guid.TryParse(h["X-Activity-Id"], out var requestId) || !Guid.TryParse(h["X-Activity-Assignment"], out var assignmentId)) return;
+        var studentId = Guid.Parse(http.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+        var log = http.RequestServices.GetRequiredService<ActivityLogService>();
+        var attempt = await log.CurrentAttemptAsync(assignmentId, studentId);
+        int? question = int.TryParse(h["X-Activity-Question"], out var q) ? q : null;
+        var kind = h["X-Activity-Kind"].ToString() switch
+        {
+            "hint" => SmartSchoolAI.Models.ActivityKind.HintRequested,
+            "message" => SmartSchoolAI.Models.ActivityKind.TutorMessage,
+            _ => SmartSchoolAI.Models.ActivityKind.TutorRequest
+        };
+        // Only for work the student was given (checked when the request is stored is the student's own attempt).
+        var db = http.RequestServices.GetRequiredService<AppDbContext>();
+        if (!await db.AssignmentStudents.AnyAsync(x => x.AssignmentId == assignmentId && x.StudentId == studentId)) return;
+        var now = DateTime.UtcNow;
+        if (h["X-Activity-Opened"] == "1")
+            await log.RecordAsync(assignmentId, studentId, attempt, question, SmartSchoolAI.Models.ActivityKind.TutorOpened,
+                                  SmartSchoolAI.Models.ActivityOutcome.Allowed, null, now.AddMilliseconds(-1));
+        await log.RecordAsync(assignmentId, studentId, attempt, question, kind, SmartSchoolAI.Models.ActivityOutcome.LimitReached, requestId, now);
+    };
+
     options.AddPolicy("login", httpContext => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions
@@ -63,14 +112,35 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit  = 0
         }));
 
+    // Keyed by the account id (two students with the same name must not share a budget), else the IP.
     options.AddPolicy("ai", httpContext => RateLimitPartition.GetFixedWindowLimiter(
-        partitionKey: httpContext.User.Identity?.Name
+        partitionKey: httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
             ?? httpContext.Connection.RemoteIpAddress?.ToString()
             ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = builder.Configuration.GetValue("RateLimit:AiPermitLimit", 15),
             Window      = TimeSpan.FromMinutes(5),
+            QueueLimit  = 0
+        }));
+
+    // The browser's activity batches (copy / paste / opening the tutor): small and frequent, per account.
+    options.AddPolicy("activity", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? httpContext.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions { PermitLimit = 60, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+
+    // Handing in work is never refused because the student used the answer checker a lot: it has its own budget,
+    // generous enough for retries after a lost connection, per account.
+    options.AddPolicy("submit", httpContext => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? httpContext.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = builder.Configuration.GetValue("RateLimit:SubmitPermitLimit", 30),
+            Window      = TimeSpan.FromMinutes(1),
             QueueLimit  = 0
         }));
 });
@@ -191,6 +261,9 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();   // must come before UseAuthorization and the rate limiter
+// Pages for a signed-in user are never kept by the browser, so Back after logout or after another person
+// signs in on the same computer does not show the previous user's page from memory.
+app.UseMiddleware<SmartSchoolAI.Middleware.NoStoreForSignedInMiddleware>();
 // After authentication so the "ai" policy sees the signed-in user and limits each person
 // separately; before it, every request looked anonymous and the whole school shared one IP bucket.
 app.UseRateLimiter();

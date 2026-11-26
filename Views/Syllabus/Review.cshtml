@@ -1,0 +1,100 @@
+@model SmartSchoolAI.Models.SyllabusVersion
+@using SmartSchoolAI.Models
+@{
+    ViewData["Title"] = $"{Model.Program.Code} {Model.Years}";
+    var links = ViewBag.LinkCounts as Dictionary<Guid, int> ?? new();
+    var draft = Model.Status == SyllabusVersionStatus.Draft;
+}
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <a href="/Syllabus" class="btn btn-sm btn-outline-secondary"><i class="bx bx-arrow-back me-1" aria-hidden="true"></i>Syllabus library</a>
+  <h4 class="fw-bold py-3 mb-0 me-auto">
+    <span class="text-muted fw-light">@(draft ? "Preview import" : "Syllabus") /</span> @Model.Program.Code · @Model.Years
+  </h4>
+  @if (draft) { <span class="badge bg-label-warning fs-6" id="syllabusStatus">Draft — not visible to teachers</span> }
+  else { <span class="badge bg-label-success fs-6" id="syllabusStatus">Published @Model.PublishedAt?.ToString("dd MMM yyyy")</span> }
+</div>
+
+@if (TempData["SyllabusDifferentFile"] is string different)
+{
+  <div class="alert alert-warning" id="syllabusDifferentFile" role="alert"><i class="bx bx-error me-1" aria-hidden="true"></i><strong>Different file, same exam years.</strong> @different</div>
+}
+@if (TempData["Info"] is string info)
+{
+  <div class="alert alert-info" id="syllabusInfo"><i class="bx bx-info-circle me-1" aria-hidden="true"></i>@info</div>
+}
+
+<div class="card mb-3">
+  <div class="card-body small" id="syllabusSource">
+    <div><strong>@Model.Program.Title (@Model.Program.Code)</strong> — exams @Model.Years@(Model.DocumentVersion is null ? "" : $" · {Model.DocumentVersion}")</div>
+    <div class="text-muted">Source: @Model.SourceName@if (Model.SourceUrl is not null) { <text> · </text><a href="@Model.SourceUrl" target="_blank" rel="noopener">@Model.SourceUrl</a> }
+      · @Model.Components.Count components, @Model.Components.Sum(c => c.Topics.Count) topics (topic headings from "Subject content"; the learning objectives under them are not topics)</div>
+    <div class="text-muted">Check each topic against the PDF page shown. Titles can be corrected at any time — questions stay linked.</div>
+  </div>
+</div>
+
+<form method="post" action="/Syllabus/Save/@Model.Id" id="syllabusReviewForm">
+  @Html.AntiForgeryToken()
+  @foreach (var c in Model.Components)
+  {
+    <div class="card mb-3" data-component="@c.Number">
+      <div class="card-header d-flex flex-wrap gap-2 align-items-baseline">
+        <h5 class="mb-0 me-auto">@c.Number · @c.Title</h5>
+        <span class="small text-muted">@c.Topics.Count topics · from PDF p. @c.SourcePage</span>
+      </div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0 syllabus-review-table">
+          <thead class="table-light"><tr><th style="width:6rem">No.</th><th>Topic</th><th style="width:7rem">PDF page</th><th style="width:9rem"></th></tr></thead>
+          <tbody>
+            @foreach (var t in c.Topics)
+            {
+              var linked = links.GetValueOrDefault(t.Id);
+              <tr data-topic="@t.Title">
+                <td><input class="form-control form-control-sm" name="number_@t.Id" value="@t.Number" aria-label="Number of @t.Title" /></td>
+                <td><input class="form-control form-control-sm" name="title_@t.Id" value="@t.Title" required maxlength="200" aria-label="Title of topic @t.Number" /></td>
+                <td><input class="form-control form-control-sm" name="page_@t.Id" value="@t.SourcePage" type="number" min="1" aria-label="PDF page of @t.Title" /></td>
+                <td>
+                  @if (linked > 0)
+                  { <span class="small text-muted">@linked linked question@(linked == 1 ? "" : "s")</span> }
+                  else
+                  {
+                    <div class="form-check mb-0">
+                      <input class="form-check-input" type="checkbox" name="remove_@t.Id" value="true" id="remove_@t.Id" />
+                      <label class="form-check-label small" for="remove_@t.Id">Remove</label>
+                    </div>
+                  }
+                </td>
+              </tr>
+            }
+            <tr class="table-light">
+              <td><input class="form-control form-control-sm" name="newNumber_@c.Id" placeholder="@($"{c.Number}.x")" aria-label="Number of a missing topic in @c.Title" /></td>
+              <td><input class="form-control form-control-sm" name="newTitle_@c.Id" placeholder="Add a topic the import missed (optional)" aria-label="Add a topic to @c.Title" /></td>
+              <td><input class="form-control form-control-sm" name="newPage_@c.Id" type="number" min="1" aria-label="PDF page of the new topic" /></td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
+
+  <div class="d-flex flex-wrap gap-2 mb-4">
+    @if (draft)
+    {
+      <button type="submit" name="publish" value="true" class="btn btn-primary" id="syllabusPublish"><i class="bx bx-check-double me-1" aria-hidden="true"></i>Publish to teachers</button>
+      <button type="submit" class="btn btn-outline-primary">Save draft</button>
+    }
+    else
+    {
+      <button type="submit" class="btn btn-primary">Save corrections</button>
+    }
+  </div>
+</form>
+
+@if (draft)
+{
+  <form method="post" action="/Syllabus/Discard/@Model.Id" onsubmit="return confirm('Discard this draft? Nothing is published yet.');">
+    @Html.AntiForgeryToken()
+    <button type="submit" class="btn btn-sm btn-outline-danger">Discard draft</button>
+  </form>
+}

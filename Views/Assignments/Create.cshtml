@@ -1,12 +1,21 @@
 @{
     ViewData["Title"] = "Create Assignment";
     var classes = ViewBag.Classes as IEnumerable<SmartSchoolAI.Models.Class> ?? Enumerable.Empty<SmartSchoolAI.Models.Class>();
+    // Opened from a class page: that class is filled in and the way back leads to it.
+    var presetClass = ViewBag.PresetClass as SmartSchoolAI.Models.Class;
 }
 
 <div class="row mb-4">
   <div class="col">
     <h4 class="fw-bold py-3 mb-0">
-      <span class="text-muted fw-light">SmartSchool AI / <a href="/Assignments">Assignments</a> /</span> Create
+      @if (presetClass is not null)
+      {
+        <span class="text-muted fw-light">SmartSchool AI / <a href="/Classes">My Classes</a> / <a href="/Classes/Details/@presetClass.Id">@presetClass.Name</a> /</span> @("New assignment")
+      }
+      else
+      {
+        <span class="text-muted fw-light">SmartSchool AI / <a href="/Assignments">Assignments</a> /</span> @("Create")
+      }
     </h4>
   </div>
 </div>
@@ -25,6 +34,10 @@
             <i class="bx bx-error-circle me-1"></i> @ViewBag.Error
           </div>
         }
+
+        <p class="text-muted small">
+          This saves a draft. You add questions next, then choose who gets it — nothing reaches students until you assign it.
+        </p>
 
         <form method="post" asp-action="Create" asp-controller="Assignments">
           @Html.AntiForgeryToken()
@@ -48,7 +61,14 @@
                 <option value="">— Select a class —</option>
                 @foreach (var cls in classes)
                 {
-                  <option value="@cls.Id">@cls.Name</option>
+                  if (presetClass?.Id == cls.Id)
+                  {
+                    <option value="@cls.Id" selected>@cls.Name</option>
+                  }
+                  else
+                  {
+                    <option value="@cls.Id">@cls.Name</option>
+                  }
                 }
               </select>
               @if (!classes.Any())
@@ -69,10 +89,18 @@
           </div>
 
           <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label" for="availableFromInput">Opens <span class="text-muted small">(optional)</span></label>
+              <input type="datetime-local" class="form-control" name="availableFrom" id="availableFromInput" />
+              <div class="form-text">Leave empty to let students start as soon as you assign it.</div>
+            </div>
+          </div>
+
+          <div class="row">
             <div class="col-md-6 mb-3" id="deadlineGroup">
               <label class="form-label">Deadline <span class="text-danger" id="deadlineRequired">*</span></label>
               <input type="datetime-local" class="form-control" name="deadline" id="deadlineInput" />
-              <div class="form-text">Required for Homework assignments</div>
+              <div class="form-text">Required for Homework assignments. Times are @SmartSchoolAI.Services.SchoolTime.Label.</div>
             </div>
             <div class="col-md-6 mb-3 d-flex align-items-end pb-1">
               <div class="form-check">
@@ -84,9 +112,9 @@
 
           <div class="d-flex gap-2 mt-2">
             <button type="submit" class="btn btn-primary">
-              <i class="bx bx-save me-1"></i> Save as Draft
+              <i class="bx bx-right-arrow-alt me-1"></i> Save and add questions
             </button>
-            <a href="/Assignments" class="btn btn-outline-secondary">Cancel</a>
+            <a href="@(presetClass is null ? "/Assignments" : $"/Classes/Details/{presetClass.Id}")" class="btn btn-outline-secondary">Cancel</a>
           </div>
         </form>
 

@@ -365,6 +365,12 @@
     });
   }
 
+  /** One line of text with maths, in place (no paragraphs): for answers and steps shown inside a line. */
+  function inlineInto(target, str) {
+    while (target.firstChild) target.removeChild(target.firstChild);
+    lineNodes(String(str == null ? '' : str).replace(/\s*\r?\n\s*/g, ' '), target);
+  }
+
   /** KaTeX for the spans convert() could not handle. A no-op when KaTeX is not loaded. */
   function typeset(root) {
     if (!root || !global.katex) return;
@@ -377,5 +383,5 @@
     });
   }
 
-  global.MathText = { toReadable: convert, inline: inline, renderInto: renderInto, typeset: typeset };
+  global.MathText = { toReadable: convert, inline: inline, renderInto: renderInto, inlineInto: inlineInto, typeset: typeset };
 })(typeof window !== 'undefined' ? window : globalThis);

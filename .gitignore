@@ -19,3 +19,5 @@ appsettings.Production.json
 .env
 .env.*
 !.env.example
+# local student lists and generated passwords: never commit
+.student-import/

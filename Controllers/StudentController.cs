@@ -6,6 +6,7 @@ using SmartSchoolAI.Data;
 using SmartSchoolAI.Models;
 using SmartSchoolAI.Models.Dtos;
 using SmartSchoolAI.Services;
+using SmartSchoolAI.ViewModels;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
@@ -20,32 +21,35 @@ public class StudentController : Controller
     private readonly AuthService                _authService;
     private readonly IConfiguration             _config;
     private readonly IHttpClientFactory         _httpFactory;
-    private readonly HandwritingAnalysisService _handwriting;
+    private readonly AiMarkingService _marking;
     private readonly GradingService             _grader;
     private readonly GenerationJobTracker       _jobs;
     private readonly IServiceScopeFactory       _scopeFactory;
     private readonly IWebHostEnvironment        _env;
     private readonly ILogger<StudentController> _logger;
     private readonly TranslationService         _translator;
+    private readonly SubmissionService          _submissions;
 
     public StudentController(
         AppDbContext               db,
         AuthService                authService,
         IConfiguration             config,
         IHttpClientFactory         httpFactory,
-        HandwritingAnalysisService handwriting,
+        AiMarkingService marking,
         GradingService             grader,
         GenerationJobTracker       jobs,
         IServiceScopeFactory       scopeFactory,
         IWebHostEnvironment        env,
         ILogger<StudentController> logger,
-        TranslationService         translator)
+        TranslationService         translator,
+        SubmissionService          submissions)
     {
+        _submissions  = submissions;
         _db           = db;
         _authService  = authService;
         _config       = config;
         _httpFactory  = httpFactory;
-        _handwriting  = handwriting;
+        _marking      = marking;
         _grader       = grader;
         _jobs         = jobs;
         _scopeFactory = scopeFactory;
@@ -59,52 +63,32 @@ public class StudentController : Controller
 
     // ── DASHBOARD ──────────────────────────────────────────────────────────────
 
-    /// <summary>Main student dashboard: enrolled classes + their assigned active assignments.</summary>
-    public async Task<IActionResult> Index()
+    /// <summary>
+    /// "My work": the next thing to do, then To do / Submitted / Feedback for all classes or one, with the one status
+    /// rule of <see cref="StudentWork"/> (the class page uses the same). Reads only what is stored — opening it never
+    /// calls the AI.
+    /// </summary>
+    public async Task<IActionResult> Index(Guid? classId = null, string? section = null, bool all = false)
     {
         var studentId = CurrentStudentId;
-
-        var enrolledClassIds = await _db.ClassStudents
-            .Where(cs => cs.StudentId == studentId)
-            .Select(cs => cs.ClassId)
-            .ToListAsync();
-
-        var assignedAssignmentIds = await _db.AssignmentStudents
-            .Where(asn => asn.StudentId == studentId)
-            .Select(asn => asn.AssignmentId)
-            .ToListAsync();
+        var now = DateTime.UtcNow;
 
         var classes = await _db.Classes
-            .Where(c => enrolledClassIds.Contains(c.Id) && !c.IsArchived)
             .Include(c => c.Teacher)
-            .Include(c => c.Assignments.Where(a => a.Status == AssignmentStatus.Active
-                                                && assignedAssignmentIds.Contains(a.Id)))
+            .Where(c => !c.IsArchived && c.ClassStudents.Any(cs => cs.StudentId == studentId))
+            .OrderBy(c => c.Name)
             .ToListAsync();
+        if (classId is { } cid && !classes.Any(c => c.Id == cid)) classId = null;
 
-        var submittedResults = await _db.StudentResults
-            .Where(r => r.StudentId == studentId && r.IsSubmitted)
-            .ToListAsync();
-
-        var latestResults = submittedResults
-            .GroupBy(r => r.AssignmentId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.AttemptNumber).First());
-
-        ViewBag.SubmittedResults = latestResults;
-
-        var averageScore = latestResults.Values.Any() 
-            ? (int)Math.Round(latestResults.Values.Average(r => r.Score)) 
-            : 0;
-        ViewBag.AverageScore = averageScore;
-
-        var allActiveAssignments = classes
-            .SelectMany(c => c.Assignments)
-            .Where(a => !latestResults.ContainsKey(a.Id))
-            .OrderBy(a => a.Deadline ?? DateTime.MaxValue)
-            .Take(5)
-            .ToList();
-        ViewBag.UpcomingDeadlines = allActiveAssignments;
-
-        return View(classes);
+        return View(new MyWorkViewModel
+        {
+            Now      = now,
+            Classes  = classes,
+            ClassId  = classId,
+            Section  = section is "submitted" or "feedback" ? section : "todo",
+            ShowAll  = all,
+            Work     = await StudentWork.LoadAsync(_db, studentId, now, classId)
+        });
     }
 
     /// <summary>Dedicated page for student's enrolled classes overview.</summary>
@@ -140,6 +124,15 @@ public class StudentController : Controller
         ViewBag.SubmittedResults = latestResults;
 
         return View(classes);
+    }
+
+    /// <summary>Each assignment's due date for this student: their personal one if the teacher set it.</summary>
+    private static Dictionary<Guid, DateTime?> MyDueDates(IEnumerable<Assignment> assignments, List<AssignmentStudent> mine)
+    {
+        var overrides = mine.ToDictionary(x => x.AssignmentId, x => x.DueDateOverride);
+        return assignments.DistinctBy(a => a.Id).ToDictionary(
+            a => a.Id,
+            a => overrides.TryGetValue(a.Id, out var personal) && personal.HasValue ? personal : a.Deadline);
     }
 
     // ── JOIN CLASS ─────────────────────────────────────────────────────────────
@@ -181,34 +174,10 @@ public class StudentController : Controller
 
         if (cls is null) return NotFound();
 
-        // Only show assignments this student is explicitly assigned to
-        var assignedIds = await _db.AssignmentStudents
-            .Where(asn => asn.StudentId == studentId)
-            .Select(asn => asn.AssignmentId)
-            .ToListAsync();
-
-        var assignments = await _db.Assignments
-            .Where(a => a.ClassId == classId
-                     && a.Status == AssignmentStatus.Active
-                     && assignedIds.Contains(a.Id))
-            .OrderBy(a => a.Deadline)
-            .ToListAsync();
-
-        // Fetch submissions by this student for these assignments
-        var assignmentIds = assignments.Select(a => a.Id).ToList();
-        var myResults = await _db.StudentResults
-            .Where(r => r.StudentId == studentId && assignmentIds.Contains(r.AssignmentId))
-            .ToListAsync();
-
-        ViewBag.Class   = cls;
-        // One entry per assignment — prefer the submitted result, else the latest in-progress.
-        ViewBag.Results = myResults
-            .GroupBy(r => r.AssignmentId)
-            .ToDictionary(
-                g => g.Key,
-                g => g.OrderByDescending(r => r.IsSubmitted).ThenByDescending(r => r.AttemptNumber).First());
-
-        return View(assignments);
+        // The same rule as "My work": a draft is never shown as handed in (it used to be — the class page took
+        // "any attempt" for "submitted" and offered View My Result for a draft the home page offered Start for).
+        ViewBag.Class = cls;
+        return View(await StudentWork.LoadAsync(_db, studentId, DateTime.UtcNow, classId));
     }
 
     // ── TAKE ASSIGNMENT ────────────────────────────────────────────────────────
@@ -263,104 +232,172 @@ public class StudentController : Controller
 
         ViewBag.Assignment    = assignment;
         ViewBag.AttemptNumber = submittedCount + 1;
+        ViewBag.MyDue         = enrollment.DueDateOverride ?? assignment.Deadline;
+        ViewBag.PersonalDue   = enrollment.DueDateOverride.HasValue;
+
+        // The attempt in progress, from any device: typed answers to restore, and photos already saved per question.
+        var draft = await _db.StudentResults.Include(r => r.StudentAnswers)
+            .Where(r => r.AssignmentId == assignmentId && r.StudentId == studentId && !r.IsSubmitted)
+            .OrderByDescending(r => r.AttemptNumber).FirstOrDefaultAsync();
+        var serverDraft = new Dictionary<string, string>();
+        var photos = new Dictionary<int, List<string>>();
+        if (draft is not null)
+        {
+            foreach (var a in draft.StudentAnswers)
+            {
+                if (!string.IsNullOrEmpty(a.ImagePath)) photos[a.QuestionIndex] = SubmissionMedia.Paths(a.ImagePath);
+                else if (!string.IsNullOrEmpty(a.AnswerValue)) serverDraft[$"q_{a.QuestionIndex}"] = a.AnswerValue;
+                if (GradingService.IsChoiceQuestion(questions.ElementAtOrDefault(a.QuestionIndex) ?? new QuestionDto())
+                    && !string.IsNullOrEmpty(a.AnswerValue)) serverDraft[$"q_{a.QuestionIndex}"] = a.AnswerValue;
+                if (!string.IsNullOrEmpty(a.WorkText) && string.IsNullOrEmpty(a.ImagePath)) serverDraft[$"work_{a.QuestionIndex}"] = a.WorkText;
+            }
+            var savedAt = draft.StudentAnswers.Select(a => a.UpdatedAt ?? a.CreatedAt).DefaultIfEmpty(draft.UpdatedAt ?? draft.CreatedAt).Max();
+            serverDraft["__savedAt"] = new DateTimeOffset(DateTime.SpecifyKind(savedAt, DateTimeKind.Utc)).ToUnixTimeMilliseconds().ToString();
+        }
+        ViewBag.ServerDraft = serverDraft;
+        ViewBag.SavedPhotos = photos;
 
         return View(questions);
     }
 
-    // ── SUBMIT ASSIGNMENT ──────────────────────────────────────────────────────
+    // ── SAVE DRAFT ─────────────────────────────────────────────────────────────
 
-    /// <summary>Receives student answers, evaluates via AI, stores StudentResult.</summary>
+    /// <summary>
+    /// Keeps the typed answers of the attempt in progress on the server, so the student can continue on another
+    /// device. Nothing is marked (no AI, no score) — that happens on Submit. The page sends the attempt number it
+    /// shows: a page left open after the work was handed in cannot start a new attempt by saving.
+    /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [EnableRateLimiting("ai")]
-    public async Task<IActionResult> SubmitAssignment([FromForm] Dictionary<string, string> formData)
+    [EnableRateLimiting("submit")]
+    public async Task<IActionResult> SaveDraft(Guid assignmentId, int attempt, [FromForm] Dictionary<string, string> formData)
     {
         var studentId = CurrentStudentId;
+        var assignment = await _db.Assignments.FirstOrDefaultAsync(a => a.Id == assignmentId && a.Status == AssignmentStatus.Active);
+        var enrollment = assignment is null ? null : await _db.AssignmentStudents
+            .FirstOrDefaultAsync(x => x.AssignmentId == assignmentId && x.StudentId == studentId);
+        if (assignment is null || enrollment is null) return NotFound(new { ok = false });
+        if (GradingService.IsBeforeStart(assignment, enrollment) || GradingService.IsPastDeadline(assignment, enrollment))
+            return Conflict(new { ok = false, error = "This assignment is not open for changes." });
 
-        // Extract assignmentId from form data
-        if (!formData.TryGetValue("assignmentId", out var assignmentIdStr) ||
-            !Guid.TryParse(assignmentIdStr, out var assignmentId))
+        var submittedCount = await _db.StudentResults.CountAsync(r => r.AssignmentId == assignmentId && r.StudentId == studentId && r.IsSubmitted);
+        if (attempt != submittedCount + 1 || (!assignment.AllowsUnlimitedAttempts && submittedCount >= assignment.MaxAttempts))
+            return Conflict(new { ok = false, stale = true, error = "This attempt was already handed in. Reload the page." });
+
+        var questions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment.Questions) ?? new();
+        var result = await _grader.GetOrCreateSavedResultAsync(assignmentId, studentId);
+        var now = DateTime.UtcNow;
+        for (var i = 0; i < questions.Count; i++)
         {
-            return BadRequest("Invalid assignment ID.");
-        }
-
-        var assignment = await _db.Assignments
-            .Include(a => a.Class)
-            .FirstOrDefaultAsync(a => a.Id == assignmentId && a.Status == AssignmentStatus.Active);
-
-        if (assignment is null) return NotFound();
-
-        var isAssigned = await _db.AssignmentStudents
-            .AnyAsync(asn => asn.AssignmentId == assignmentId && asn.StudentId == studentId);
-
-        if (!isAssigned) return Forbid();
-
-        var submittedCount = await _db.StudentResults
-            .CountAsync(r => r.AssignmentId == assignmentId && r.StudentId == studentId && r.IsSubmitted);
-
-        if (!assignment.AllowsUnlimitedAttempts && submittedCount >= assignment.MaxAttempts)
-        {
-            TempData["Error"] = "No attempts remaining.";
-            return RedirectToAction(nameof(Assignments), new { classId = assignment.ClassId });
-        }
-
-        var questions = JsonSerializer.Deserialize<List<QuestionDto>>(assignment.Questions)
-                        ?? new List<QuestionDto>();
-
-        // Merge typed answers into the in-progress result so per-question photo
-        // solutions the student already submitted are preserved, not overwritten.
-        var result = await _grader.GetOrCreateResultAsync(assignmentId, studentId);
-
-        for (int i = 0; i < questions.Count; i++)
-        {
-            var q = questions[i];
-            if (_grader.IsGroupHeader(questions, q)) continue; // stem-only "Q2" above 2a/2b — no answer of its own
+            if (_grader.IsGroupHeader(questions, questions[i])) continue;
+            var hasAnswer = formData.TryGetValue($"q_{i}", out var value);
+            var hasWork   = formData.TryGetValue($"work_{i}", out var work);
+            if (!hasAnswer && !hasWork) continue;
 
             var existing = result.StudentAnswers.FirstOrDefault(a => a.QuestionIndex == i);
-
-            // Keep an existing photo/handwritten answer (already graded by AI).
-            if (existing != null && !string.IsNullOrEmpty(existing.ImagePath))
-                continue;
-
-            var answerValue = formData.TryGetValue($"q_{i}", out var v) ? (v ?? string.Empty) : string.Empty;
-            var isCorrect   = _grader.EvaluateTypedAnswer(q, answerValue);
-
+            if (existing is not null && !string.IsNullOrEmpty(existing.ImagePath) && !GradingService.IsChoiceQuestion(questions[i]))
+                continue;                                    // a photographed solution: kept as marked
             if (existing is null)
             {
-                existing = new StudentAnswer { StudentResultId = result.Id, QuestionIndex = i };
+                if (string.IsNullOrWhiteSpace(value) && string.IsNullOrWhiteSpace(work)) continue;
+                existing = new StudentAnswer { StudentResultId = result.Id, QuestionIndex = i, QuestionId = questions[i].Id ?? $"q{i}" };
                 result.StudentAnswers.Add(existing);
                 _db.StudentAnswers.Add(existing);
             }
-
-            // Never overwrite a teacher's manual grade.
-            if (!existing.TeacherOverridden)
+            if (existing.TeacherOverridden) continue;
+            if (hasAnswer && existing.AnswerValue != (value ?? ""))
             {
-                existing.QuestionId    = q.Id ?? $"q{i}";
-                existing.AnswerValue   = answerValue;
-                existing.IsCorrect     = isCorrect;
-                existing.PointsAwarded = isCorrect == true ? 1m : 0m;
+                existing.AnswerValue   = value ?? "";
+                existing.IsCorrect     = null;               // marked on Submit, not while typing
+                existing.PointsAwarded = null;
             }
-
-            // "Show your work" is never auto-graded — it's kept for the teacher.
-            var work = formData.TryGetValue($"work_{i}", out var w) ? w?.Trim() : null;
-            if (!string.IsNullOrWhiteSpace(work)) existing.WorkText = work;
-
-            existing.UpdatedAt = DateTime.UtcNow;
+            if (hasWork && string.IsNullOrEmpty(existing.ImagePath)) existing.WorkText = string.IsNullOrWhiteSpace(work) ? null : work;
+            existing.UpdatedAt = now;
         }
-
-        // AI-grade the answers that exact matching couldn't decide
-        // (no answer key, or a text answer written in an equivalent form).
-        await _grader.GradeUngradedAnswersAsync(result, questions);
-
-        // Finalise: mark submitted and score it. AttemptNumber was assigned when
-        // the in-progress result was created (kept unique per assignment/student).
-        result.IsSubmitted = true;
-        result.SubmittedAt = DateTime.UtcNow;
-        _grader.RecomputeResultScore(result, _grader.CountAnswerableQuestions(questions), assignment.PassThreshold);
-
+        result.UpdatedAt = now;
         await _db.SaveChangesAsync();
 
-        return RedirectToAction(nameof(AssignmentResult), new { assignmentId, resultId = result.Id });
+        return Json(new { ok = true, attempt = result.AttemptNumber, savedAt = SchoolTime.Show(now, "HH:mm") });
+    }
+
+    // ── SUBMIT ASSIGNMENT ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Hands in the student's work. The attempt is saved as submitted first (see <see cref="SubmissionService"/>);
+    /// the AI marks what it needs to afterwards, in the background, so a slow or failing AI can never lose or delay
+    /// the submission. The page sends a key per press of Submit: a retry with the same key gets the same attempt.
+    /// The page posts with fetch and gets JSON; a plain form post (no script) is redirected as before.
+    /// Not under the "ai" rate limit: handing in work must never be refused because the student used the
+    /// answer checker a lot. It has its own, generous per-student limit.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("submit")]
+    public async Task<IActionResult> SubmitAssignment([FromForm] Dictionary<string, string> formData)
+    {
+        var studentId = CurrentStudentId;
+        var wantsJson = Request.Headers["X-Requested-With"] == "fetch";
+
+        if (!formData.TryGetValue("assignmentId", out var assignmentIdStr) || !Guid.TryParse(assignmentIdStr, out var assignmentId))
+            return wantsJson ? BadRequest(new { ok = false, error = "Invalid assignment." }) : BadRequest("Invalid assignment ID.");
+
+        // A page from before the key existed (or without script) still submits, with a key made here.
+        var key = formData.TryGetValue("submissionKey", out var k) && Guid.TryParse(k, out var parsed) ? parsed : Guid.NewGuid();
+
+        ActivityLog.Record(_env, "SubmitStarted", "Student", studentId, $"assignment={assignmentId} key={key}");
+
+        SubmissionService.SubmitOutcome outcome;
+        try
+        {
+            outcome = await _submissions.SubmitAsync(studentId, assignmentId, key, formData);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Submission failed for assignment {AssignmentId}, student {StudentId}", assignmentId, studentId);
+            ActivityLog.Record(_env, "SubmitFailed", "Student", studentId, $"assignment={assignmentId} key={key} error={ex.GetType().Name}");
+            const string message = "Your work could not be saved. Nothing was handed in yet — your answers are still on this page. Please try again.";
+            if (wantsJson) return StatusCode(StatusCodes.Status500InternalServerError, new { ok = false, retry = true, error = message });
+            TempData["Error"] = message;
+            return RedirectToAction(nameof(TakeAssignment), new { assignmentId });
+        }
+
+        if (!outcome.IsSaved)
+        {
+            ActivityLog.Record(_env, "SubmitRejected", "Student", studentId, $"assignment={assignmentId} key={key} reason={outcome.Status}");
+            if (wantsJson) return StatusCode(StatusCodes.Status409Conflict, new { ok = false, retry = false, error = outcome.Message });
+            TempData["Error"] = outcome.Message;
+            return outcome.Status == SubmissionService.SubmitStatus.NotFound
+                ? RedirectToAction(nameof(Index))
+                : RedirectToAction(nameof(Assignments), new { classId = outcome.ClassId });
+        }
+
+        ActivityLog.Record(_env, outcome.Status == SubmissionService.SubmitStatus.Saved ? "SubmitSaved" : "SubmitAlreadySaved",
+            "Student", studentId, $"assignment={assignmentId} key={key} result={outcome.ResultId} gradingPending={outcome.GradingPending}");
+
+        if (outcome.Status == SubmissionService.SubmitStatus.Saved && outcome.GradingPending)
+            StartGradingAfterSubmit(outcome.ResultId);
+
+        var resultUrl = Url.Action(nameof(AssignmentResult), new { assignmentId, resultId = outcome.ResultId, submitted = true })!;
+        return wantsJson
+            ? Ok(new { ok = true, status = outcome.Status.ToString(), resultUrl })
+            : Redirect(resultUrl);
+    }
+
+    /// <summary>The AI's marking, on its own scope after the response: the submission is already saved.</summary>
+    private void StartGradingAfterSubmit(Guid resultId)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<SubmissionService>().GradeAfterSubmitAsync(resultId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background marking failed for result {ResultId}", resultId);
+            }
+        });
     }
 
     // ── INSTANT FEEDBACK ─────────────────────────────────────────────────────────
@@ -419,6 +456,7 @@ public class StudentController : Controller
                 var outcome = await grader.AiCheckTypedAnswerAsync(question!, questionIndex, answer);
                 if (!outcome.Success)
                 {
+                    // A technical failure keeps the work (saved as "not marked yet"); the student can try again.
                     job.Error  = outcome.Error;
                     job.Status = "error";
                     return;
@@ -617,20 +655,30 @@ public class StudentController : Controller
             if (pages.Count == 0)
                 return Json(new { success = false, error = "No valid images uploaded." });
 
-            var analysis = await _handwriting.ExtractStepsAsync(pages, question!.Title);
+            // Read by the recognition model once per photo: the same photo again (a second click, a reload, a retry)
+            // reuses the stored reading at no cost; a new photo is read anew.
+            var reading = await _marking.RecognizeAsync(
+                pages.Select(p => new AiMarkingService.Page(p.bytes, p.mime)).ToList(), question!.Title,
+                new AiCallContext("recognition", null, studentId, assignmentId, null, questionIndex.ToString()));
 
             return Json(new
             {
                 success         = true,
                 imagePaths      = paths,
-                detectedProblem = analysis.DetectedProblem,
-                steps           = analysis.Steps
+                detectedProblem = reading.DetectedProblem,
+                steps           = reading.Steps.Select(s => new
+                {
+                    number  = s.Number,
+                    text    = s.Text,
+                    unclear = s.Unclear.Count > 0
+                })
             });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "AnalyzeHandwritten failed for assignment {AssignmentId} q{QuestionIndex}", assignmentId, questionIndex);
-            return Json(new { success = false, error = "Analysis failed. Please try again." });
+            _logger.LogWarning("AnalyzeHandwritten failed for assignment {AssignmentId} q{QuestionIndex}: {Kind}", assignmentId, questionIndex,
+                               (ex as AiCallException)?.Kind ?? ex.GetType().Name);
+            return Json(new { success = false, retry = true, error = "Reading the photo did not finish. Your photo is saved — please try again." });
         }
     }
 
@@ -703,6 +751,7 @@ public class StudentController : Controller
                 var outcome = await grader.EvaluateStepsAsync(assignmentId, questionIndex, studentId, stepsJson, imagePath, selectedAnswer);
                 if (!outcome.Success)
                 {
+                    // A technical failure keeps the work (saved as "not marked yet"); the student can try again.
                     job.Error  = outcome.Error;
                     job.Status = "error";
                     return;
@@ -715,6 +764,8 @@ public class StudentController : Controller
                     summary        = outcome.Summary,
                     expectedAnswer = outcome.ExpectedAnswer,
                     score          = outcome.Score,
+                    marks          = outcome.Marks,
+                    maxMarks       = outcome.MaxMarks,
                     steps          = outcome.Steps,
                     option         = outcome.Option is null ? null : new { correct = outcome.Option.Correct, feedback = outcome.Option.Feedback }
                 };
@@ -738,7 +789,7 @@ public class StudentController : Controller
     // ── RESULT ─────────────────────────────────────────────────────────────────
 
     /// <summary>Shows the AI-evaluated result for a submission.</summary>
-    public async Task<IActionResult> AssignmentResult(Guid assignmentId, Guid resultId)
+    public async Task<IActionResult> AssignmentResult(Guid assignmentId, Guid resultId, bool submitted = false)
     {
         var studentId = CurrentStudentId;
 
@@ -751,11 +802,27 @@ public class StudentController : Controller
 
         if (result is null) return NotFound();
 
+        // An attempt still in progress has no result yet: never show it as if it were handed in.
+        if (!result.IsSubmitted)
+        {
+            TempData["Error"] = "This attempt has not been submitted yet. Finish it and press Submit.";
+            return RedirectToAction(nameof(TakeAssignment), new { assignmentId = result.AssignmentId });
+        }
+
         var questions = JsonSerializer.Deserialize<List<QuestionDto>>(result.Assignment.Questions)
                         ?? new List<QuestionDto>();
 
         ViewBag.Questions = questions;
 
+        // Handing in and marking are two events. Right after Submit (and whenever the result is not available yet —
+        // still being marked, or an answer waits for the teacher) the student sees "Work submitted" with their own
+        // work only; marks, keys and comments appear once the result is available. Nothing here calls the AI.
+        var ready = StudentWork.FeedbackReady(result);
+        if (submitted || !ready)
+        {
+            ViewBag.FeedbackReady = ready;
+            return View("WorkSubmitted", result);
+        }
         return View(result);
     }
 
@@ -831,12 +898,14 @@ public class StudentController : Controller
             chatMessages.Add(new { role = m.Role, content = m.Content });
 
         string reply;
+        var tutorFailed = false;
         try
         {
             reply = await CallTutorAsync(chatMessages);
         }
         catch (Exception ex)
         {
+            tutorFailed = true;
             _logger.LogError(ex, "SendChatMessage failed for session {SessionId}", sessionId);
             reply = "Sorry, I couldn't reach the tutor right now. Please try again.";
         }
@@ -846,6 +915,11 @@ public class StudentController : Controller
         session.Messages  = JsonSerializer.Serialize(messages);
         session.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
+
+        // A message sent while studying the result: one request, its outcome as the server saw it.
+        await HttpContext.RequestServices.GetRequiredService<ActivityLogService>().RecordAsync(
+            session.StudentResult.AssignmentId, studentId, session.StudentResult.AttemptNumber, null,
+            ActivityKind.TutorMessage, tutorFailed ? ActivityOutcome.Error : ActivityOutcome.Received);
 
         return RedirectToAction(nameof(Chat),
             new { resultId = session.StudentResultId, mode = session.Mode });
@@ -1193,6 +1267,11 @@ public class StudentController : Controller
             messages
         };
 
+        // What became of this request, for the attempt's activity (the server decides; the stream's parts are one request).
+        // Its time is when it arrived, so it sorts right after the click that opened the tutor.
+        var requestedAt = DateTime.UtcNow;
+        var delivered = false;
+        var failed    = false;
         try
         {
             using var httpClient  = _httpFactory.CreateClient();
@@ -1211,6 +1290,7 @@ public class StudentController : Controller
                     "ChatStream: OpenRouter returned {Status}: {Body}", httpResponse.StatusCode, errorBody);
 
                 await WriteSseAsync("⚠️ Sorry, I couldn't reach the tutor right now. Please try again.");
+                failed = true;
                 return;
             }
 
@@ -1236,16 +1316,62 @@ public class StudentController : Controller
                         .GetString();
 
                     if (!string.IsNullOrEmpty(deltaContent))
+                    {
                         await WriteSseAsync(deltaContent);
+                        delivered = true;
+                    }
                 }
                 catch { /* skip malformed chunk */ }
             }
         }
         catch (Exception ex)
         {
+            failed = true;
+            if (HttpContext.RequestAborted.IsCancellationRequested) return;   // the student left: recorded as interrupted below
             _logger.LogError(ex, "ChatStream failed");
             await WriteSseAsync("⚠️ Sorry, I couldn't reach the tutor right now. Please try again.");
         }
+        finally
+        {
+            // A student's own request while working (a teacher previewing is not logged). Counted once per request id,
+            // however many parts the answer streamed in.
+            if (assignment is not null && request.Kind is not null && User.IsInRole(Role.Student))
+            {
+                var outcome = HttpContext.RequestAborted.IsCancellationRequested ? ActivityOutcome.Interrupted
+                            : delivered && !failed ? ActivityOutcome.Received
+                            : ActivityOutcome.Error;
+                var kind = request.Kind switch
+                {
+                    "hint"    => ActivityKind.HintRequested,
+                    "message" => ActivityKind.TutorMessage,
+                    _         => ActivityKind.TutorRequest
+                };
+                var log = HttpContext.RequestServices.GetRequiredService<ActivityLogService>();
+                var attemptNo = await log.CurrentAttemptAsync(assignment.Id, CurrentStudentId);
+                if (request.Opened)   // the click that opened the tutor, on the server's clock, just before its first request
+                    await log.RecordAsync(assignment.Id, CurrentStudentId, attemptNo, request.QuestionIndex,
+                                          ActivityKind.TutorOpened, ActivityOutcome.Allowed, null, requestedAt.AddMilliseconds(-1));
+                await log.RecordAsync(assignment.Id, CurrentStudentId, attemptNo, request.QuestionIndex, kind, outcome, request.RequestId, requestedAt);
+            }
+        }
+    }
+
+    // ── ACTIVITY (browser actions) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Copy / cut / paste inside the assignment and opening the AI tutor, reported by the page in small batches. Only
+    /// these actions, only for the student's own attempt; a batch sent twice is stored once. A failure here never
+    /// affects the work: the page just keeps the batch for later.
+    /// </summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [EnableRateLimiting("activity")]
+    public async Task<IActionResult> LogActivity([FromBody] ActivityLogService.BrowserBatch batch)
+    {
+        var result = await HttpContext.RequestServices.GetRequiredService<ActivityLogService>()
+            .RecordBrowserBatchAsync(CurrentStudentId, batch);
+        return result.Ok ? Json(new { ok = true, stored = result.Stored, duplicates = result.Duplicates })
+                         : StatusCode(result.Error == "Not stored." ? 503 : 400, new { ok = false, error = result.Error });
     }
 
     /// <summary>

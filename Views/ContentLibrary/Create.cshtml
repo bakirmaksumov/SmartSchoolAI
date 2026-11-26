@@ -623,6 +623,7 @@
               <option value="English"></option>
             </datalist>
           </div>
+          <partial name="_SyllabusTopicPicker" model="(Guid?)null" />
           <div class="mb-3">
             <label class="form-label fw-semibold">Grade Level</label>
             <select class="form-select" name="gradeLevel">
@@ -1229,6 +1230,7 @@
 </div>
 
 @section Scripts {
+<script src="~/js/syllabus-topic-picker.js" asp-append-version="true"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 <script src="~/js/content-library-create.js" asp-append-version="true"></script>

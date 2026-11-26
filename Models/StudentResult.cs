@@ -28,6 +28,19 @@ public class StudentResult : BaseEntity
     /// </summary>
     public bool        IsSubmitted   { get; set; }
 
+    /// <summary>
+    /// Identifies one press of "Submit" (sent by the page). A repeated request with the same key — a retry
+    /// after a lost response, a double click — finds this attempt instead of making another one.
+    /// Null for attempts submitted before the key existed and for drafts.
+    /// </summary>
+    public Guid?       SubmissionKey { get; set; }
+
+    /// <summary>
+    /// True from the moment the work is saved as submitted until the AI has finished checking the answers
+    /// that need it. The submission itself is final either way; only the marks of those answers can change.
+    /// </summary>
+    public bool        GradingPending { get; set; }
+
     /// <summary>Teacher-awarded extra points added on top of per-question points.</summary>
     public decimal     BonusPoints   { get; set; }
 
@@ -48,21 +61,24 @@ public class StudentResult : BaseEntity
     /// <summary>
     /// Recomputes <see cref="Score"/> and <see cref="OverallStatus"/> from the
     /// per-question points awarded plus any teacher <see cref="BonusPoints"/>.
-    /// Each question is worth 1 point. Score may exceed 100 when bonus is given.
+    /// Each question is worth its marks (1 unless the teacher set more), so the score is
+    /// marks gained out of marks available. Score may exceed 100 when bonus is given.
     /// </summary>
     /// <param name="passThreshold">
     /// The assignment's pass mark. At or above it the work counts as correct;
     /// at or above half of it as partial; below that as incorrect.
     /// </param>
-    public void RecomputeScore(int totalQuestions, int passThreshold)
+    /// <param name="totalMarks">Marks available across all answerable questions; null means one per question.</param>
+    public void RecomputeScore(int totalQuestions, int passThreshold, decimal? totalMarks = null)
     {
         var awarded = StudentAnswers.Sum(a => a.PointsAwarded ?? 0m);
+        var outOf   = totalMarks ?? totalQuestions;
 
         // No upper clamp — bonus is meant to be able to push a score past 100.
         // A lower clamp is still needed: nothing legitimately produces a
         // negative percentage, but an unclamped BonusPoints override could.
-        Score = totalQuestions > 0
-            ? Math.Max(0, (int)Math.Round((awarded + BonusPoints) * 100m / totalQuestions, MidpointRounding.AwayFromZero))
+        Score = outOf > 0
+            ? Math.Max(0, (int)Math.Round((awarded + BonusPoints) * 100m / outOf, MidpointRounding.AwayFromZero))
             : 0;
 
         TotalSteps    = totalQuestions;

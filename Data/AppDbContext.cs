@@ -28,12 +28,53 @@ public class AppDbContext : DbContext
     public DbSet<Question>       Questions       { get; set; }
     public DbSet<StudentAnswer>       StudentAnswers       { get; set; }
     public DbSet<AssignmentStudent>   AssignmentStudents   { get; set; }
+    public DbSet<LateJoinRequest>     LateJoinRequests     { get; set; }
     public DbSet<QuestionReport>      QuestionReports      { get; set; }
     public DbSet<SupportTicket>       SupportTickets       { get; set; }
+    public DbSet<AiStageResult>       AiStageResults       { get; set; }
+    public DbSet<AiCallLog>           AiCallLogs           { get; set; }
+    public DbSet<AttemptActivity>        AttemptActivities        { get; set; }
+    public DbSet<AttemptActivitySummary> AttemptActivitySummaries { get; set; }
+    public DbSet<SyllabusProgram>   SyllabusPrograms   { get; set; }
+    public DbSet<SyllabusVersion>   SyllabusVersions   { get; set; }
+    public DbSet<SyllabusComponent> SyllabusComponents { get; set; }
+    public DbSet<SyllabusTopic>     SyllabusTopics     { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // Finished AI stages are looked up by their key; one row per key, so two racing requests cannot both store one.
+        modelBuilder.Entity<AiStageResult>(e =>
+        {
+            e.HasIndex(x => x.CacheKey).IsUnique();
+            e.Property(x => x.CacheKey).HasMaxLength(100);
+        });
+        // A student's actions per attempt: read by attempt, in time order; a repeated delivery is found by its id.
+        modelBuilder.Entity<AttemptActivity>(e =>
+        {
+            e.HasIndex(x => new { x.AssignmentId, x.StudentId, x.AttemptNumber, x.OccurredAt });
+            e.HasIndex(x => new { x.StudentId, x.ClientId }).IsUnique().HasFilter("ClientId IS NOT NULL");
+            // Ids as 16-byte blobs and times as 8-byte ticks (UTC) instead of 36- and ~27-character text: this table can
+            // hold many rows per attempt, and its indexes repeat the ids. (The daily clean-up scans it once; no index.)
+            var bytes = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.GuidToBytesConverter();
+            e.Property(x => x.AssignmentId).HasConversion(bytes);
+            e.Property(x => x.StudentId).HasConversion(bytes);
+            e.Property(x => x.ClientId).HasConversion(new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<Guid?, byte[]?>(
+                v => v.HasValue ? v.Value.ToByteArray() : null, v => v == null ? null : new Guid(v)));
+            var utc = new Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTime, long>(
+                v => v.ToUniversalTime().Ticks, v => new DateTime(v, DateTimeKind.Utc));
+            e.Property(x => x.OccurredAt).HasConversion(utc);
+            e.Property(x => x.ReceivedAt).HasConversion(utc);
+        });
+        modelBuilder.Entity<AttemptActivitySummary>(e =>
+            e.HasIndex(x => new { x.AssignmentId, x.StudentId, x.AttemptNumber }).IsUnique());
+        modelBuilder.Entity<AiCallLog>(e =>
+        {
+            e.HasIndex(x => x.CacheKey);
+            e.HasIndex(x => x.ResultId);
+            e.Property(x => x.Cost).HasPrecision(18, 8);
+        });
 
         ConfigureUser(modelBuilder);
         ConfigureRole(modelBuilder);
@@ -48,8 +89,10 @@ public class AppDbContext : DbContext
         ConfigureContentItem(modelBuilder);
         ConfigureAuditLog(modelBuilder);
         ConfigureQuestion(modelBuilder);
+        ConfigureSyllabus(modelBuilder);
         ConfigureStudentAnswer(modelBuilder);
         ConfigureAssignmentStudent(modelBuilder);
+        ConfigureLateJoinRequest(modelBuilder);
         ConfigureQuestionReport(modelBuilder);
 
         SeedRoles(modelBuilder);
@@ -156,6 +199,8 @@ public class AppDbContext : DbContext
             e.Property(a => a.Type).HasConversion<string>();
             e.Property(a => a.Status).HasConversion<string>();
             e.Property(a => a.GradingType).HasConversion<string>();
+            e.Property(a => a.Audience).HasConversion<string>().HasMaxLength(32);
+            e.Property(a => a.LateJoinPolicy).HasConversion<string>().HasMaxLength(32);
             e.HasIndex(a => a.ClassId);
             e.HasIndex(a => a.TeacherId);
             e.HasIndex(a => a.Status);
@@ -183,6 +228,8 @@ public class AppDbContext : DbContext
             e.HasIndex(sr => sr.AssignmentId);
             e.HasIndex(sr => sr.StudentId);
             e.HasIndex(sr => new { sr.AssignmentId, sr.StudentId, sr.AttemptNumber }).IsUnique();
+            // One attempt per press of "Submit": a retried request with the same key can never add another.
+            e.HasIndex(sr => new { sr.StudentId, sr.SubmissionKey }).IsUnique();
 
             e.HasOne(sr => sr.Assignment)
              .WithMany(a => a.StudentResults)
@@ -286,6 +333,33 @@ public class AppDbContext : DbContext
         });
     }
 
+    private static void ConfigureLateJoinRequest(ModelBuilder mb)
+    {
+        mb.Entity<LateJoinRequest>(e =>
+        {
+            e.HasKey(r => r.Id);
+            e.Property(r => r.Status).HasConversion<string>().HasMaxLength(16);
+
+            // One request per (assignment, student): a repeated join, a double click or two processes
+            // racing can never queue the same student twice for the same work.
+            e.HasIndex(r => new { r.AssignmentId, r.StudentId }).IsUnique();
+            e.HasIndex(r => r.Status);
+
+            e.HasOne(r => r.Assignment)
+             .WithMany()
+             .HasForeignKey(r => r.AssignmentId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasOne(r => r.Student)
+             .WithMany()
+             .HasForeignKey(r => r.StudentId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // A deleted assignment's requests are not shown or acted on.
+            e.HasQueryFilter(r => r.Assignment.DeletedAt == null);
+        });
+    }
+
     private static void ConfigureContentItem(ModelBuilder mb)
     {
         mb.Entity<ContentItem>(e =>
@@ -315,7 +389,46 @@ public class AppDbContext : DbContext
             e.Property(q => q.CreatedByEmail).HasMaxLength(255).IsRequired();
             e.HasIndex(q => q.CreatedByEmail);
             e.HasIndex(q => q.Subject);
+            e.HasIndex(q => q.SyllabusTopicId);
+            // Optional link; a topic that still has questions cannot be removed from the library.
+            e.HasOne(q => q.SyllabusTopic).WithMany().HasForeignKey(q => q.SyllabusTopicId).OnDelete(DeleteBehavior.Restrict);
             e.HasQueryFilter(q => q.DeletedAt == null);
+        });
+    }
+
+    private static void ConfigureSyllabus(ModelBuilder mb)
+    {
+        mb.Entity<SyllabusProgram>(e =>
+        {
+            e.Property(p => p.Code).HasMaxLength(20).IsRequired();
+            e.Property(p => p.Title).HasMaxLength(200).IsRequired();
+            e.HasIndex(p => p.Code).IsUnique();
+        });
+        mb.Entity<SyllabusVersion>(e =>
+        {
+            e.Property(v => v.Status).HasConversion<string>().HasMaxLength(20);
+            e.Property(v => v.SourceName).HasMaxLength(260).IsRequired();
+            e.Property(v => v.SourceUrl).HasMaxLength(500);
+            e.Property(v => v.SourceSha256).HasMaxLength(64).IsRequired();
+            e.Property(v => v.DocumentVersion).HasMaxLength(40);
+            e.Ignore(v => v.Years);
+            // One edition per programme and exam years, and one version per file: importing again finds it.
+            e.HasIndex(v => new { v.ProgramId, v.FirstExamYear, v.LastExamYear }).IsUnique();
+            e.HasIndex(v => v.SourceSha256).IsUnique();
+            e.HasOne(v => v.Program).WithMany(p => p.Versions).HasForeignKey(v => v.ProgramId).OnDelete(DeleteBehavior.Cascade);
+        });
+        mb.Entity<SyllabusComponent>(e =>
+        {
+            e.Property(c => c.Title).HasMaxLength(200).IsRequired();
+            e.HasIndex(c => new { c.VersionId, c.Number }).IsUnique();
+            e.HasOne(c => c.Version).WithMany(v => v.Components).HasForeignKey(c => c.VersionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        mb.Entity<SyllabusTopic>(e =>
+        {
+            e.Property(t => t.Title).HasMaxLength(200).IsRequired();
+            e.Property(t => t.Number).HasMaxLength(20);
+            e.HasIndex(t => new { t.ComponentId, t.Order });
+            e.HasOne(t => t.Component).WithMany(c => c.Topics).HasForeignKey(t => t.ComponentId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 

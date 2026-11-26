@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using SmartSchoolAI.Data;
 using SmartSchoolAI.Models;
 using SmartSchoolAI.Services;
+using SmartSchoolAI.ViewModels;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -25,11 +26,25 @@ public class ContentLibraryController : Controller
         _env = env;
     }
 
-    private string CurrentUserEmail =>
-        User.FindFirstValue(ClaimTypes.Email) ?? User.Identity?.Name ?? "guest";
+    private string CurrentUserEmail => User.LibraryOwnerKey();
 
     private Guid CurrentUserId =>
         Guid.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+
+    // The syllabus library is a thin layer over the same context; built here so the controller's constructor stays as is.
+    private SyllabusService Syllabus => _syllabus ??= new SyllabusService(_db);
+    private SyllabusService? _syllabus;
+
+    /// <summary>
+    /// The syllabus topic the form chose, if it is one a teacher may link to (in a published version). A question
+    /// that already links to <paramref name="current"/> keeps it even when the form sends it back unchanged.
+    /// </summary>
+    private async Task<Guid?> LinkableTopicAsync(Guid? chosen, Guid? current = null)
+    {
+        if (chosen is null || chosen == Guid.Empty) return null;
+        if (chosen == current) return current;
+        return await Syllabus.IsLinkableAsync(chosen.Value) ? chosen : null;
+    }
 
     private Task<Question?> FindOwnedQuestionAsync(Guid id)
         => _db.Questions.FirstOrDefaultAsync(q => q.Id == id && q.CreatedByEmail == CurrentUserEmail);
@@ -151,13 +166,17 @@ public class ContentLibraryController : Controller
         int?    grade      = null,
         string? difficulty = null,
         string? search     = null,
-        Guid?   assignmentId = null)
+        Guid?   assignmentId = null,
+        int?    page       = null,
+        Guid?   syllabusVersion   = null,
+        Guid?   syllabusComponent = null,
+        Guid?   syllabusTopic     = null)
     {
         // A teacher's own questions, plus anything another teacher chose to
         // share ("Make visible to other teachers" — IsPublic). Without this,
         // every teacher could browse every other teacher's private library,
         // answer keys included.
-        var query = _db.Questions.Where(q => q.CreatedByEmail == CurrentUserEmail || q.IsPublic);
+        var query = _db.Questions.UsableBy(CurrentUserEmail);
 
         if (!string.IsNullOrWhiteSpace(subject))
             query = query.Where(q => q.Subject == subject);
@@ -172,12 +191,28 @@ public class ContentLibraryController : Controller
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(q => q.Title.Contains(search));
 
-        var questions = await query
-            .OrderByDescending(q => q.CreatedAt)
-            .ToListAsync();
+        // Syllabus filters: only questions a teacher explicitly linked to a topic — a free-text subject such as
+        // "Quadratics" does not count. The narrowest filter given wins.
+        if (syllabusTopic.HasValue)
+            query = query.Where(q => q.SyllabusTopicId == syllabusTopic);
+        else if (syllabusComponent.HasValue)
+            query = query.Where(q => q.SyllabusTopic != null && q.SyllabusTopic.ComponentId == syllabusComponent);
+        else if (syllabusVersion.HasValue)
+            query = query.Where(q => q.SyllabusTopic != null && q.SyllabusTopic.Component.VersionId == syllabusVersion);
+
+        // Ten per page, newest first; Id breaks ties so a question never shows on two pages.
+        var (questions, pageInfo) = await query
+            .OrderByDescending(q => q.CreatedAt).ThenByDescending(q => q.Id)
+            .ToPageAsync(page);
+        ViewBag.Page = pageInfo;
+        ViewBag.SyllabusLabels = await Syllabus.LabelsAsync(questions.Where(q => q.SyllabusTopicId.HasValue).Select(q => q.SyllabusTopicId!.Value));
+        ViewBag.SyllabusCatalog = await Syllabus.CatalogAsync();
+        ViewBag.CurrentSyllabusVersion   = syllabusVersion;
+        ViewBag.CurrentSyllabusComponent = syllabusComponent;
+        ViewBag.CurrentSyllabusTopic     = syllabusTopic;
 
         ViewBag.Subjects = await _db.Questions
-            .Where(q => (q.CreatedByEmail == CurrentUserEmail || q.IsPublic) && q.Subject != null)
+            .UsableBy(CurrentUserEmail).Where(q => q.Subject != null)
             .Select(q => q.Subject!)
             .Distinct()
             .OrderBy(s => s)
@@ -215,7 +250,9 @@ public class ContentLibraryController : Controller
         string?         explanation,
         bool            isPublic,
         List<string>?   options,
-        List<Guid>?     skillIds)
+        List<Guid>?     skillIds,
+        string?         rubric = null,
+        Guid?           syllabusTopicId = null)
     {
         if (string.IsNullOrWhiteSpace(title))
         {
@@ -242,7 +279,8 @@ public class ContentLibraryController : Controller
             CreatedByEmail = CurrentUserEmail,
             Options        = JsonSerializer.Serialize(options  ?? new List<string>()),
             SkillIds       = JsonSerializer.Serialize(skillIds ?? new List<Guid>()),
-            VisualState    = BuildVisualState(type)
+            VisualState    = BuildVisualState(type),
+            SyllabusTopicId = await LinkableTopicAsync(syllabusTopicId)
         };
 
         _db.Questions.Add(question);
@@ -276,7 +314,10 @@ public class ContentLibraryController : Controller
                     difficulty  = question.Difficulty.ToString(),
                     answerKey   = question.AnswerKey,
                     options     = JsonSerializer.Deserialize<List<string>>(question.Options) ?? new List<string>(),
-                    visualState = question.VisualState
+                    visualState = question.VisualState,
+                    // "Rubric / Grading notes" on the form: the mark scheme the AI marker follows.
+                    markScheme  = string.IsNullOrWhiteSpace(rubric) ? null : rubric.Trim(),
+                    syllabusTopicId = question.SyllabusTopicId
                 };
                 using var doc = JsonDocument.Parse(JsonSerializer.Serialize(qObj));
                 list.Add(doc.RootElement.Clone());
@@ -316,7 +357,7 @@ public class ContentLibraryController : Controller
         Guid id, string title, QuestionType type,
         DifficultyLevel difficulty, string? subject, int? gradeLevel,
         string answerKey, string? explanation, bool isPublic,
-        List<string>? options, List<Guid>? skillIds)
+        List<string>? options, List<Guid>? skillIds, Guid? syllabusTopicId = null)
     {
         var question = await FindOwnedQuestionAsync(id);
         if (question is null) return NotFound();
@@ -336,6 +377,10 @@ public class ContentLibraryController : Controller
         // overwrite when the submitted form actually carried new panel state,
         // otherwise keep whatever the question already had.
         question.VisualState = BuildVisualState(type, isEdit: true) ?? question.VisualState;
+        // The form always posts the picker's field: empty means "Remove link". Only the link changes — the subject,
+        // the question text, its answer and marks are untouched by it.
+        if (Request.HasFormContentType && Request.Form.ContainsKey("syllabusTopicId"))
+            question.SyllabusTopicId = await LinkableTopicAsync(syllabusTopicId, question.SyllabusTopicId);
         question.UpdatedAt   = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
@@ -348,7 +393,7 @@ public class ContentLibraryController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(Guid id, string? returnUrl = null)
     {
         var question = await FindOwnedQuestionAsync(id);
         if (question is null) return NotFound();
@@ -357,6 +402,10 @@ public class ContentLibraryController : Controller
         await _db.SaveChangesAsync();
 
         TempData["Success"] = "Question removed from library.";
+        // Back to the same page and filters the teacher was on (Index moves to the last page if this one is now empty).
+        if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl) &&
+            returnUrl.StartsWith("/ContentLibrary", StringComparison.OrdinalIgnoreCase))
+            return LocalRedirect(returnUrl);
         return RedirectToAction(nameof(Index));
     }
 
@@ -385,7 +434,8 @@ public class ContentLibraryController : Controller
             difficulty  = question.Difficulty.ToString(),
             answerKey   = question.AnswerKey,
             options     = JsonSerializer.Deserialize<List<string>>(question.Options) ?? new List<string>(),
-            visualState = question.VisualState
+            visualState = question.VisualState,
+            syllabusTopicId = question.SyllabusTopicId
         };
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(qObj));
         list.Add(doc.RootElement.Clone());
@@ -407,7 +457,7 @@ public class ContentLibraryController : Controller
         // "import from library" picker in the assignment editor and must not
         // hand another teacher's private questions (answer keys included) to
         // whoever calls it.
-        var query = _db.Questions.Where(q => q.CreatedByEmail == CurrentUserEmail || q.IsPublic);
+        var query = _db.Questions.UsableBy(CurrentUserEmail);
 
         if (!string.IsNullOrWhiteSpace(subject))
             query = query.Where(q => q.Subject == subject);

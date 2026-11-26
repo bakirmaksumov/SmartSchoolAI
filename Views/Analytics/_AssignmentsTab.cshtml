@@ -1,0 +1,50 @@
+@model SmartSchoolAI.ViewModels.AnalyticsViewModel
+@using SmartSchoolAI.ViewModels
+@using SmartSchoolAI.Services
+<div class="card" id="assignmentsTab">
+  <div class="card-header pb-2">
+    <h5 class="card-title mb-0">Assignments</h5>
+    <small class="text-muted">Counted per student given the work. Average = graded work only (newest submitted attempt).</small>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr><th>Assignment</th><th>Due</th><th class="text-center">Given to</th><th class="text-center">Submitted</th>
+            <th class="text-center">Awaiting review</th><th class="text-center">Overdue</th><th>Average</th></tr>
+      </thead>
+      <tbody>
+        @foreach (var a in Model.Assignments)
+        {
+          <tr data-assignment-row="@a.Id">
+            <td>
+              <a class="fw-semibold" href="/Assignments/Details/@a.Id">@a.Title</a>
+              <span class="d-block small text-muted">@AnalyticsViewModel.TypeLabel(a.Type)@(a.Status == SmartSchoolAI.Models.AssignmentStatus.Closed ? " · closed" : "")</span>
+            </td>
+            <td class="text-nowrap">
+              @SchoolTime.Show(a.Deadline, "dd MMM yyyy", "No due date")
+              @if (a.HasPersonalDue) { <span class="d-block small text-muted">some personal dates</span> }
+            </td>
+            <td class="text-center"><a href="@Model.Link("work", assignmentId: a.Id)">@a.Recipients</a></td>
+            <td class="text-center"><a href="@Model.Link("work", "submitted", a.Id)">@a.Submitted of @a.Recipients</a></td>
+            <td class="text-center">
+              @if (a.Awaiting > 0) { <a class="badge bg-label-warning" href="@Model.Link("work", "awaiting", a.Id)">@a.Awaiting</a> }
+              else { <span class="text-muted">0</span> }
+            </td>
+            <td class="text-center">
+              @if (a.Overdue > 0) { <a class="badge bg-label-danger" href="@Model.Link("work", "overdue", a.Id)">@a.Overdue</a> }
+              else { <span class="text-muted">0</span> }
+            </td>
+            <td class="text-nowrap">
+              @if (a.AverageScore is { } s)
+              {
+                <a href="@Model.Link("work", "graded", a.Id)"><strong>@s%</strong></a> <span class="small text-muted">· @a.Graded graded</span>
+              }
+              else { <span class="text-muted fst-italic">No grades yet</span> }
+              <a class="ms-2 small" href="@Model.Link("questions", questionAssignment: a.Id)" title="Questions of this assignment">Questions</a>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</div>

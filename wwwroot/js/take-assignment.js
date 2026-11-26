@@ -707,8 +707,11 @@
   }
 
   function saveDraft() {
-    try { localStorage.setItem(draftKey(), JSON.stringify(answers)); }
+    var attemptEl = document.getElementById('attemptNumber');
+    var copy = Object.assign({}, answers, { __savedAt: Date.now(), __attempt: attemptEl ? attemptEl.value : '' });
+    try { localStorage.setItem(draftKey(), JSON.stringify(copy)); }
     catch (e) { /* storage unavailable — draft is best-effort */ }
+    scheduleServerSave();
   }
 
   function loadDraft() {
@@ -720,7 +723,72 @@
 
   function clearDraft() {
     clearChecks();
+    cancelServerSave();
     try { localStorage.removeItem(draftKey()); } catch (e) { /* ignore */ }
+  }
+
+  // ── Answer draft (server) ────────────────────────────────────────────────
+  // The same answers also go to the server a moment after the student stops typing, into the attempt in
+  // progress, so the work continues on another device (start on a laptop, carry on from a phone). Nothing is
+  // marked by this. The status line says what is saved; a failed save is retried on the next change.
+  var serverTimer = null, serverSaving = false, serverDirty = false, submittingNow = false;
+
+  function draftStatus(text, tone) {
+    var el = document.getElementById('draftStatus');
+    if (!el) return;
+    el.textContent = text;
+    el.className = 'ms-2 draft-status small ' + (tone === 'error' ? 'text-danger' : 'text-muted');
+  }
+
+  function scheduleServerSave() {
+    if (submittingNow || !document.getElementById('attemptNumber')) return;
+    serverDirty = true;
+    if (serverTimer) clearTimeout(serverTimer);
+    serverTimer = setTimeout(sendServerDraft, 1500);
+  }
+
+  function cancelServerSave() {
+    submittingNow = true;
+    if (serverTimer) clearTimeout(serverTimer);
+    serverTimer = null;
+  }
+
+  async function sendServerDraft() {
+    serverTimer = null;
+    if (serverSaving || submittingNow || !serverDirty) return;
+    serverSaving = true;
+    serverDirty = false;
+    var fd = new FormData();
+    fd.append('assignmentId', document.getElementById('assignmentId').value);
+    fd.append('attempt', document.getElementById('attemptNumber').value);
+    var token = document.querySelector('input[name="__RequestVerificationToken"]');
+    if (token) fd.append('__RequestVerificationToken', token.value);
+    Object.keys(answers).forEach(function (k) {
+      if (/^(q|work)_\d+$/.test(k)) fd.append(k, answers[k] || '');
+    });
+    draftStatus('Saving…');
+    try {
+      var res = await fetch('/Student/SaveDraft', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'fetch' }, credentials: 'same-origin' });
+      var data = null;
+      try { data = await res.json(); } catch (e) { data = null; }
+      if (res.ok && data && data.ok) draftStatus('Saved to your account · ' + data.savedAt);
+      else if (data && data.stale) draftStatus(data.error, 'error');
+      else { draftStatus('Not saved to your account yet — kept on this device.', 'error'); serverDirty = true; }
+    } catch (e) {
+      draftStatus('Offline — your answers are kept on this device and will be saved when you are back online.', 'error');
+      serverDirty = true;
+    } finally {
+      serverSaving = false;
+      if (serverDirty && !submittingNow) serverTimer = setTimeout(sendServerDraft, 5000);
+    }
+  }
+
+  // The draft from the server (any device) next to the one on this device: the newer one wins, and the other
+  // only fills what the newer one does not have.
+  function serverDraftData() {
+    var el = document.getElementById('serverDraft');
+    if (!el) return null;
+    try { var d = JSON.parse(el.textContent || '{}'); return Object.keys(d).length ? d : null; } catch (e) { return null; }
   }
 
   // ── Sync hidden form field so the <form> posts correctly ─────────────────
@@ -763,6 +831,18 @@
     btn.classList.toggle('correct', parts.every(function (i) { return pillResult[i] === 'correct'; }));
   }
 
+  // For widgets that keep their own answer data (the sketch pad): the value goes into the same
+  // answers{} the draft is saved from, so it survives a reload and is cleared on submit like the rest.
+  window.QuizAnswers = {
+    get: function (key) { return answers[key] || ''; },
+    set: function (key, value) {
+      if (value) answers[key] = value; else delete answers[key];
+      dirty = true;
+      syncHiddenInput(key);
+      saveDraft();
+    }
+  };
+
   window.QuizPills = {
     setAnswered: function (idx, on) { pillAnswered[idx] = !!on; refreshPill(idx); },
     setResult:   function (idx, result) {
@@ -789,13 +869,27 @@
       if (w && (w.value || '').trim() !== '' && !answers['work_' + i]) answers['work_' + i] = w.value;
     }
 
-    // Our own draft survives a reload even when the browser restores nothing.
-    var draft = loadDraft();
-    if (draft) {
+    // Our own draft survives a reload even when the browser restores nothing; the server's draft carries the
+    // work over from another device. The newer of the two goes first.
+    var local = loadDraft(), remote = serverDraftData();
+    // A draft kept on this device for an attempt that was handed in meanwhile (e.g. from a phone) is not
+    // carried into the next attempt.
+    var attemptEl = document.getElementById('attemptNumber');
+    if (local && local.__attempt && attemptEl && String(local.__attempt) !== attemptEl.value) local = null;
+    // A draft kept by an earlier version of this page has no time: it predates drafts on the server and was made on
+    // this device, so it goes first, as it always did.
+    var localAt = local ? (local.__savedAt ? Number(local.__savedAt) : Number.MAX_SAFE_INTEGER) : 0;
+    var remoteAt = remote && Number(remote.__savedAt) || 0;
+    var drafts = remoteAt > localAt ? [remote, local] : [local, remote];
+    drafts.forEach(function (draft) {
+      if (!draft) return;
       Object.keys(draft).forEach(function (k) {
+        if (k === '__savedAt' || k === '__attempt') return;
         if (!answers[k] || answers[k].toString().trim() === '') answers[k] = draft[k];
       });
-    }
+    });
+    if (remote) draftStatus('Continuing your saved work');
+    if (local && localAt > remoteAt) scheduleServerSave();   // changes made here while offline go up now
 
     // Put recovered text back into the fields it came from.
     Object.keys(answers).forEach(function (k) {
@@ -851,33 +945,147 @@
       for (var i = 0; i < totalQuestions; i++) {
         var h = document.getElementById('hidden_q_' + i);
         if (h && h.dataset.header === 'true') continue;   // a shared stem has nothing to answer
+        var sketch = document.getElementById('sketchpng_' + i);
+        if (sketch && sketch.value) continue;             // answered by drawing
         if (!h || (h.value || '').trim() === '') unanswered++;
       }
       var warnEl = document.getElementById('submitWarnText');
-      if (warnEl) {
-        warnEl.textContent = unanswered > 0
-          ? 'You still have ' + unanswered + ' unanswered question(s).'
-          : '';
-      }
+      if (warnEl) warnEl.textContent = '';
+      describeSubmission();
 
       if (modalEl && window.bootstrap) {
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
       } else if (confirm('Submit and finish? You cannot come back or change your answers.')) {
-        isSubmitting = true;
-        clearDraft();   // answers are about to be saved server-side
-        form.submit();
+        sendSubmission(form, null, submitBtn);
       }
     });
 
     var confirmBtn = document.getElementById('confirmSubmitBtn');
     if (confirmBtn) {
       confirmBtn.addEventListener('click', function () {
-        if (modalEl && window.bootstrap) bootstrap.Modal.getOrCreateInstance(modalEl).hide();
-        isSubmitting = true;
-        clearDraft();   // answers are about to be saved server-side
-        form.submit();   // native submit — bypasses the handler above, posts directly
+        if (window.PhotoStatus && PhotoStatus.activeCount() > 0) return;   // waits for the photo(s) on their way
+        sendSubmission(form, modalEl, confirmBtn);
       });
     }
+    document.addEventListener('photostatus:change', describeSubmission);
+
+    // A key that was already sent but never confirmed (the page was reloaded after a lost answer) is reused,
+    // so sending again can only ever find that same attempt, never use up another one.
+    var keyInput = document.getElementById('submissionKey');
+    var storedKey = null;
+    try { storedKey = localStorage.getItem(submitKeyName()); } catch (e) { /* storage unavailable */ }
+    if (keyInput && storedKey) keyInput.value = storedKey;
+  }
+
+  // "4 of 5 questions answered · 1 photo attached", what is still required, and photos still uploading. Counts
+  // what this attempt really holds: typed answers, choices, drawings and photos saved on the server.
+  function describeSubmission() {
+    var summary = document.getElementById('submitSummary');
+    if (!summary) return;
+    var total = 0, answered = 0, missing = [];
+    for (var i = 0; i < totalQuestions; i++) {
+      var h = document.getElementById('hidden_q_' + i);
+      if (h && h.dataset.header === 'true') continue;
+      total++;
+      var sketch = document.getElementById('sketchpng_' + i);
+      var photo = window.PhotoStatus && PhotoStatus.hasSaved(i);
+      var has = (h && (h.value || '').trim() !== '') || (sketch && sketch.value) || photo;
+      if (has) answered++;
+      var block = document.querySelector('.question-panel[data-qindex="' + i + '"] .work-toggle[data-required="true"]');
+      var work = document.getElementById('hidden_work_' + i);
+      if (block && !photo && !(work && (work.value || '').trim())) {
+        var label = document.querySelector('.photo-status[data-qindex="' + i + '"]');
+        missing.push('Question ' + (label ? label.dataset.label : i + 1) + ' needs your working (typed or a photo).');
+      }
+    }
+    var photos = window.PhotoStatus ? PhotoStatus.savedCount() : 0;
+    summary.textContent = answered + ' of ' + total + ' question' + (total === 1 ? '' : 's') + ' answered' +
+                          (photos ? ' · ' + photos + ' photo' + (photos === 1 ? '' : 's') + ' attached' : '');
+    var list = document.getElementById('submitMissing');
+    if (list) list.innerHTML = missing.map(function (m) { var li = document.createElement('li'); li.textContent = m; return li.outerHTML; }).join('');
+
+    var uploads = document.getElementById('submitUploads');
+    var busy = window.PhotoStatus ? PhotoStatus.activeCount() : 0;
+    if (uploads) {
+      uploads.classList.toggle('d-none', busy === 0);
+      uploads.querySelector('span:last-child').textContent = busy ? 'Waiting for ' + busy + ' photo' + (busy === 1 ? '' : 's') + ' to finish saving…' : '';
+    }
+    var confirm = document.getElementById('confirmSubmitBtn');
+    if (confirm && !sending) confirm.disabled = busy > 0;
+  }
+
+  function submitKeyName() {
+    var el = document.getElementById('assignmentId');
+    return 'quizSubmitKey:' + (el ? el.value : '');
+  }
+
+  // Sends the work and waits for the server to confirm it is saved. Only then are the draft and the key
+  // forgotten and the result page opened. Any failure leaves everything on the page and offers a retry
+  // with the same key, which can never create a second attempt.
+  var sending = false;
+  async function sendSubmission(form, modalEl, confirmBtn) {
+    if (sending) return;                       // a double click sends once
+    sending = true;
+    cancelServerSave();                        // a late draft save must never start a new attempt
+    if (window.ActivityLog) { try { await ActivityLog.flushNow(1500); } catch (e) { /* never blocks the hand-in */ } }
+
+    var errorBox  = document.getElementById('submitError');
+    var errorText = document.getElementById('submitErrorText');
+    var progress  = document.getElementById('submitProgress');
+    var label     = document.getElementById('confirmSubmitLabel');
+    var keyInput  = document.getElementById('submissionKey');
+    try { localStorage.setItem(submitKeyName(), keyInput ? keyInput.value : ''); } catch (e) { /* best effort */ }
+
+    errorBox && errorBox.classList.add('d-none');
+    progress && progress.classList.remove('d-none');
+    confirmBtn.disabled = true;
+
+    var controller = window.AbortController ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, 90000) : null;
+    var failure = null;
+
+    try {
+      var response = await fetch(form.action, {
+        method: 'POST',
+        body: new FormData(form),
+        headers: { 'X-Requested-With': 'fetch', 'Accept': 'application/json' },
+        credentials: 'same-origin',
+        signal: controller ? controller.signal : undefined
+      });
+      var data = null;
+      try { data = await response.json(); } catch (e) { data = null; }
+
+      if (response.ok && data && data.ok && data.resultUrl) {
+        isSubmitting = true;
+        clearDraft();
+        try { localStorage.removeItem(submitKeyName()); } catch (e) { /* ignore */ }
+        window.location.assign(data.resultUrl);
+        return;
+      }
+      failure = (data && data.error) ||
+        (response.status === 429
+          ? 'Too many tries in a short time. Wait a minute, then press Try again.'
+          : 'The server could not save your work (error ' + response.status + ').');
+      if (data && data.retry === false) {
+        // Not something a retry can fix (e.g. no attempts left); the key is not needed any more.
+        try { localStorage.removeItem(submitKeyName()); } catch (e) { /* ignore */ }
+      }
+    } catch (e) {
+      failure = e && e.name === 'AbortError'
+        ? 'The server took too long to answer. Your work may still have been saved — press Try again: it will not use another attempt.'
+        : 'No connection to the server. Check your internet, then press Try again.';
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+
+    sending = false;
+    submittingNow = false;                     // not handed in: keep saving the draft
+    progress && progress.classList.add('d-none');
+    if (errorText) errorText.textContent = failure + ' Your answers are still on this page.';
+    errorBox && errorBox.classList.remove('d-none');
+    if (label) label.textContent = 'Try again';
+    confirmBtn.disabled = false;
+    if (modalEl && window.bootstrap) bootstrap.Modal.getOrCreateInstance(modalEl).show();
   }
 
   // ── KaTeX rendering ──────────────────────────────────────────────────────
@@ -905,10 +1113,16 @@
   // Expose globally so the button onclick works
   window.openTutorial = function (opts) {
     // Inline onclick handlers call this with no arguments; the step buttons pass { step }.
+    // This is the student's own click: an opening for the activity log (a reload or a restored chat is not). When it
+    // starts a conversation, the server logs the opening with that first request (same clock, exact order);
+    // reopening a conversation already under way sends no request, so the page reports it.
+    tutorOpenClicked = true;
     return openTutorial(opts && opts.step ? opts : undefined);
   };
   window.closeTutorial = closeTutorial;
   window.setTutorialMode = setTutorialMode;
+
+  var tutorOpenClicked = false;
 
   function openTutorial(opts) {
     // Help opened from a step starts its own conversation about that step.
@@ -930,6 +1144,8 @@
                         && chatQuestionIdx === qIdx
                         && chatHistory.length > 0;
     if (sameConversation) {
+      if (tutorOpenClicked && window.ActivityLog) ActivityLog.tutorOpened(qIdx);
+      tutorOpenClicked = false;
       updateModeButtons();
       return;
     }
@@ -956,7 +1172,7 @@
       if (chatStep.feedback) contextMsg += ' (the checker said: ' + chatStep.feedback + ')';
     }
 
-    streamTutorTurn(contextMsg, false);  // hidden priming; assistant replies with the first hint
+    streamTutorTurn(contextMsg, false, 'hint');  // hidden priming; assistant replies with the first hint
   }
 
   function closeTutorial() {
@@ -1010,7 +1226,7 @@
     var intent = mode === 'solution' ? 'Can you show me the full solution?'
                : mode === 'concept'  ? 'Can you explain the concept behind this?'
                :                       'Can you give me a hint?';
-    streamTutorTurn(intent, true);
+    streamTutorTurn(intent, true, mode === 'hint' ? 'hint' : 'mode');
   }
 
   function updateModeButtons() {
@@ -1172,7 +1388,9 @@
 
   // Sends one tutor turn: appends the user message, streams the assistant reply,
   // and keeps the running history so the conversation continues across modes.
-  async function streamTutorTurn(userMessage, showUserBubble) {
+  // kind: 'hint' (a hint asked for), 'mode' (Concept / Solution), 'message' (typed by the student): one request id per
+  // turn, so the activity log counts the request once however its answer streams in.
+  async function streamTutorTurn(userMessage, showUserBubble, kind) {
     if (showUserBubble) addUserBubble(userMessage);
     chatHistory.push({ role: 'user', content: userMessage });
 
@@ -1182,10 +1400,21 @@
     try {
       var assignmentId = document.getElementById('assignmentId')?.value || '';
       var csrfToken = document.querySelector('input[name="__RequestVerificationToken"]')?.value || '';
+      var requestId = window.ActivityLog ? ActivityLog.newRequestId() : null;
+      var openedNow = tutorOpenClicked;                 // this request starts the conversation the student opened
+      tutorOpenClicked = false;
+      var activityHeaders = requestId ? {
+        'X-Activity-Id': requestId, 'X-Activity-Kind': kind || 'mode', 'X-Activity-Assignment': assignmentId,
+        'X-Activity-Opened': openedNow ? '1' : '0',
+        'X-Activity-Question': chatQuestionIdx === null || chatQuestionIdx === undefined ? '' : String(chatQuestionIdx)
+      } : {};
       var response = await fetch('/Student/ChatStream', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+        headers: Object.assign({ 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken }, activityHeaders),
         body: JSON.stringify(Object.assign({
+          requestId:    requestId,
+          kind:         requestId ? (kind || 'mode') : null,
+          opened:       openedNow,
           message:      userMessage,
           mode:         chatMode,
           assignmentId: assignmentId,
@@ -1236,7 +1465,7 @@
     if (sendBtn) sendBtn.disabled = true;
 
     try {
-      await streamTutorTurn(userMessage, true);
+      await streamTutorTurn(userMessage, true, 'message');
     } finally {
       if (sendBtn) sendBtn.disabled = false;
       input.focus();

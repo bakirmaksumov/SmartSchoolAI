@@ -17,6 +17,107 @@ namespace SmartSchoolAI.Migrations
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.11");
 
+            modelBuilder.Entity("SmartSchoolAI.Models.AiCallLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("AssignmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CacheKey")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("Cost")
+                        .HasPrecision(18, 8)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Failure")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GenerationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("InputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("OutputTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Questions")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ResultId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("StudentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Succeeded")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CacheKey");
+
+                    b.HasIndex("ResultId");
+
+                    b.ToTable("AiCallLogs");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.AiStageResult", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CacheKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PromptVersion")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CacheKey")
+                        .IsUnique();
+
+                    b.ToTable("AiStageResults");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.Assignment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -34,6 +135,11 @@ namespace SmartSchoolAI.Migrations
 
                     b.Property<bool>("AntiCopyPaste")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("Audience")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("AvailableFrom")
                         .HasColumnType("TEXT");
@@ -58,6 +164,11 @@ namespace SmartSchoolAI.Migrations
 
                     b.Property<string>("GradingType")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LateJoinPolicy")
+                        .IsRequired()
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("MaxAttempts")
@@ -126,6 +237,102 @@ namespace SmartSchoolAI.Migrations
                     b.HasIndex("StudentId");
 
                     b.ToTable("AssignmentStudents");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.AttemptActivity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("AssignmentId")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("ClientId")
+                        .HasColumnType("BLOB");
+
+                    b.Property<byte>("Flags")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("OccurredAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte>("Outcome")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<short?>("QuestionIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ReceivedAt")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("StudentId")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StudentId", "ClientId")
+                        .IsUnique()
+                        .HasFilter("ClientId IS NOT NULL");
+
+                    b.HasIndex("AssignmentId", "StudentId", "AttemptNumber", "OccurredAt");
+
+                    b.ToTable("AttemptActivities");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.AttemptActivitySummary", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Copies")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("HintsReceived")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("HintsRequested")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Pastes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PastesBlocked")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("PurgedBefore")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TutorOpened")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TutorRequests")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssignmentId", "StudentId", "AttemptNumber")
+                        .IsUnique();
+
+                    b.ToTable("AttemptActivitySummaries");
                 });
 
             modelBuilder.Entity("SmartSchoolAI.Models.AuditLog", b =>
@@ -361,6 +568,44 @@ namespace SmartSchoolAI.Migrations
                     b.ToTable("ContentItems");
                 });
 
+            modelBuilder.Entity("SmartSchoolAI.Models.LateJoinRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DecidedById")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("StudentId");
+
+                    b.HasIndex("AssignmentId", "StudentId")
+                        .IsUnique();
+
+                    b.ToTable("LateJoinRequests");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.Question", b =>
                 {
                     b.Property<Guid>("Id")
@@ -408,6 +653,9 @@ namespace SmartSchoolAI.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("SyllabusTopicId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -428,6 +676,8 @@ namespace SmartSchoolAI.Migrations
                     b.HasIndex("CreatedByEmail");
 
                     b.HasIndex("Subject");
+
+                    b.HasIndex("SyllabusTopicId");
 
                     b.ToTable("Questions");
                 });
@@ -676,6 +926,12 @@ namespace SmartSchoolAI.Migrations
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("GradingJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GradingKey")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ImagePath")
                         .HasColumnType("TEXT");
 
@@ -695,7 +951,13 @@ namespace SmartSchoolAI.Migrations
                     b.Property<int>("QuestionIndex")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("RecognitionKey")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ReviewNote")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SketchPath")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("StudentResultId")
@@ -745,6 +1007,9 @@ namespace SmartSchoolAI.Migrations
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("GradingPending")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ImagePath")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -760,6 +1025,9 @@ namespace SmartSchoolAI.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("StudentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SubmissionKey")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("SubmittedAt")
@@ -779,6 +1047,9 @@ namespace SmartSchoolAI.Migrations
                     b.HasIndex("AssignmentId");
 
                     b.HasIndex("StudentId");
+
+                    b.HasIndex("StudentId", "SubmissionKey")
+                        .IsUnique();
 
                     b.HasIndex("AssignmentId", "StudentId", "AttemptNumber")
                         .IsUnique();
@@ -819,6 +1090,147 @@ namespace SmartSchoolAI.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("SupportTickets");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusComponent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Number")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SourcePage")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("VersionId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VersionId", "Number")
+                        .IsUnique();
+
+                    b.ToTable("SyllabusComponents");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusProgram", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("SyllabusPrograms");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusTopic", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ComponentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Number")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Order")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SourcePage")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ComponentId", "Order");
+
+                    b.ToTable("SyllabusTopics");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DocumentVersion")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FirstExamYear")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("ImportedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ImportedById")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("LastExamYear")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ProgramId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceSha256")
+                        .IsUnique();
+
+                    b.HasIndex("ProgramId", "FirstExamYear", "LastExamYear")
+                        .IsUnique();
+
+                    b.ToTable("SyllabusVersions");
                 });
 
             modelBuilder.Entity("SmartSchoolAI.Models.User", b =>
@@ -1003,6 +1415,35 @@ namespace SmartSchoolAI.Migrations
                     b.Navigation("CreatedBy");
                 });
 
+            modelBuilder.Entity("SmartSchoolAI.Models.LateJoinRequest", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.Assignment", "Assignment")
+                        .WithMany()
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("SmartSchoolAI.Models.User", "Student")
+                        .WithMany()
+                        .HasForeignKey("StudentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Assignment");
+
+                    b.Navigation("Student");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.Question", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.SyllabusTopic", "SyllabusTopic")
+                        .WithMany()
+                        .HasForeignKey("SyllabusTopicId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("SyllabusTopic");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.QuestionReport", b =>
                 {
                     b.HasOne("SmartSchoolAI.Models.Assignment", "Assignment")
@@ -1073,6 +1514,39 @@ namespace SmartSchoolAI.Migrations
                     b.Navigation("Student");
                 });
 
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusComponent", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.SyllabusVersion", "Version")
+                        .WithMany("Components")
+                        .HasForeignKey("VersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Version");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusTopic", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.SyllabusComponent", "Component")
+                        .WithMany("Topics")
+                        .HasForeignKey("ComponentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Component");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusVersion", b =>
+                {
+                    b.HasOne("SmartSchoolAI.Models.SyllabusProgram", "Program")
+                        .WithMany("Versions")
+                        .HasForeignKey("ProgramId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Program");
+                });
+
             modelBuilder.Entity("SmartSchoolAI.Models.User", b =>
                 {
                     b.HasOne("SmartSchoolAI.Models.Role", "Role")
@@ -1117,6 +1591,21 @@ namespace SmartSchoolAI.Migrations
                     b.Navigation("StepResults");
 
                     b.Navigation("StudentAnswers");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusComponent", b =>
+                {
+                    b.Navigation("Topics");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusProgram", b =>
+                {
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("SmartSchoolAI.Models.SyllabusVersion", b =>
+                {
+                    b.Navigation("Components");
                 });
 
             modelBuilder.Entity("SmartSchoolAI.Models.User", b =>

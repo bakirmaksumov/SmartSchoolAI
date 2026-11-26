@@ -1,252 +1,179 @@
-@model List<SmartSchoolAI.Models.Class>
+@model SmartSchoolAI.ViewModels.MyWorkViewModel
+@using SmartSchoolAI.Services
 @{
-    ViewData["Title"] = "My Dashboard";
-    // assignmentId → latest submitted result
-    var submittedResults  = ViewBag.SubmittedResults as Dictionary<System.Guid, SmartSchoolAI.Models.StudentResult> ?? new();
-    var averageScore      = ViewBag.AverageScore as int? ?? 0;
-    var upcomingDeadlines = ViewBag.UpcomingDeadlines as List<SmartSchoolAI.Models.Assignment> ?? new();
+    ViewData["Title"] = "My work";
+    var next = Model.Next;
+    var sections = new[] { ("todo", "To do"), ("submitted", "Submitted"), ("feedback", "Feedback") };
+    var classFilterName = Model.Classes.FirstOrDefault(c => c.Id == Model.ClassId)?.Name;
 }
 
-<!-- EduSchool AI Hero Welcome Card -->
-<div class="wiut-hero-card mb-4">
-  <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
-    <div>
-      <h3 class="fw-bold text-white mb-1"><i class="bx bx-graduation me-2"></i>Welcome to EduSchool AI</h3>
-      <p class="text-white-50 mb-0">Next-Generation School Academic Workspace & Adaptive Tutoring</p>
-    </div>
-    <div>
-      <button class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#joinClassModal">
-        <i class="bx bx-plus me-1"></i> Join a Class
-      </button>
-    </div>
-  </div>
+<div class="my-work" id="myWork" data-query="@Context.Request.QueryString">
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+  <h4 class="fw-bold mb-0 me-auto">My work</h4>
+  <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#joinClassModal">
+    <i class="bx bx-plus me-1" aria-hidden="true"></i>Join a class
+  </button>
 </div>
 
-<!-- TOP STATS METRIC ROW -->
-<div class="row mb-4">
-  <!-- Enrolled Classes -->
-  <div class="col-sm-6 col-lg-3 mb-3 mb-lg-0">
-    <div class="card card-hover wiut-stat-card h-100">
-      <div class="card-body d-flex align-items-center justify-content-between">
-        <div>
-          <span class="text-muted d-block mb-1 fw-semibold">Enrolled Classes</span>
-          <h4 class="mb-0 fw-bold text-primary">@Model.Count</h4>
-        </div>
-        <div class="avatar avatar-md bg-label-primary p-2 rounded">
-          <i class="bx bx-group fs-3 text-primary"></i>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Overall Average Score (GPA) -->
-  <div class="col-sm-6 col-lg-3 mb-3 mb-lg-0">
-    <div class="card card-hover wiut-stat-card stat-crimson h-100">
-      <div class="card-body d-flex align-items-center justify-content-between">
-        <div>
-          <span class="text-muted d-block mb-1 fw-semibold">Average Grade</span>
-          <h4 class="mb-0 fw-bold text-danger">@averageScore%</h4>
-        </div>
-        <div class="avatar avatar-md bg-label-danger p-2 rounded">
-          <i class="bx bx-bar-chart-alt-2 fs-3 text-danger"></i>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Completed Submissions -->
-  <div class="col-sm-6 col-lg-3 mb-3 mb-lg-0">
-    <div class="card card-hover wiut-stat-card stat-gold h-100">
-      <div class="card-body d-flex align-items-center justify-content-between">
-        <div>
-          <span class="text-muted d-block mb-1 fw-semibold">Tasks Completed</span>
-          <h4 class="mb-0 fw-bold" style="color:var(--wiut-gold);">@submittedResults.Count</h4>
-        </div>
-        <div class="avatar avatar-md p-2 rounded" style="background-color: var(--wiut-gold-light);">
-          <i class="bx bx-check-circle fs-3" style="color:var(--wiut-gold);"></i>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- EduSchool Badges & Streak -->
-  <div class="col-sm-6 col-lg-3">
-    <div class="card card-hover wiut-stat-card h-100" style="border-left-color: #28a745;">
-      <div class="card-body d-flex align-items-center justify-content-between">
-        <div>
-          <span class="text-muted d-block mb-1 fw-semibold">EduSchool Badges</span>
-          <h4 class="mb-0 fw-bold text-success">
-            @(submittedResults.Count >= 5 ? "3" : submittedResults.Count >= 1 ? "2" : "1") 🏅
-          </h4>
-        </div>
-        <div class="avatar avatar-md bg-label-success p-2 rounded">
-          <i class="bx bx-award fs-3 text-success"></i>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- MIDDLE SECTION: UPCOMING DEADLINES & AI TUTOR INSIGHTS -->
-<div class="row mb-4">
-  <!-- Left: To-Do Upcoming Deadlines -->
-  <div class="col-lg-7 mb-4 mb-lg-0">
-    <div class="card card-hover h-100">
-      <div class="card-header d-flex align-items-center justify-content-between py-3 bg-transparent">
-        <h5 class="card-title mb-0 fw-bold text-primary">
-          <i class="bx bx-time-five me-1 text-danger"></i> To-Do / Upcoming Deadlines
-        </h5>
-        <span class="badge bg-label-danger">@upcomingDeadlines.Count Pending</span>
-      </div>
-      <div class="card-body">
-        @if (!upcomingDeadlines.Any())
-        {
-          <div class="text-center py-4">
-            <i class="bx bx-check-double text-success" style="font-size:3rem;"></i>
-            <h6 class="fw-bold mt-2 text-success">All caught up!</h6>
-            <p class="text-muted small mb-0">No pending assignments due at the moment.</p>
-          </div>
-        }
-        else
-        {
-          <div class="list-group list-group-flush">
-            @foreach (var task in upcomingDeadlines)
-            {
-              <div class="list-group-item d-flex align-items-center justify-content-between px-0 py-3 border-bottom">
-                <div class="d-flex align-items-center me-3">
-                  <div class="avatar avatar-sm me-3 flex-shrink-0">
-                    <span class="avatar-initial rounded bg-label-primary">
-                      <i class="bx bx-task"></i>
-                    </span>
-                  </div>
-                  <div>
-                    <h6 class="mb-0 fw-semibold">@task.Title</h6>
-                    <small class="text-muted">@task.Class?.Name · @task.Type</small>
-                  </div>
-                </div>
-                <div class="text-end flex-shrink-0">
-                  @if (task.Deadline.HasValue)
-                  {
-                    var isOverdue = task.Deadline.Value < DateTime.UtcNow;
-                    <span class="badge bg-label-@(isOverdue ? "danger" : "warning") d-block mb-1">
-                      <i class="bx bx-calendar me-1"></i>@task.Deadline.Value.ToString("dd MMM HH:mm")
-                    </span>
-                  }
-                  <a asp-action="TakeAssignment" asp-route-assignmentId="@task.Id" class="btn btn-xs btn-primary">
-                    Start <i class="bx bx-right-arrow-alt ms-1"></i>
-                  </a>
-                </div>
-              </div>
-            }
-          </div>
-        }
-      </div>
-    </div>
-  </div>
-
-  <!-- Right: AI Mastery & Smart Insights -->
-  <div class="col-lg-5">
-    <div class="card card-hover h-100">
-      <div class="card-header d-flex align-items-center justify-content-between py-3 bg-transparent">
-        <h5 class="card-title mb-0 fw-bold text-primary">
-          <i class="bx bx-bot me-1 text-primary"></i> AI Learning Insights
-        </h5>
-        <span class="badge bg-label-primary">Live AI</span>
-      </div>
-      <div class="card-body">
-        <div class="bg-lighter rounded p-3 mb-3 border">
-          <div class="d-flex align-items-start gap-2">
-            <i class="bx bx-bulb text-warning fs-4 mt-1"></i>
-            <div>
-              <h6 class="fw-bold mb-1">Smart Focus Tip</h6>
-              <p class="text-muted small mb-0">
-                Based on your latest test results (@averageScore% avg), review step-by-step solutions with your <strong>AI Tutor</strong> before your next quiz.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <h6 class="fw-bold mb-2 small text-uppercase text-muted">Academic Progress Status</h6>
-        <div class="mb-3">
-          <div class="d-flex justify-content-between small fw-semibold mb-1">
-            <span>Overall Course Completion</span>
-            <span class="text-primary">@averageScore%</span>
-          </div>
-          <div class="progress" style="height: 8px;">
-            <div class="progress-bar bg-primary" role="progressbar" style="width: @averageScore%;" aria-valuenow="@averageScore" aria-valuemin="0" aria-valuemax="100"></div>
-          </div>
-        </div>
-
-        <div class="d-grid gap-2 mt-4">
-          <a asp-action="Index" asp-controller="Profile" class="btn btn-outline-primary btn-sm">
-            <i class="bx bx-award me-1"></i> View All Achievements
-          </a>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- BOTTOM SECTION: ENROLLED COURSES SUMMARY -->
-<h5 class="fw-bold text-primary mb-3">
-  <i class="bx bx-book-open me-1 text-danger"></i> My Enrolled Classes
-</h5>
-
-@if (!Model.Any())
+@if (!Model.Classes.Any())
 {
-  <div class="card card-hover">
+  <div class="card" id="noClasses">
     <div class="card-body text-center py-5">
-      <i class="bx bx-book-open text-primary" style="font-size:3.5rem;"></i>
-      <h5 class="mt-3 text-primary fw-bold">No classes enrolled yet</h5>
-      <p class="text-muted">Ask your instructor for an invite code to join your first class.</p>
+      <i class="bx bx-book-open text-primary" style="font-size:3rem;" aria-hidden="true"></i>
+      <h5 class="mt-3 fw-bold">Join a class to get started</h5>
+      <p class="text-muted">Ask your teacher for the 6-character invite code.</p>
       <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#joinClassModal">
-        <i class="bx bx-plus me-1"></i> Join a Class
+        <i class="bx bx-log-in me-1" aria-hidden="true"></i>Join a class
       </button>
     </div>
   </div>
 }
 else
 {
-  <div class="row">
-    @foreach (var cls in Model)
-    {
-      var totalAssigned = cls.Assignments.Count;
-      var completedInClass = cls.Assignments.Count(a => submittedResults.ContainsKey(a.Id));
-      var progressPercent = totalAssigned > 0 ? (completedInClass * 100 / totalAssigned) : 0;
-
-      <div class="col-md-6 col-xl-4 mb-4">
-        <div class="card card-hover h-100">
-          <div class="card-body d-flex flex-column justify-content-between">
-            <div>
-              <div class="d-flex align-items-center justify-content-between mb-2">
-                <span class="badge bg-label-primary">Grade @cls.GradeLevel</span>
-                <span class="badge bg-label-info">@cls.Subject</span>
-              </div>
-              <h5 class="card-title fw-bold text-primary mb-1">@cls.Name</h5>
-              <p class="text-muted small mb-3">
-                <i class="bx bx-user me-1"></i>Instructor: @cls.Teacher.FullName
-              </p>
+  <div class="row g-3">
+    <div class="col-lg-8">
+      <!-- Next up: the one thing to do now -->
+      <section class="card next-up mb-3" id="nextUp" aria-labelledby="nextUpTitle">
+        <div class="card-body">
+          <h2 class="next-up-label" id="nextUpTitle">Next up</h2>
+          @if (next is not null)
+          {
+            <div class="next-up-title">@next.Assignment.Title</div>
+            <div class="text-muted mb-2">@next.ClassName</div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+              <span class="badge bg-label-@(next.State == StudentWorkState.InProgress ? "primary" : next.Overdue ? "danger" : "secondary")" data-status>
+                <i class="bx @(next.State == StudentWorkState.InProgress ? "bx-edit" : "bx-circle") me-1" aria-hidden="true"></i>@next.StatusText
+              </span>
+              <span class="@(next.Overdue ? "text-danger fw-semibold" : "")" data-due title="@SchoolTime.Label">
+                <i class="bx bx-calendar me-1" aria-hidden="true"></i>@(next.PersonalDue ? "Your deadline: " : "")@StudentWork.DueText(next.Due, Model.Now)@(next.Due.HasValue ? $" ({SchoolTime.Label})" : "")
+              </span>
             </div>
-
-            <div>
-              <div class="d-flex justify-content-between small fw-semibold mb-1">
-                <span>Class Completion</span>
-                <span class="text-primary">@completedInClass / @totalAssigned (@progressPercent%)</span>
-              </div>
-              <div class="progress mb-3" style="height: 6px;">
-                <div class="progress-bar bg-success" role="progressbar" style="width: @progressPercent%;" aria-valuenow="@progressPercent" aria-valuemin="0" aria-valuemax="100"></div>
-              </div>
-
-              <a asp-action="Assignments" asp-route-classId="@cls.Id" class="btn btn-outline-primary btn-sm w-100">
-                <i class="bx bx-folder-open me-1"></i> Open Class Assignments
+            <div class="d-flex flex-wrap gap-2">
+              <a class="btn btn-primary next-up-action" href="@next.Primary!.Url" id="nextUpAction">
+                <i class="bx @next.Primary.Icon me-1" aria-hidden="true"></i>@next.Primary.Label
               </a>
+              @if (next.Secondary is { } s2)
+              {
+                <a class="btn btn-outline-secondary" href="@s2.Url"><i class="bx @s2.Icon me-1" aria-hidden="true"></i>@s2.Label</a>
+              }
             </div>
-          </div>
+          }
+          else if (!Model.Work.Any())
+          {
+            <div class="next-up-title">No assignments for you yet</div>
+            <p class="text-muted mb-0" id="noWorkYet">
+              You are in @string.Join(", ", Model.Classes.Select(c => c.Name)). Work your teacher gives you will appear here.
+            </p>
+          }
+          else
+          {
+            <div class="next-up-title">You're all caught up</div>
+            <p class="text-muted mb-0">Nothing to start or continue right now@(classFilterName is null ? "" : $" in {classFilterName}").</p>
+          }
         </div>
-      </div>
-    }
+      </section>
+
+      <!-- To do / Submitted / Feedback, for all classes or one -->
+      <section class="card" aria-label="My work list">
+        <div class="card-header d-flex flex-wrap align-items-center gap-2 pb-0">
+          <ul class="nav nav-tabs work-tabs me-auto" role="tablist" id="workTabs">
+            @foreach (var (key, label) in sections)
+            {
+              var on = Model.Section == key;
+              <li class="nav-item" role="presentation">
+                <a class="nav-link @(on ? "active" : "")" href="@Model.Link(key)" data-section="@key" role="tab"
+                   aria-selected="@(on ? "true" : "false")" aria-current="@(on ? "page" : null)">
+                  @label <span class="badge rounded-pill bg-label-secondary ms-1">@Model.Count(key)</span>
+                </a>
+              </li>
+            }
+          </ul>
+          <form method="get" action="/Student" class="mb-2">
+            <input type="hidden" name="section" value="@Model.Section" />
+            <label class="visually-hidden" for="classFilter">Class</label>
+            <select class="form-select form-select-sm" id="classFilter" name="classId" onchange="this.form.submit()">
+              <option value="">All classes</option>
+              @foreach (var c in Model.Classes)
+              {
+                <option value="@c.Id" selected="@(c.Id == Model.ClassId)">@c.Name</option>
+              }
+            </select>
+            <noscript><button class="btn btn-sm btn-outline-primary mt-1">Show</button></noscript>
+          </form>
+        </div>
+        <div class="card-body pt-2" id="workList" data-section="@Model.Section">
+          @if (!Model.InSection.Any())
+          {
+            <p class="text-muted my-4 text-center" id="sectionEmpty">
+              @(Model.Section switch
+              {
+                  "submitted" => "Nothing is waiting for a mark.",
+                  "feedback"  => "No feedback yet.",
+                  _           => Model.Work.Any() ? "Nothing to do here — well done." : "No assignments for you yet."
+              })
+            </p>
+          }
+          else
+          {
+            @foreach (var item in Model.Shown)
+            {
+              <partial name="_WorkItem" model="item" />
+            }
+            @if (!Model.ShowAll && Model.InSection.Count > MyWorkViewModel.ShortList)
+            {
+              <a class="btn btn-link px-0 mt-2" id="viewAllWork" href="@Model.Link(all: true)">View all work (@Model.InSection.Count)</a>
+            }
+          }
+        </div>
+      </section>
+    </div>
+
+    <div class="col-lg-4">
+      <!-- Results the student may see -->
+      <section class="card mb-3" id="recentFeedback" aria-labelledby="recentFeedbackTitle">
+        <div class="card-body">
+          <h2 class="h6 fw-bold mb-3" id="recentFeedbackTitle">Recent feedback</h2>
+          @if (!Model.RecentFeedback.Any())
+          {
+            <p class="text-muted mb-0" id="noGrades">No grades yet</p>
+          }
+          else
+          {
+            <ul class="list-unstyled mb-3">
+              @foreach (var f in Model.RecentFeedback)
+              {
+                var r = f.LatestFeedback!;
+                <li class="d-flex align-items-center justify-content-between gap-2 py-2 border-bottom">
+                  <a class="min-w-0 text-truncate" href="/Student/AssignmentResult?assignmentId=@f.Assignment.Id&resultId=@r.Id">@f.Assignment.Title</a>
+                  <span class="badge bg-label-success flex-shrink-0" data-score>@f.Assignment.FormatGrade(r.Score)</span>
+                </li>
+              }
+            </ul>
+            <div class="small text-muted" id="averageScore" title="Average of the results you can see (newest attempt of each assignment).">
+              Average: <strong class="text-body">@Model.Average%</strong> · @AnalyticsService.Plural(Model.GradedCount, "graded assignment")
+            </div>
+          }
+        </div>
+      </section>
+
+      <!-- Classes -->
+      <section class="card" aria-labelledby="myClassesTitle">
+        <div class="card-body">
+          <h2 class="h6 fw-bold mb-3" id="myClassesTitle">My classes</h2>
+          <ul class="list-unstyled mb-0">
+            @foreach (var c in Model.Classes)
+            {
+              <li class="py-1"><a href="/Student/Assignments?classId=@c.Id"><i class="bx bx-book me-1" aria-hidden="true"></i>@c.Name</a>
+                <span class="small text-muted">· @c.Teacher.FullName</span></li>
+            }
+          </ul>
+        </div>
+      </section>
+    </div>
   </div>
 }
+</div>
 
 <!-- Join Class Modal -->
 <div class="modal fade" id="joinClassModal" tabindex="-1">
@@ -256,11 +183,11 @@ else
         @Html.AntiForgeryToken()
         <div class="modal-header">
           <h5 class="modal-title">Join a Class</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <label class="form-label">Invite Code</label>
-          <input type="text" name="inviteCode" class="form-control text-uppercase"
+          <label class="form-label" for="inviteCode">Invite Code</label>
+          <input type="text" id="inviteCode" name="inviteCode" class="form-control text-uppercase"
                  placeholder="e.g. AB3XY7" maxlength="6" required />
           <div class="form-text">Enter the 6-character code from your teacher</div>
         </div>
@@ -274,3 +201,20 @@ else
     </div>
   </div>
 </div>
+
+@section Scripts {
+  <link rel="stylesheet" href="~/css/my-work.css" asp-append-version="true" />
+  <script>
+    // Coming back to "My work" (from an assignment, a result, the menu) restores the class and section last chosen.
+    (function () {
+      var key = 'myWork:query', page = document.getElementById('myWork');
+      if (!page) return;
+      var q = page.dataset.query || '';
+      try {
+        if (q) sessionStorage.setItem(key, q);
+        else if (sessionStorage.getItem(key) && document.referrer.indexOf(location.origin) === 0 && !/[?&]reset=1/.test(location.search))
+          location.replace('/Student' + sessionStorage.getItem(key));
+      } catch (e) { /* storage unavailable: start from the default view */ }
+    })();
+  </script>
+}

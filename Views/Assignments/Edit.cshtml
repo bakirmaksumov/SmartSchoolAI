@@ -1,9 +1,14 @@
 @model SmartSchoolAI.ViewModels.AssignmentEditViewModel
 @using System.Text.Json
+@inject SmartSchoolAI.Services.SyllabusService SyllabusLibrary
 @{
     var a = Model.Assignment;
     ViewData["Title"] = a.Title;
     var questions = JsonSerializer.Deserialize<List<JsonElement>>(a.Questions ?? "[]") ?? new();
+    // "Aligned to Cambridge 9709" labels for questions the teacher linked to a syllabus topic.
+    var syllabusLabels = await SyllabusLibrary.LabelsAsync(questions
+        .Select(q => q.TryGetProperty("syllabusTopicId", out var st) && st.ValueKind == JsonValueKind.String && Guid.TryParse(st.GetString(), out var g) ? g : Guid.Empty)
+        .Where(g => g != Guid.Empty));
     var classes = Model.Classes;
     // Allows deep-linking straight to the settings tab (/Assignments/Edit/{id}?tab=settings)
     var activeTab = Context.Request.Query["tab"].ToString() == "settings" ? "settings" : "questions";
@@ -30,13 +35,16 @@
         </button>
         @if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft)
         {
-            <form method="post" asp-action="Publish" asp-route-id="@a.Id" class="d-inline"
-                  onsubmit="return confirm('Assign this to your students? They can start straight away. You can still fix questions until someone submits — after the first submission the questions are locked.')">
-                @Html.AntiForgeryToken()
-                <button type="submit" class="btn btn-sm btn-primary">
-                    Assign <i class="bx bx-right-arrow-alt ms-1"></i>
-                </button>
-            </form>
+            <button type="button" class="btn btn-sm btn-primary" id="openAssignBtn"
+                    data-bs-toggle="modal" data-bs-target="#assignModal">
+                Assign <i class="bx bx-right-arrow-alt ms-1"></i>
+            </button>
+        }
+        else
+        {
+            <a href="/Assignments/Details/@a.Id" class="btn btn-sm btn-outline-primary">
+                <i class="bx bx-group me-1"></i>Students &amp; results
+            </a>
         }
     </div>
 </div>
@@ -127,6 +135,24 @@
                             renderItems.Add((kids[c], $"{t + 1}{(char)('a' + c)}", true, t));
                     }
                 }
+
+                // Marks as printed on exam papers ("[4]"); a question without marks counts as 1.
+                int MarksOf(JsonElement e)
+                {
+                    if (!e.TryGetProperty("marks", out var m)) return 1;
+                    var v = m.ValueKind == JsonValueKind.Number && m.TryGetInt32(out var n) ? n
+                          : m.ValueKind == JsonValueKind.String && int.TryParse(m.GetString(), out var s) ? s : 0;
+                    return v > 0 ? Math.Min(v, 100) : 1;
+                }
+                var totalMarks = Enumerable.Range(0, questions.Count)
+                    .Where(i => !childrenOf.ContainsKey(i))
+                    .Sum(i => MarksOf(questions[i]));
+            }
+            @if (questions.Any())
+            {
+                <div class="d-flex justify-content-end mb-2 small text-muted">
+                    <span><i class="bx bx-award me-1"></i>Total: <strong>@totalMarks</strong> @(totalMarks == 1 ? "mark" : "marks")</span>
+                </div>
             }
             <div id="questionsList">
                 @foreach (var item in renderItems)
@@ -174,6 +200,11 @@
                         ? qdh.GetString() : null;
                     var qValidationWarning = q.TryGetProperty("validationWarning", out var qvw) && qvw.ValueKind == System.Text.Json.JsonValueKind.String
                         ? qvw.GetString() : null;
+                    var qRequireDrawing = q.TryGetProperty("requireDrawing", out var rd) && rd.ValueKind == System.Text.Json.JsonValueKind.True;
+                    var qIsStem = !item.isChild && childrenOf.ContainsKey(idx);   // shared text above parts: nothing to answer or mark
+                    var qMarks = MarksOf(q);
+                    var qSyllabus = q.TryGetProperty("syllabusTopicId", out var qst) && qst.ValueKind == JsonValueKind.String
+                        && Guid.TryParse(qst.GetString(), out var qstId) && syllabusLabels.TryGetValue(qstId, out var lbl) ? lbl : null;
 
                     <div class="card mb-3 question-card @(item.isChild ? "ms-4 border-start border-primary border-3" : "")" data-index="@idx">
                         <div class="card-body">
@@ -183,8 +214,30 @@
                                         <span class="badge bg-label-secondary">Q@(item.label)</span>
                                         <span class="badge bg-label-primary">@qType</span>
                                         <span class="badge bg-label-@(qDiff=="Easy"?"success":qDiff=="Hard"?"danger":"warning")">@qDiff</span>
+                                        @if (!qIsStem)
+                                        {
+                                            <span class="badge bg-label-info" title="Marks for this question">[@qMarks @(qMarks == 1 ? "mark" : "marks")]</span>
+                                            @if (qRequireDrawing)
+                                            {
+                                                <span class="badge bg-label-warning"><i class="bx bx-pencil me-1"></i>Drawing</span>
+                                            }
+                                        }
+                                        @if (qSyllabus is not null)
+                                        {
+                                            <span class="badge bg-label-info syllabus-chip" title="Aligned to Cambridge @qSyllabus.Code: @qSyllabus.Full" data-syllabus-label>@qSyllabus.Short</span>
+                                        }
                                     </div>
-                                    <div class="fw-semibold mb-1 math-render">@qTitle</div>
+                                    @if (string.IsNullOrWhiteSpace(qTitle))
+                                    {
+                                        <div class="small text-muted fst-italic mb-1">
+                                            @(qIsStem ? "No shared text — the parts below are the question. (Optional: click Edit to add text shown above every part.)"
+                                                      : "Empty — click Edit to write this part.")
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="fw-semibold mb-1 math-render">@qTitle</div>
+                                    }
 
                                     @if (!string.IsNullOrEmpty(qImagePath))
                                     {
@@ -269,6 +322,27 @@
                                             </form>
                                         }
                                     </div>
+                                    @if (!qIsStem)
+                                    {
+                                        <div class="mt-1 d-flex align-items-center gap-2">
+                                            <div class="form-check form-switch mb-0">
+                                                <input type="checkbox" class="form-check-input" role="switch"
+                                                       id="requireDrawing_@idx" @(qRequireDrawing ? "checked" : null)
+                                                       @(canEditQuestions ? null : "disabled")
+                                                       onchange="document.getElementById('requireDrawingForm_@idx')?.submit();" />
+                                                <label class="form-check-label small text-muted" for="requireDrawing_@idx">
+                                                    Student answers by drawing (sketch pad@(string.IsNullOrEmpty(qImagePath) ? "" : " over this diagram"))
+                                                </label>
+                                            </div>
+                                            @if (canEditQuestions)
+                                            {
+                                                <form id="requireDrawingForm_@idx" method="post" asp-action="ToggleRequireDrawing" asp-route-id="@a.Id" class="d-none">
+                                                    @Html.AntiForgeryToken()
+                                                    <input type="hidden" name="index" value="@idx" />
+                                                </form>
+                                            }
+                                        </div>
+                                    }
                                     @if (canEditQuestions && !item.isChild)
                                     {
                                         <form method="post" asp-action="AddSubpoint" asp-route-id="@a.Id" class="mt-2">
@@ -399,10 +473,19 @@
                         </div>
 
                         <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label fw-semibold" for="settingsOpensInput">Opens <span class="text-muted small fw-normal">(optional)</span></label>
+                                <input type="datetime-local" class="form-control" name="availableFrom" id="settingsOpensInput"
+                                       value="@SmartSchoolAI.Services.SchoolTime.Input(a.AvailableFrom)" />
+                                <div class="form-text">Students can't start before this. Empty = straight away. Times are @SmartSchoolAI.Services.SchoolTime.Label.</div>
+                            </div>
+                        </div>
+
+                        <div class="row">
                             <div class="col-md-6 mb-3" id="settingsDeadlineGroup">
                                 <label class="form-label fw-semibold">Deadline <span class="text-danger" id="settingsDeadlineReq">*</span></label>
                                 <input type="datetime-local" class="form-control" name="deadline"
-                                       value="@(a.Deadline.HasValue ? a.Deadline.Value.ToString("yyyy-MM-ddTHH:mm") : "")"
+                                       value="@SmartSchoolAI.Services.SchoolTime.Input(a.Deadline)"
                                        id="settingsDeadlineInput" />
                             </div>
                             <div class="col-md-6 mb-3 d-flex align-items-end pb-1">
@@ -540,6 +623,24 @@
         <div class="row g-2" id="scratchTypeGrid">
             <!-- filled by JS from SCRATCH_TYPES -->
         </div>
+
+        <!-- A question in parts, as on exam papers: "3. (a) … [3] (b) … [2]" -->
+        <form method="post" asp-action="AddQuestionWithParts" asp-route-id="@a.Id"
+              class="border rounded p-3 mt-3 d-flex align-items-center gap-2 flex-wrap" id="addWithPartsForm">
+            @Html.AntiForgeryToken()
+            <i class="bx bx-list-ol fs-4 text-primary"></i>
+            <div class="flex-grow-1">
+                <div class="fw-semibold">Question with parts (a), (b) …</div>
+                <div class="small text-muted">Shared text is optional. Each part gets its own marks.</div>
+            </div>
+            <select name="parts" class="form-select form-select-sm" style="width:auto;" aria-label="Number of parts">
+                @for (var n = 2; n <= 6; n++)
+                {
+                    <option value="@n">@n parts</option>
+                }
+            </select>
+            <button type="submit" class="btn btn-sm btn-primary">Add</button>
+        </form>
 
         <!-- Import from PDF / Image -->
         <div class="border-top mt-4 pt-3 d-flex flex-column gap-2">
@@ -878,6 +979,23 @@
             </div>
         </div>
 
+        <!-- Marks and how the student answers -->
+        <div class="row g-2 mb-3 align-items-end">
+            <div class="col-4">
+                <label class="form-label fw-semibold" for="eq_marks">Marks</label>
+                <input type="number" id="eq_marks" class="form-control" min="1" max="100" step="1" value="1" />
+            </div>
+            <div class="col-8">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="eq_requireDrawing" />
+                    <label class="form-check-label" for="eq_requireDrawing">
+                        Student answers by drawing
+                        <span class="d-block small text-muted">They get a sketch pad over the question's diagram.</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
         <!-- Options (shown for Single/Multiple choice) -->
         <div id="eq_optionsSection" class="mb-3 d-none">
             <label class="form-label fw-semibold">Answer options</label>
@@ -905,6 +1023,16 @@
                 <div id="eq_answerKeyImageUploadStatus" class="small text-muted mt-1"></div>
             </div>
         </div>
+
+        <!-- Mark scheme for the AI marker -->
+        <div class="mb-4">
+            <label class="form-label fw-semibold" for="eq_markScheme">Mark scheme <span class="text-muted fw-normal small">(optional, used by the AI marker)</span></label>
+            <textarea id="eq_markScheme" class="form-control" rows="2" placeholder="e.g. M1 correct method (expands the brackets); A1 x = 3"></textarea>
+            <div class="form-text">One mark point per item. Without it the AI gives method marks for a correct method and accuracy marks for correct results.</div>
+        </div>
+
+        <!-- Optional: aligned to a published syllabus topic (teacher metadata; students do not see it) -->
+        <partial name="_SyllabusTopicPicker" model="(Guid?)null" />
 
         <div id="eq_saveError" class="d-none alert alert-danger py-2 small mb-3"></div>
 
@@ -934,10 +1062,71 @@
 </div>
 
 @section Scripts {
+<script src="~/js/syllabus-topic-picker.js" asp-append-version="true"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css">
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/contrib/auto-render.min.js"></script>
+@if (a.Status == SmartSchoolAI.Models.AssignmentStatus.Draft)
+{
+    <!-- ══ ASSIGN MODAL ══════════════════════════════════════════════════════ -->
+    <div class="modal fade" id="assignModal" tabindex="-1" aria-labelledby="assignModalTitle" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold" id="assignModalTitle">
+                        @(a.Type == SmartSchoolAI.Models.AssignmentType.Homework ? "Assign homework" : "Assign practice")
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!questions.Any())
+                    {
+                        <div class="alert alert-warning py-2 small mb-3">
+                            <i class="bx bx-info-circle me-1"></i>Add at least one question before assigning.
+                        </div>
+                    }
+                    @await Html.PartialAsync("_AssignPanel", Model.AssignPanel)
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+      // Back from a failed attempt or from inviting students: show the panel again straight away.
+      document.addEventListener('DOMContentLoaded', function () {
+        if (new URLSearchParams(location.search).get('assign') === 'open' || document.getElementById('assignError')) {
+          bootstrap.Modal.getOrCreateInstance(document.getElementById('assignModal')).show();
+        }
+      });
+    </script>
+}
+
 <script>
+// ── Keep the scroll position across this page's own reloads ─────────────────
+// Every action on a question card (the switches, Dismiss, move, duplicate, remove, add subpoint, saving in
+// the edit drawer) posts and comes back to this same page, which would otherwise open at the top and make
+// the teacher scroll back down to the question they were working on.
+(function () {
+  const key = 'assignmentEditScroll:@a.Id';
+  window.addEventListener('beforeunload', function () {
+    try { sessionStorage.setItem(key, JSON.stringify({ y: window.scrollY, at: Date.now() })); } catch (e) { /* best effort */ }
+  });
+
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem(key) || 'null'); sessionStorage.removeItem(key); } catch (e) { saved = null; }
+  // Only a reload that just happened counts; arriving here later from elsewhere starts at the top as usual.
+  if (!saved || Date.now() - saved.at > 30000 || !(saved.y > 0)) return;
+  let fromHere = false;
+  try { fromHere = new URL(document.referrer).pathname.toLowerCase() === location.pathname.toLowerCase(); } catch (e) { /* no referrer */ }
+  if (!fromHere && performance.getEntriesByType('navigation')[0]?.type !== 'reload') return;
+
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+  const restore = () => window.scrollTo(0, saved.y);
+  restore();
+  document.addEventListener('DOMContentLoaded', restore);
+  // Images and rendered maths change the page height while loading; settle on the final layout.
+  window.addEventListener('load', function () { restore(); setTimeout(restore, 150); });
+})();
+
 // crypto.randomUUID requires a secure context (HTTPS or localhost).
 // Fall back to a manual UUIDv4 generator when served over plain HTTP.
 function genUUID() {
@@ -1084,8 +1273,13 @@ function openEditDrawer(idx) {
   // Populate fields
   document.getElementById('eq_title').value      = q.title      ?? '';
   document.getElementById('eq_answerKey').value  = q.answerKey  ?? '';
+  document.getElementById('eq_markScheme').value = q.markScheme ?? '';
+  const sp = document.getElementById('syllabusPicker');
+  if (sp && window.SyllabusPicker) SyllabusPicker.mount(sp).set(q.syllabusTopicId || '');
   document.getElementById('eq_difficulty').value = q.difficulty ?? 'Medium';
   document.getElementById('eq_type').value       = String(q.type ?? 0);
+  document.getElementById('eq_marks').value      = (parseInt(q.marks, 10) > 0) ? parseInt(q.marks, 10) : 1;
+  document.getElementById('eq_requireDrawing').checked = q.requireDrawing === true;
   document.getElementById('eq_saveError').classList.add('d-none');
 
   // Populate options + math preview
@@ -1245,7 +1439,10 @@ async function eqSave() {
   if (eqCurrentIndex < 0) return;
 
   const title = document.getElementById('eq_title').value.trim();
-  if (!title) {
+  // A question with parts may have no shared text of its own (exam questions often go straight into "(a)").
+  const current = QUESTIONS_DATA[eqCurrentIndex] ?? {};
+  const hasParts = !!current.id && QUESTIONS_DATA.some(x => x.groupId === current.id);
+  if (!title && !hasParts) {
     const err = document.getElementById('eq_saveError');
     err.textContent = 'Question text is required.';
     err.classList.remove('d-none');
@@ -1255,8 +1452,11 @@ async function eqSave() {
   const type       = parseInt(document.getElementById('eq_type').value);
   const difficulty = document.getElementById('eq_difficulty').value;
   const answerKey  = document.getElementById('eq_answerKey').value.trim();
+  const markScheme = document.getElementById('eq_markScheme').value.trim();
   const options    = Array.from(document.querySelectorAll('#eq_optionsList .eq-option'))
                          .map(i => i.value.trim()).filter(Boolean);
+  const marks      = Math.min(100, Math.max(1, parseInt(document.getElementById('eq_marks').value, 10) || 1));
+  const requireDrawing = document.getElementById('eq_requireDrawing').checked;
 
   // Preserve fields this form doesn't expose — an id/groupId/requireWork
   // dropped here would silently un-group a subpoint or reset its toggle.
@@ -1271,6 +1471,12 @@ async function eqSave() {
     imagePath:          eqImagePath,
     answerKeyImagePath: eqAnswerKeyImagePath,
     requireWork:        original.requireWork ?? false,
+    marks,
+    requireDrawing,
+    markScheme:         markScheme || null,
+    syllabusTopicId:    (window.SyllabusPicker && document.getElementById('syllabusPicker'))
+                          ? SyllabusPicker.mount(document.getElementById('syllabusPicker')).get() : (original.syllabusTopicId ?? null),
+    explanation:        original.explanation ?? null,
     groupId:            original.groupId ?? null,
     // A diagram hint is only useful until the real image is attached; a
     // validation warning is only useful until the teacher has reviewed and
@@ -1617,6 +1823,8 @@ function pdfBuildReviewList() {
           <span class="badge bg-${badge}">${q.type}</span>
           <span class="badge bg-light text-dark">${q.difficulty ?? 'Medium'}</span>
           ${q.number ? '<span class="text-muted small">Q' + q.number + (q.groupKey && q.part ? '(' + pdfEscapeHtml(q.part) + ')' : '') + '</span>' : ''}
+          ${q.marks > 0 ? '<span class="badge bg-label-info">[' + q.marks + (q.marks == 1 ? ' mark' : ' marks') + ']</span>' : ''}
+          ${q.needsDrawing ? '<span class="badge bg-label-warning"><i class="bx bx-pencil me-1"></i>drawing</span>' : ''}
           ${q.groupKey ? '<span class="badge bg-label-success">part of a shared question</span>' : ''}
         </div>
         ${q.groupKey && q.stem ? '<div class="small text-muted border-start ps-2 mb-1">Shared: ' + pdfEscapeHtml(q.stem) + '</div>' : ''}
@@ -1666,14 +1874,15 @@ async function pdfAddSelected() {
   for (const q of toAdd) {
     // Parts the import clearly identified share one parent question (the stem and its diagram), added once
     // before the first part. Questions the import was unsure about were not grouped and are added as listed.
+    // A question that goes straight into "(a)" has no stem; its parent then carries no text of its own.
     let groupId = null;
-    if (q.groupKey && q.stem) {
+    if (q.groupKey) {
       if (!sharedParents[q.groupKey]) {
         const sharedHint = toAdd.filter(p => p.groupKey === q.groupKey && p.hasDiagram).map(p => p.diagramHint).find(Boolean) ?? '';
         sharedParents[q.groupKey] = genUUID();
         await addQuestionJson({
           id:         sharedParents[q.groupKey],
-          title:      q.stem,
+          title:      q.stem ?? '',
           type:       0,
           difficulty: q.difficulty ?? 'Medium',
           answerKey:  '',
@@ -1693,6 +1902,8 @@ async function pdfAddSelected() {
       difficulty:        q.difficulty ?? 'Medium',
       answerKey:         q.answerKey ?? '',
       options:           q.options ?? [],
+      marks:             q.marks > 0 ? q.marks : 1,
+      requireDrawing:    q.needsDrawing === true,
       diagramHint:       (q.hasDiagram && !groupId) ? (q.diagramHint ?? '') : null,   // a shared diagram belongs to the shared question
       validationWarning: q.validationWarning ?? null
     };
