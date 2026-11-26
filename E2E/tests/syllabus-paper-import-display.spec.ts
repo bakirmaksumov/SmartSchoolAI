@@ -11,6 +11,9 @@ import { assignTo, createClass, createDraftAssignment, signIn, signInAs, unique 
 // It runs after syllabus-display.spec.ts (file order): the 9709 2026–2027 syllabus it needs is either the real one that
 // spec imported or, when that one is skipped, the generated one imported here.
 test.describe.configure({ mode: "serial" });
+// Publishing the syllabus needs the seeded admin; the container run registers its accounts through the UI and has
+// none, so there this spec is skipped (cambridge-answer-checks-display.spec.ts covers the import without an admin).
+test.skip(!process.env.E2E_ADMIN_PASSWORD, "Needs the seeded admin account (E2E_ADMIN_PASSWORD) to publish the syllabus.");
 
 const mockAi = process.env.E2E_MOCK_AI_URL ?? `http://127.0.0.1:${process.env.E2E_MOCK_AI_PORT ?? 5199}`;
 const shots = process.env.E2E_SHOT_DIR;
