@@ -43,12 +43,45 @@
       </h4>
     }
   </div>
-  <div class="col-auto">
+  <div class="col-auto d-flex flex-wrap gap-2">
     <a href="/ContentLibrary/Create@(pickerMode ? $"?assignmentId={assignmentId}" : "")" class="btn btn-primary">
       <i class="bx bx-plus me-1"></i> @(pickerMode ? "Create new question" : "Add Question")
     </a>
+    @if (!pickerMode)
+    {
+      <a href="/CambridgeImport" class="btn btn-outline-primary" id="importCambridgeBtn">
+        <i class="bx bx-file me-1" aria-hidden="true"></i> Import Cambridge Paper
+      </a>
+    }
   </div>
 </div>
+
+@if (!pickerMode && ViewBag.CambridgeDrafts is List<SmartSchoolAI.Models.CambridgeImport> { Count: > 0 } drafts)
+{
+  <div class="card mb-4 border-primary-subtle" id="cambridgeDrafts">
+    <div class="card-body py-3">
+      <h6 class="mb-2"><i class="bx bx-time-five me-1" aria-hidden="true"></i>Cambridge paper imports in progress</h6>
+      <ul class="list-unstyled mb-0">
+        @foreach (var d in drafts)
+        {
+          var lastStep = d.LastCompletedStep == 0 ? "Not started yet" : $"Last completed: {SmartSchoolAI.Controllers.CambridgeImportController.StepNames[Math.Min(d.LastCompletedStep, 4) - 1]}";
+          <li class="d-flex flex-wrap align-items-center gap-2 py-1 border-top" data-draft="@d.Id">
+            <span class="fw-semibold me-auto">@d.Label <span class="text-muted fw-normal small">· @d.PaperFileName</span></span>
+            <span class="small text-muted" data-draft-step>@lastStep</span>
+            <a class="btn btn-sm btn-primary" href="/CambridgeImport/@d.Id/@SmartSchoolAI.Controllers.CambridgeImportController.ContinueAction(d)">Continue import</a>
+          </li>
+        }
+      </ul>
+    </div>
+  </div>
+}
+@if (ViewBag.CambridgeImportFilter is string importLabel)
+{
+  <div class="alert alert-info d-flex flex-wrap align-items-center gap-2" id="importedFilter">
+    <span class="me-auto">Showing the questions saved from <strong>@importLabel</strong>.</span>
+    <a href="/ContentLibrary" class="btn btn-sm btn-outline-secondary">Show all questions</a>
+  </div>
+}
 
 <!-- Filters -->
 <div class="card mb-4">
@@ -235,7 +268,7 @@ else
             };
             <tr>
               <td>
-                <div class="fw-semibold">@q.Title</div>
+                <div class="fw-semibold math-text" data-question-title>@q.Title</div>
                 @if (!string.IsNullOrEmpty(q.Explanation))
                 {
                   <small class="text-muted">
@@ -261,12 +294,26 @@ else
                 {
                   <span class="badge bg-label-info syllabus-chip d-inline-block mt-1" title="Aligned to Cambridge @sl.Code: @sl.Full" data-syllabus-label>@sl.Short</span>
                 }
+                @if (q.SourceLabel is not null)
+                {
+                  // "9709/11 · May/June 2024 · Q11(b)" → the paper on one line, the question and its marks on the next.
+                  var sourceParts = q.SourceLabel.Split(" · ");
+                  var sourceQuestion = sourceParts.Length > 1 && sourceParts[^1].StartsWith("Q") ? sourceParts[^1][1..] : null;
+                  var sourcePaper = sourceQuestion is null ? q.SourceLabel : string.Join(" · ", sourceParts[..^1]);
+                  <div class="lib-source mt-1" data-source-label title="From @q.SourceLabel">
+                    <div class="lib-source-paper">@sourcePaper</div>
+                    @if (sourceQuestion is not null || q.Marks is > 0)
+                    {
+                      <div class="lib-source-question">@(sourceQuestion is null ? "" : $"Question {sourceQuestion}")@(sourceQuestion is not null && q.Marks is > 0 ? " · " : "")@(q.Marks is > 0 ? $"{q.Marks} mark{(q.Marks == 1 ? "" : "s")}" : "")</div>
+                    }
+                  </div>
+                }
               </td>
               <td>
                 <span class="badge bg-label-@diffColor">@diffEmoji @diffLabel</span>
               </td>
               <td>
-                <code class="text-success fw-semibold small">@q.AnswerKey</code>
+                <span class="text-success fw-semibold small math-text" data-answer-key>@q.AnswerKey</span>
               </td>
               <td>
                 <div class="d-flex gap-1 align-items-center">
@@ -304,6 +351,9 @@ else
   </div>
 }
 
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" crossorigin="anonymous"></script>
+<script src="~/js/math-text.js" asp-append-version="true"></script>
+<script src="~/js/math-display.js" asp-append-version="true"></script>
 <script>
   // Syllabus filters narrow step by step: changing the syllabus or component clears the narrower choices, then applies.
   document.querySelectorAll('#libraryFilters select[name^="syllabus"]').forEach(sel => sel.addEventListener('change', () => {

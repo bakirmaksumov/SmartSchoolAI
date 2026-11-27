@@ -1,0 +1,40 @@
+@model SmartSchoolAI.Models.CambridgeImport
+@using SmartSchoolAI.Models
+@{
+    ViewData["Title"] = "Import Cambridge Paper · Finish";
+    var saved = Model.Parts.Count(p => p.Status == ImportPartStatus.Saved);
+    var waiting = Model.Parts.Count(p => p.Status != ImportPartStatus.Saved);
+    var needs = Model.Parts.Count(p => p.Status == ImportPartStatus.NeedsReview || p.PendingReplacement != null);
+    int? justSaved = ViewBag.JustSaved;
+    int? alreadySaved = ViewBag.AlreadySaved;
+}
+<partial name="_Header" model="Model" />
+<partial name="_Stepper" model="Model" />
+
+<div class="card mb-4" id="finishSummary">
+  <div class="card-body">
+    <h5 class="card-title"><i class="bx bx-check-circle text-success me-1" aria-hidden="true"></i>Saved to your Content Library</h5>
+    <p class="fs-5 mb-1" id="finishCounts"><strong>@saved</strong> part@(saved == 1 ? "" : "s") saved · <strong>@waiting</strong> waiting for review</p>
+    @if (justSaved is not null)
+    {
+      <p class="small text-muted mb-1" id="finishThisTime">
+        This time: @justSaved new@(alreadySaved is > 0 ? $", {alreadySaved} already in your library (not saved twice)" : "").
+      </p>
+    }
+    @if (needs > 0) { <p class="small text-warning mb-1">@needs part@(needs == 1 ? "" : "s") still need@(needs == 1 ? "s" : "") your review.</p> }
+    <p class="small text-muted mb-3">Each saved part keeps its question text, shared stem and figure, marks, Cambridge topic, answer key and marking criteria. Add them to an assignment from the Content Library as usual.</p>
+    <div class="d-flex flex-wrap gap-2">
+      <a class="btn btn-primary" href="/ContentLibrary?cambridgeImport=@Model.Id" id="viewQuestions"><i class="bx bx-list-ul me-1" aria-hidden="true"></i>View questions</a>
+      @if (waiting > 0)
+      {
+        <a class="btn btn-outline-primary" href="/CambridgeImport/@Model.Id/Review?filter=open" id="continueReview">Continue review</a>
+      }
+    </div>
+  </div>
+</div>
+
+<div class="ci-actionbar">
+  <a href="/CambridgeImport/@Model.Id/Review" class="btn btn-outline-secondary"><i class="bx bx-arrow-back me-1" aria-hidden="true"></i>Back</a>
+  <span class="me-auto"></span>
+  <a href="/ContentLibrary" class="btn btn-outline-primary">Content Library</a>
+</div>

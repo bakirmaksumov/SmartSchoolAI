@@ -39,6 +39,8 @@ public class AppDbContext : DbContext
     public DbSet<SyllabusVersion>   SyllabusVersions   { get; set; }
     public DbSet<SyllabusComponent> SyllabusComponents { get; set; }
     public DbSet<SyllabusTopic>     SyllabusTopics     { get; set; }
+    public DbSet<CambridgeImport>     CambridgeImports     { get; set; }
+    public DbSet<CambridgeImportPart> CambridgeImportParts { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -90,6 +92,7 @@ public class AppDbContext : DbContext
         ConfigureAuditLog(modelBuilder);
         ConfigureQuestion(modelBuilder);
         ConfigureSyllabus(modelBuilder);
+        ConfigureCambridgeImport(modelBuilder);
         ConfigureStudentAnswer(modelBuilder);
         ConfigureAssignmentStudent(modelBuilder);
         ConfigureLateJoinRequest(modelBuilder);
@@ -392,6 +395,13 @@ public class AppDbContext : DbContext
             e.HasIndex(q => q.SyllabusTopicId);
             // Optional link; a topic that still has questions cannot be removed from the library.
             e.HasOne(q => q.SyllabusTopic).WithMany().HasForeignKey(q => q.SyllabusTopicId).OnDelete(DeleteBehavior.Restrict);
+            e.Property(q => q.SourceKey).HasMaxLength(300);
+            e.Property(q => q.SourceGroupKey).HasMaxLength(300);
+            e.Property(q => q.SourceLabel).HasMaxLength(200);
+            e.Property(q => q.ImagePath).HasMaxLength(300);
+            // A source subpart is saved once per owner; a deleted copy does not block saving it again.
+            e.HasIndex(q => new { q.CreatedByEmail, q.SourceKey }).IsUnique()
+             .HasFilter("\"SourceKey\" IS NOT NULL AND \"DeletedAt\" IS NULL");
             e.HasQueryFilter(q => q.DeletedAt == null);
         });
     }
@@ -429,6 +439,42 @@ public class AppDbContext : DbContext
             e.Property(t => t.Number).HasMaxLength(20);
             e.HasIndex(t => new { t.ComponentId, t.Order });
             e.HasOne(t => t.Component).WithMany(c => c.Topics).HasForeignKey(t => t.ComponentId).OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    private static void ConfigureCambridgeImport(ModelBuilder mb)
+    {
+        mb.Entity<CambridgeImport>(e =>
+        {
+            e.Property(x => x.OwnerEmail).HasMaxLength(256).IsRequired();
+            e.Property(x => x.SyllabusCode).HasMaxLength(10).IsRequired();
+            e.Property(x => x.Variant).HasMaxLength(4);
+            e.Property(x => x.Session).HasMaxLength(40);
+            e.Property(x => x.Subject).HasMaxLength(100);
+            e.Property(x => x.PaperFileName).HasMaxLength(260);
+            e.Property(x => x.PaperSha256).HasMaxLength(64);
+            e.Property(x => x.MarkSchemeFileName).HasMaxLength(260);
+            e.Property(x => x.MarkSchemeSha256).HasMaxLength(64);
+            e.Property(x => x.PaperStage).HasConversion<string>().HasMaxLength(20);
+            e.Property(x => x.MarkSchemeStage).HasConversion<string>().HasMaxLength(20);
+            e.Ignore(x => x.PaperCode);
+            e.Ignore(x => x.Label);
+            // The same paper uploaded again by the same teacher opens that teacher's import; other teachers get their own.
+            e.HasIndex(x => new { x.OwnerId, x.PaperSha256 }).IsUnique().HasFilter("\"DeletedAt\" IS NULL");
+            e.HasQueryFilter(x => x.DeletedAt == null);
+        });
+        mb.Entity<CambridgeImportPart>(e =>
+        {
+            e.Property(x => x.Number).HasMaxLength(30).IsRequired();
+            e.Property(x => x.Kind).HasMaxLength(20);
+            e.Property(x => x.TopicSource).HasMaxLength(20);
+            e.Property(x => x.FigureKey).HasMaxLength(40);
+            e.Property(x => x.SchemePages).HasMaxLength(40);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(20);
+            e.HasIndex(x => new { x.ImportId, x.Number }).IsUnique();
+            e.HasOne(x => x.Import).WithMany(i => i.Parts).HasForeignKey(x => x.ImportId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.SyllabusTopic).WithMany().HasForeignKey(x => x.SyllabusTopicId).OnDelete(DeleteBehavior.Restrict);
+            e.HasQueryFilter(x => x.Import.DeletedAt == null);
         });
     }
 

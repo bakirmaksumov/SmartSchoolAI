@@ -76,4 +76,34 @@ public class Question : BaseEntity
     /// </summary>
     public Guid?          SyllabusTopicId { get; set; }
     public SyllabusTopic? SyllabusTopic   { get; set; }
+
+    // ── Exam-paper questions (e.g. imported from a Cambridge paper). All optional; ordinary questions leave them empty.
+
+    /// <summary>The question's shared text that this part depends on (the stem before "(a)"). Shown above the part,
+    /// and as the shared question when it is added to an assignment.</summary>
+    public string? Stem { get; set; }
+
+    /// <summary>The figure the question uses, stored privately (see <c>LibraryFileStorage</c>); web path.</summary>
+    public string? ImagePath { get; set; }
+
+    /// <summary>Marks available, as printed on the paper ("[4]").</summary>
+    public int? Marks { get; set; }
+
+    /// <summary>Marking criteria for the marker (M1/A1/B1, dependencies, alternative methods, guidance).</summary>
+    public string? MarkScheme { get; set; }
+
+    /// <summary>Where the question came from, e.g. "9709/01 · Specimen 2027 · Q10(b)(i)". Teacher-facing only.</summary>
+    public string? SourceLabel { get; set; }
+
+    /// <summary>Identity of the source subpart within its owner's library ("9709/01/Specimen/2027/{sha}#10(b)(i)"), so
+    /// saving the same part twice never makes a duplicate. Unique per owner; another teacher has their own copy.</summary>
+    public string? SourceKey { get; set; }
+
+    /// <summary>Questions of one source question share this key ("…#10"), so parts added to the same assignment sit
+    /// under one shared question with the stem and figure shown once.</summary>
+    public string? SourceGroupKey { get; set; }
+
+    /// <summary>The student answers by drawing on the sketch pad (e.g. "Sketch the graph of y = f⁻¹(x) on this
+    /// diagram"); carried to the assignment question's "requireDrawing".</summary>
+    public bool RequireDrawing { get; set; }
 }

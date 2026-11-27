@@ -1,0 +1,44 @@
+@model SmartSchoolAI.Models.CambridgeImport
+@using SmartSchoolAI.Controllers
+@{
+    int current = ViewBag.Step ?? 1;
+    // A step can be opened when it is done or is the next one; later steps are not links yet.
+    string? UrlFor(int step) => step switch
+    {
+        1 => $"/CambridgeImport/{Model.Id}/Paper",
+        2 when Model.PaperStage == SmartSchoolAI.Models.ImportStage.Done => $"/CambridgeImport/{Model.Id}/MarkScheme",
+        3 when Model.MarkSchemeStage == SmartSchoolAI.Models.ImportStage.Done => $"/CambridgeImport/{Model.Id}/Review",
+        4 when Model.LastCompletedStep >= 3 => $"/CambridgeImport/{Model.Id}/Finish",
+        _ => null,
+    };
+}
+<link rel="stylesheet" href="~/css/cambridge-import.css" asp-append-version="true" />
+<nav aria-label="Import steps">
+  <ol class="ci-stepper" id="importSteps">
+    @for (var s = 1; s <= 4; s++)
+    {
+      var done = s < 4 ? Model.LastCompletedStep >= s : Model.LastCompletedStep >= 3 && !Model.Parts.Any(p => p.Status != SmartSchoolAI.Models.ImportPartStatus.Saved) && current == 4;
+      var isCurrent = s == current;
+      var url = isCurrent ? null : UrlFor(s);
+      if (s > 1) { <li class="ci-step-line @(Model.LastCompletedStep >= s - 1 ? "is-done" : "")" aria-hidden="true"></li> }
+      <li class="ci-step @(isCurrent ? "is-current" : done ? "is-done" : "")" data-step="@s" @(isCurrent ? "aria-current=step" : null)>
+        @{
+          var mark = done && !isCurrent ? Html.Raw("<i class=\"bx bx-check\" aria-hidden=\"true\"></i>") : Html.Raw(s.ToString());
+          var state = isCurrent ? "current step" : done ? "completed" : "not started";
+        }
+        @if (url is not null)
+        {
+          <a href="@url"><span class="ci-step-mark">@mark</span> <span class="ci-step-name">@CambridgeImportController.StepNames[s - 1]</span><span class="visually-hidden"> (@state)</span></a>
+        }
+        else
+        {
+          <span class="ci-step-mark">@mark</span> <span class="ci-step-name">@CambridgeImportController.StepNames[s - 1]</span><span class="visually-hidden"> (@state)</span>
+        }
+      </li>
+    }
+  </ol>
+</nav>
+@if (TempData["Info"] is string info)
+{
+  <div class="alert alert-info" id="importInfo"><i class="bx bx-info-circle me-1" aria-hidden="true"></i>@info</div>
+}

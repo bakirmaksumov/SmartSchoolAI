@@ -226,7 +226,10 @@ test("submitting marks the drawing from the picture and weighs every question by
   await submitAssignment(student);
   await expect(student).toHaveURL(/AssignmentResult/, { timeout: 60_000 });
 
-  // What the model was asked: the shared text and the part, the marks, and the picture.
+  // What the model was asked: the shared text and the part, the marks, and the picture. The AI marks after the
+  // submission is saved, so its calls may arrive just after the result page.
+  await expect.poll(async () => (await seen("sketch")).length, { timeout: 30_000 }).toBe(1);
+  await expect.poll(async () => (await seen("answer")).length, { timeout: 30_000 }).toBe(1);
   const sketchCalls = await seen("sketch");
   expect(sketchCalls).toHaveLength(1);
   expect(sketchCalls[0].user).toContain("The diagram shows the graph");

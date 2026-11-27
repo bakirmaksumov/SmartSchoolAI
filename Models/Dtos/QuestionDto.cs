@@ -107,6 +107,11 @@ public class QuestionDto
     /// </summary>
     [JsonPropertyName("syllabusTopicId")]
     public Guid? SyllabusTopicId { get; set; }
+
+    /// <summary>On a shared question added from the Content Library: which source question it stands for (see
+    /// <see cref="Question.SourceGroupKey"/>), so further parts of it join it instead of repeating the stem.</summary>
+    [JsonPropertyName("sourceGroup")]
+    public string? SourceGroup { get; set; }
 }
 
 /// <summary>

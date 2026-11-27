@@ -1,0 +1,122 @@
+@model SmartSchoolAI.Models.CambridgeImport
+@using SmartSchoolAI.Models
+@using SmartSchoolAI.Services
+@inject CambridgeImportService Imports
+@{
+    ViewData["Title"] = "Import Cambridge Paper · Mark Scheme";
+    var scheme = CambridgeImportService.SchemeDetailsOf(Model);
+    var paper = Imports.PaperDetailsOf(Model);
+    var (ready, conflicts, needsOk) = Imports.SchemeReadiness(Model);
+    var running = Model.MarkSchemeStage == ImportStage.Running;
+    var unused = Model.MarkSchemeStage == ImportStage.Done ? CambridgeImportService.UnusedRows(Model) : new List<string>();
+    string Show(string? v) => string.IsNullOrWhiteSpace(v) ? "not readable" : v;
+}
+<partial name="_Header" model="Model" />
+<partial name="_Stepper" model="Model" />
+
+<div class="card mb-4">
+  <div class="card-body">
+    <h5 class="card-title">Mark Scheme</h5>
+    <p class="small text-muted mb-3">
+      The mark scheme for <strong>@Model.Label</strong>. Its code, session, component and variant are checked against
+      the Question Paper before anything is matched. Criteria are linked to subparts by their full number, so the
+      order of pages and rows does not matter.
+    </p>
+
+    @if (scheme is not null)
+    {
+      <div class="table-responsive mb-3">
+        <table class="table table-sm mb-0" id="detailsCompare">
+          <thead class="table-light"><tr><th>Detail</th><th>Question Paper</th><th>Mark Scheme (@Model.MarkSchemeFileName)</th></tr></thead>
+          <tbody>
+            @foreach (var (label, a, b) in new[] {
+              ("Syllabus code", paper.Code, scheme.Code), ("Component", paper.Component?.ToString(), scheme.Component?.ToString()),
+              ("Variant", paper.Variant ?? (paper.Session == "Specimen" ? "—" : null), scheme.Variant ?? (scheme.Session == "Specimen" ? "—" : null)),
+              ("Session", paper.Session, scheme.Session), ("Year", paper.Year?.ToString(), scheme.Year?.ToString()) })
+            {
+              var bad = conflicts.Any(c => c.Field == label);
+              <tr class="@(bad ? "table-danger" : "")" data-detail="@label">
+                <th scope="row" class="fw-normal">@label</th>
+                <td>@Show(a)</td>
+                <td>@Show(b) @if (bad) { <span class="badge bg-danger ms-1">differs</span> } else if (b is null) { <span class="badge bg-label-warning ms-1">check</span> }</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+
+    @if (conflicts.Count > 0)
+    {
+      <div class="alert alert-danger" id="schemeConflict" role="alert">
+        <strong>This mark scheme is for a different paper.</strong>
+        @string.Join("; ", conflicts.Select(c => $"{c.Field}: paper {c.Paper}, mark scheme {c.Scheme}")).
+        Nothing was matched. Replace the PDF with the mark scheme for @Model.Label.
+      </div>
+    }
+    else if (needsOk)
+    {
+      <div class="alert alert-warning" id="schemeUnreadable" role="alert">
+        Some details of this mark scheme could not be read from the document. Check them against the paper, then confirm.
+        <form method="post" action="/CambridgeImport/@Model.Id/ConfirmScheme" class="mt-2">
+          @Html.AntiForgeryToken()
+          <button class="btn btn-sm btn-warning" id="confirmSchemeDetails">This mark scheme belongs to @Model.Label — read it</button>
+        </form>
+      </div>
+    }
+
+    @if (running)
+    {
+      <div class="d-flex align-items-center gap-3 mb-3" id="schemeStatus" data-poll="markScheme" data-import="@Model.Id" role="status" aria-live="polite">
+        <span class="spinner-border text-primary" aria-hidden="true"></span>
+        <div><div class="fw-semibold">Reading the Mark Scheme and matching it to the parts…</div>
+          <div class="small text-muted">You can leave this page; the draft is saved.</div></div>
+      </div>
+    }
+    else if (Model.MarkSchemeStage == ImportStage.Failed)
+    {
+      <div class="alert alert-danger d-flex flex-wrap align-items-center gap-2" id="schemeError" role="alert">
+        <span class="me-auto"><i class="bx bx-error-circle me-1" aria-hidden="true"></i>@Model.MarkSchemeError
+          <span class="d-block small">The Question Paper reading is kept; only the mark scheme is read again.</span></span>
+        <form method="post" action="/CambridgeImport/@Model.Id/RetryMarkScheme">@Html.AntiForgeryToken()<button class="btn btn-sm btn-danger" id="retryScheme">Try again</button></form>
+      </div>
+    }
+    else if (Model.MarkSchemeStage == ImportStage.Done)
+    {
+      var matched = Model.Parts.Count(p => p.Status is ImportPartStatus.Matched or ImportPartStatus.Confirmed or ImportPartStatus.Saved);
+      var review = Model.Parts.Count(p => p.Status == ImportPartStatus.NeedsReview);
+      <div class="alert alert-success" id="schemeSummary" role="status">
+        <i class="bx bx-check-circle me-1" aria-hidden="true"></i>
+        Matched <strong data-matched>@matched</strong> of @Model.Parts.Count parts · <strong data-needs-review>@review</strong> need@(review == 1 ? "s" : "") review.
+        @if (unused.Count > 0) { <span class="d-block small">Mark scheme rows that match no part: @string.Join(", ", unused).</span> }
+      </div>
+    }
+
+    @if (!running)
+    {
+      <form method="post" action="/CambridgeImport/@Model.Id/MarkScheme" enctype="multipart/form-data" id="schemeUploadForm" class="row g-2 align-items-end">
+        @Html.AntiForgeryToken()
+        <div class="col-md-8">
+          <label class="form-label" for="schemeFile">@(scheme is null ? "Mark Scheme (PDF)" : "Replace the Mark Scheme (PDF)")</label>
+          <input class="form-control" type="file" id="schemeFile" name="markScheme" accept="application/pdf,.pdf" required />
+        </div>
+        <div class="col-md-4"><button type="submit" class="btn btn-@(scheme is null ? "primary" : "outline-primary") w-100" id="uploadScheme">
+          <i class="bx bx-upload me-1" aria-hidden="true"></i>@(scheme is null ? "Read the mark scheme" : "Replace PDF")</button></div>
+      </form>
+    }
+  </div>
+</div>
+
+<div class="ci-actionbar">
+  <a href="/CambridgeImport/@Model.Id/Paper" class="btn btn-outline-secondary"><i class="bx bx-arrow-back me-1" aria-hidden="true"></i>Back</a>
+  <span class="me-auto"></span>
+  <form method="post" action="/CambridgeImport/@Model.Id/Later">@Html.AntiForgeryToken()<button class="btn btn-outline-primary" id="saveDraftLater">Save draft &amp; finish later</button></form>
+  @if (Model.MarkSchemeStage == ImportStage.Done)
+  {
+    <a href="/CambridgeImport/@Model.Id/Review" class="btn btn-primary" id="continueToReview">Review answer keys <i class="bx bx-right-arrow-alt ms-1" aria-hidden="true"></i></a>
+  }
+</div>
+
+@section Scripts {
+  <partial name="_ImportScripts" />
+}

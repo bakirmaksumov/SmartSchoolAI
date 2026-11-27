@@ -3,4 +3,7 @@
 .sp-option { padding: .45rem .5rem; border-radius: .375rem; cursor: pointer; line-height: 1.3; }
 .sp-option:hover, .sp-option.active { background: rgba(105, 108, 255, .12); }
 .sp-option.active { outline: 2px solid rgba(105, 108, 255, .45); outline-offset: -2px; }
-.syllabus-chip { font-size: .72rem; font-weight: 500; white-space: normal; text-align: left; text-transform: none; }
+.syllabus-chip { font-size: .72rem; font-weight: 500; white-space: normal; text-align: left; text-transform: none; line-height: 1.35; }
+/* Where a library question came from (Cambridge paper import): paper, then question and marks */
+.lib-source { font-size: .75rem; line-height: 1.35; color: #697a8d; border-left: 2px solid #d9dee3; padding-left: .4rem; max-width: 12rem; }
+.lib-source-paper { font-weight: 600; color: #566a7f; }

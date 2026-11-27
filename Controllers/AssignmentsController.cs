@@ -1715,35 +1715,8 @@ public class AssignmentsController : Controller
 
         var list = JsonSerializer.Deserialize<List<JsonElement>>(assignment.Questions ?? "[]")
                    ?? new List<JsonElement>();
-
-        // Track existing question IDs to avoid duplicates
-        var existingIds = new HashSet<string>();
-        foreach (var existing in list)
-        {
-            if (existing.TryGetProperty("id", out var idProp))
-                existingIds.Add(idProp.ToString());
-        }
-
-        int added = 0;
-        foreach (var q in questions)
-        {
-            if (existingIds.Contains(q.Id.ToString()))
-                continue;
-
-            var qObj = new
-            {
-                id         = q.Id,
-                title      = q.Title,
-                type       = (int)q.Type,
-                difficulty = q.Difficulty.ToString(),
-                answerKey  = q.AnswerKey,
-                options    = JsonSerializer.Deserialize<List<string>>(q.Options) ?? new List<string>(),
-                syllabusTopicId = q.SyllabusTopicId   // the teacher's "Aligned to Cambridge" link travels with the question
-            };
-            using var doc = JsonDocument.Parse(JsonSerializer.Serialize(qObj));
-            list.Add(doc.RootElement.Clone());
-            added++;
-        }
+        // Same path as the library's own "Add to assignment": an exam part comes with its shared stem and figure.
+        var added = await LibraryToAssignment.AddAsync(_env, assignment.Id, list, questions);
 
         assignment.Questions = JsonSerializer.Serialize(list);
         assignment.UpdatedAt = DateTime.UtcNow;

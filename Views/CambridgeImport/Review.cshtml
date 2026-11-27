@@ -1,0 +1,264 @@
+@model SmartSchoolAI.Models.CambridgeImport
+@using SmartSchoolAI.Models
+@using SmartSchoolAI.Services
+@{
+    ViewData["Title"] = "Import Cambridge Paper · Review answer keys";
+    string filter = ViewBag.Filter ?? "all";
+    var part = ViewBag.Part as CambridgeImportPart;
+    var figures = ViewBag.Figures as HashSet<string> ?? new();
+    var needs = Model.Parts.Where(p => p.Status == ImportPartStatus.NeedsReview || p.PendingReplacement != null).ToList();
+    var shown = filter switch
+    {
+        "needs" => needs,
+        "open"  => Model.Parts.Where(p => p.Status != ImportPartStatus.Saved).ToList(),
+        _       => Model.Parts,
+    };
+    var confirmed = Model.Parts.Count(p => p.Status == ImportPartStatus.Confirmed);
+    var matchedRows = shown.Where(p => p.Status == ImportPartStatus.Matched && p.PendingReplacement == null).ToList();
+    var matchable = Model.Parts.Where(p => p.Status == ImportPartStatus.Matched && p.PendingReplacement == null && p.FormatQuestion == null).Select(p => p.Id).ToList();
+    string Short(string? s) => string.IsNullOrWhiteSpace(s) ? "" : s.Length <= 90 ? s : s[..90] + " …";
+    string StatusText(CambridgeImportPart p) => p.PendingReplacement != null ? "Needs review" : p.Status switch
+    {
+        ImportPartStatus.Matched => "Matched", ImportPartStatus.NeedsReview => "Needs review", ImportPartStatus.Confirmed => "Confirmed",
+        ImportPartStatus.Saved => "Saved", _ => "Recognised",
+    };
+    string StatusBadge(CambridgeImportPart p) => StatusText(p) switch
+    {
+        "Matched" => "bg-label-success", "Needs review" => "bg-label-warning", "Confirmed" => "bg-label-primary", "Saved" => "bg-label-secondary", _ => "bg-label-info",
+    };
+    string StatusIcon(CambridgeImportPart p) => StatusText(p) switch
+    {
+        "Matched" => "bx-check-circle", "Needs review" => "bx-error", "Confirmed" => "bx-check-double", "Saved" => "bx-archive", _ => "bx-circle",
+    };
+    string Link(CambridgeImportPart p) => $"/CambridgeImport/{Model.Id}/Review?part={p.Id}" + (filter == "all" ? "" : $"&filter={filter}");
+    var pending = part is null ? null : CambridgeImportService.PendingOf(part);
+}
+<partial name="_Header" model="Model" />
+<partial name="_Stepper" model="Model" />
+
+<div class="d-flex flex-wrap align-items-end gap-2 mb-3">
+  <h5 class="mb-0 me-auto">Review answer keys</h5>
+</div>
+<ul class="nav nav-tabs mb-3" id="reviewTabs">
+  <li class="nav-item"><a class="nav-link @(filter == "all" ? "active" : "")" @(filter == "all" ? "aria-current=page" : null) href="/CambridgeImport/@Model.Id/Review@(part is null ? "" : $"?part={part.Id}")">All parts (@Model.Parts.Count)</a></li>
+  <li class="nav-item"><a class="nav-link @(filter == "needs" ? "active" : "")" @(filter == "needs" ? "aria-current=page" : null) href="/CambridgeImport/@Model.Id/Review?filter=needs" id="needsReviewTab">Needs review (@needs.Count)</a></li>
+</ul>
+
+<div class="ci-review @(part is null ? "" : "has-part")">
+  <!-- List -->
+  <div class="card ci-list">
+    <form method="post" action="/CambridgeImport/@Model.Id/ConfirmMatched" id="bulkForm"
+          data-import="@Model.Id" data-matchable="@string.Join(",", matchable)">
+      @Html.AntiForgeryToken()
+      <input type="hidden" name="filter" value="@filter" />
+      <div class="table-responsive">
+        <table class="table table-sm ci-list-table mb-0" id="partList">
+          <thead class="table-light">
+            <tr>
+              <th scope="col" style="width:2rem">
+                @if (matchedRows.Count > 0) { <input class="form-check-input" type="checkbox" id="selectAllMatched" aria-label="Select all matched parts" /> }
+              </th>
+              <th scope="col">Part</th><th scope="col">Topic</th><th scope="col" class="text-end">Marks</th><th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            @if (shown.Count == 0)
+            {
+              <tr><td colspan="5" class="text-muted small py-3" id="emptyFilter">Nothing needs review. Switch to All parts to see everything.</td></tr>
+            }
+            @foreach (var p in shown)
+            {
+              var canBulk = p.Status == ImportPartStatus.Matched && p.PendingReplacement == null;
+              <tr id="row-@p.Id" class="@(part?.Id == p.Id ? "is-selected" : "")" data-row="@p.Number" data-status="@StatusText(p)">
+                <td>@if (canBulk) { <input class="form-check-input" type="checkbox" name="partIds" value="@p.Id" data-bulk aria-label="Select @p.Number" /> }</td>
+                <td class="ci-part-cell"><a class="ci-row-link" href="@Link(p)" @(part?.Id == p.Id ? "aria-current=true" : null)>@p.Number</a>
+                  <div class="ci-row-text small text-muted math-text" data-row-text>@Short(p.Text)</div></td>
+                <td>@if (p.SyllabusTopic is { } t) { <span class="badge bg-label-info syllabus-chip">@t.Title</span> } else { <span class="small text-warning">choose</span> }</td>
+                <td class="text-end">@(p.Marks?.ToString() ?? "—")</td>
+                <td><span class="badge @StatusBadge(p) ci-status"><i class="bx @StatusIcon(p) me-1" aria-hidden="true"></i>@StatusText(p)</span></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      @if (matchable.Count > 0)
+      {
+        <div class="p-2 border-top d-flex flex-wrap align-items-center gap-2">
+          <span class="small text-muted me-auto">Matched rows are clear-cut; confirm several at once.</span>
+          <button type="submit" class="btn btn-sm btn-outline-primary" id="confirmSelected"><i class="bx bx-check me-1" aria-hidden="true"></i>Confirm <span data-count>0</span> selected</button>
+        </div>
+      }
+    </form>
+  </div>
+
+  <!-- Detail -->
+  <div class="card ci-detail" id="partDetail">
+    <div class="card-body">
+      @if (part is null)
+      {
+        <p class="text-muted mb-0">Choose a part on the left to see its question, answer key and marking criteria.</p>
+      }
+      else
+      {
+        <a class="ci-back-to-list btn btn-sm btn-outline-secondary mb-2" href="/CambridgeImport/@Model.Id/Review@(filter == "all" ? "" : $"?filter={filter}")#row-@part.Id"><i class="bx bx-arrow-back me-1" aria-hidden="true"></i>All parts</a>
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-3 pb-2 border-bottom">
+          <h4 class="mb-0 me-2" id="detailNumber">@part.Number</h4>
+          <span class="badge @StatusBadge(part) fs-6" id="detailStatus"><i class="bx @StatusIcon(part) me-1" aria-hidden="true"></i>@StatusText(part)</span>
+          <span class="ms-auto text-muted small">@(part.Marks is > 0 ? $"{part.Marks} mark{(part.Marks == 1 ? "" : "s")}" : "marks not printed")@(part.SchemeMarks is { } sm && sm != part.Marks ? $" · scheme {sm}" : "")</span>
+        </div>
+
+        @if (part.ReviewReason is not null && part.Status != ImportPartStatus.Saved)
+        {
+          <div class="alert alert-warning small py-2" id="reviewReason"><i class="bx bx-error me-1" aria-hidden="true"></i><span class="math-text">@part.ReviewReason</span></div>
+        }
+
+        @if (part.FormatQuestion is not null && part.Status != ImportPartStatus.Saved)
+        {
+          <div class="alert alert-warning small py-2" id="formatPending"><i class="bx bx-pencil me-1" aria-hidden="true"></i>Choose the answer format: drawn or written. <a href="#answerFormat">Answer format</a></div>
+        }
+
+        <!-- Topic -->
+        <form method="post" action="/CambridgeImport/@Model.Id/Topic" class="mb-3 ci-topic" data-topic-form>
+          @Html.AntiForgeryToken()
+          <input type="hidden" name="partId" value="@part.Id" />
+          <input type="hidden" name="returnTo" value="review" />
+          <span class="fw-semibold me-2">Topic</span>
+          @if (part.SyllabusTopic is { } pt) { <span data-topic-label>@Model.SyllabusCode · @pt.Component.Title · @pt.Title</span> }
+          else { <span class="text-warning" data-topic-label>No topic yet</span> }
+          @if (part.Status != ImportPartStatus.Saved) { <button type="button" class="btn btn-sm btn-link p-0 ms-2" data-change-topic>Change topic</button> }
+          <div class="mt-1" data-picker-slot hidden><div data-syllabus-picker-lazy data-name="syllabusTopicId" data-value="@part.SyllabusTopicId"></div></div>
+        </form>
+
+        <!-- Question -->
+        <h6 class="text-muted text-uppercase small mb-1">Question</h6>
+        @if (part.Stem is not null) { <div class="ci-stem mb-2 math-text math-block" id="detailStem">@part.Stem</div> }
+        @if (part.FigureKey is not null && figures.Contains(part.FigureKey))
+        { <img class="ci-figure mb-2" id="detailFigure" src="/CambridgeImport/@Model.Id/Figure/@part.FigureKey" alt="Figure: @part.FigureDescription" /> }
+        <div class="mb-3 math-text math-block" id="detailText">@part.Text</div>
+
+        <!-- Answer format: written, or drawn on the sketch pad (over the question's figure, when it has one) -->
+        @if (part.Status == ImportPartStatus.Saved)
+        {
+          <p class="small mb-3" id="answerFormat"><span class="fw-semibold me-2">Answer format</span>@(part.NeedsDrawing ? "Drawn on the sketch pad" : "Written")</p>
+        }
+        else
+        {
+          <form method="post" action="/CambridgeImport/@Model.Id/Format" id="answerFormat"
+                class="mb-3 @(part.FormatQuestion is not null ? "alert alert-warning py-2" : "")">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="partId" value="@part.Id" /><input type="hidden" name="filter" value="@filter" />
+            @if (part.FormatQuestion is not null)
+            { <div class="small mb-2" id="formatQuestion"><i class="bx bx-pencil me-1" aria-hidden="true"></i><span class="math-text">@part.FormatQuestion</span></div> }
+            <fieldset class="d-flex flex-wrap align-items-center gap-3">
+              <legend class="fw-semibold fs-6 mb-0 me-1 float-none w-auto">Answer format</legend>
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="radio" name="format" value="written" id="formatWritten" @(part.NeedsDrawing ? null : "checked") />
+                <label class="form-check-label" for="formatWritten">Written answer</label>
+              </div>
+              <div class="form-check mb-0">
+                <input class="form-check-input" type="radio" name="format" value="drawn" id="formatDrawn" @(part.NeedsDrawing ? "checked" : null) />
+                <label class="form-check-label" for="formatDrawn">Drawn on the sketch pad@(part.FigureKey is not null ? " (over the figure)" : "")</label>
+              </div>
+              <button type="submit" class="btn btn-sm @(part.FormatQuestion is not null ? "btn-warning" : "btn-outline-secondary")" id="saveFormat">@(part.FormatQuestion is not null ? "Use this format" : "Change format")</button>
+            </fieldset>
+          </form>
+        }
+
+        <!-- Answer key -->
+        <h6 class="text-muted text-uppercase small mb-1">Answer key@(part.EditedByTeacher ? " (edited)" : part.Status == ImportPartStatus.Confirmed || part.Status == ImportPartStatus.Saved ? "" : " (draft)")</h6>
+        <div class="border rounded p-2 mb-2 fs-5" id="detailKey">
+          @if (string.IsNullOrWhiteSpace(part.AnswerKey)) { <span class="text-warning fs-6">No single final answer — decide from the criteria below.</span> }
+          else { <span class="math-text">@part.AnswerKey</span> }
+        </div>
+        <h6 class="text-muted text-uppercase small mb-1">Marking criteria</h6>
+        <div class="border rounded p-2 mb-2 small math-text math-block" id="detailCriteria">@(part.Criteria ?? "No criteria matched.")</div>
+        <div class="ci-source-links small mb-3" id="sourceLinks">
+          View source:
+          @if (part.PaperPage is > 0) { <a href="/CambridgeImport/@Model.Id/File/paper#page=@part.PaperPage" target="_blank" rel="noopener" class="ms-1"><i class="bx bx-link-external" aria-hidden="true"></i> Question Paper p.@part.PaperPage</a> }
+          @if (part.SchemePages is not null) { <a href="/CambridgeImport/@Model.Id/File/markscheme#page=@part.SchemePages.Split('–')[0]" target="_blank" rel="noopener" class="ms-2"><i class="bx bx-link-external" aria-hidden="true"></i> Mark Scheme p.@part.SchemePages</a> }
+        </div>
+
+        @if (pending is not null)
+        {
+          <div class="alert alert-info" id="pendingReplacement">
+            <div class="fw-semibold mb-2">A new reading of the mark scheme differs from your version. Which one should be kept?</div>
+            <div class="ci-diff mb-2 small">
+              <div><div class="text-muted mb-1">Your version</div><div class="math-text math-block">@part.AnswerKey</div><hr class="my-1" /><div class="math-text math-block">@part.Criteria</div></div>
+              <div><div class="text-muted mb-1">New reading</div><div class="math-text math-block">@pending.AnswerKey</div><hr class="my-1" /><div class="math-text math-block">@pending.Criteria</div></div>
+            </div>
+            <form method="post" action="/CambridgeImport/@Model.Id/Resolve" class="d-flex flex-wrap gap-2">
+              @Html.AntiForgeryToken()
+              <input type="hidden" name="partId" value="@part.Id" /><input type="hidden" name="filter" value="@filter" />
+              <button name="useNew" value="false" class="btn btn-sm btn-primary" id="keepMine">Keep my version</button>
+              <button name="useNew" value="true" class="btn btn-sm btn-outline-primary" id="useNew">Use the new reading</button>
+            </form>
+          </div>
+        }
+
+        @if (part.Status != ImportPartStatus.Saved)
+        {
+          <details class="mb-3" id="editKey" @(TempData["Error"] is not null ? "open" : null)>
+            <summary class="btn btn-sm btn-outline-secondary">Edit question or answer key</summary>
+            <form method="post" action="/CambridgeImport/@Model.Id/Edit" class="mt-2">
+              @Html.AntiForgeryToken()
+              <input type="hidden" name="partId" value="@part.Id" /><input type="hidden" name="filter" value="@filter" />
+              <label class="form-label small" for="editText">Question text (LaTeX in $…$)</label>
+              <textarea class="form-control mb-1" id="editText" name="text" rows="3" required>@part.Text</textarea>
+              <div class="math-preview mb-2" data-preview-of="#editText" hidden><div class="math-preview-label">How students see it</div><div class="math-block" data-preview-body></div></div>
+              @if (part.Stem is not null || Model.Parts.Count(x => x.QuestionNumber == part.QuestionNumber) > 1)
+              {
+                <label class="form-label small" for="editStem">Shared question text (stem) — for every part of question @part.QuestionNumber</label>
+                <textarea class="form-control mb-1" id="editStem" name="stem" rows="2">@part.Stem</textarea>
+                <div class="math-preview mb-2" data-preview-of="#editStem" hidden><div class="math-preview-label">How students see it</div><div class="math-block" data-preview-body></div></div>
+              }
+              <label class="form-label small" for="editAnswerKey">Answer key (LaTeX in $…$)</label>
+              <textarea class="form-control mb-1" id="editAnswerKey" name="answerKey" rows="2">@part.AnswerKey</textarea>
+              <div class="math-preview mb-2" data-preview-of="#editAnswerKey" hidden><div class="math-preview-label">How students see it</div><div class="math-block" data-preview-body></div></div>
+              <label class="form-label small" for="editCriteria">Marking criteria</label>
+              <textarea class="form-control mb-2" id="editCriteria" name="criteria" rows="6">@part.Criteria</textarea>
+              <div class="d-flex flex-wrap gap-2 align-items-end">
+                <div><label class="form-label small" for="editMarks">Marks</label>
+                  <input class="form-control form-control-sm" id="editMarks" name="marks" type="number" min="1" max="100" value="@part.Marks" style="width:6rem" /></div>
+                <button type="submit" class="btn btn-sm btn-primary" id="saveKey">Save changes</button>
+              </div>
+            </form>
+          </details>
+          @if (part.Status != ImportPartStatus.Confirmed)
+          {
+            <form method="post" action="/CambridgeImport/@Model.Id/Confirm" class="text-end">
+              @Html.AntiForgeryToken()
+              <input type="hidden" name="partId" value="@part.Id" /><input type="hidden" name="filter" value="@filter" />
+              <button type="submit" class="btn btn-outline-primary" id="confirmPart" disabled="@(pending is not null || part.FormatQuestion is not null)"
+                      title="@(part.FormatQuestion is not null ? "Choose the answer format first" : null)"><i class="bx bx-check me-1" aria-hidden="true"></i>Confirm part</button>
+            </form>
+          }
+          else
+          {
+            <p class="text-end text-primary small mb-0" id="confirmedNote"><i class="bx bx-check-double me-1" aria-hidden="true"></i>Confirmed — will be saved with the others.</p>
+          }
+        }
+        else
+        {
+          <div class="d-flex flex-wrap align-items-center gap-2" id="savedNote">
+            <span class="small me-auto"><i class="bx bx-archive me-1" aria-hidden="true"></i>Saved to your Content Library. Changes are made there now.</span>
+            <a class="btn btn-sm btn-outline-primary" id="editSavedQuestion" href="/ContentLibrary/Edit/@part.SavedQuestionId"><i class="bx bx-edit me-1" aria-hidden="true"></i>Edit question</a>
+          </div>
+        }
+      }
+    </div>
+  </div>
+</div>
+
+<div class="ci-actionbar">
+  <a href="/CambridgeImport/@Model.Id/MarkScheme" class="btn btn-outline-secondary"><i class="bx bx-arrow-back me-1" aria-hidden="true"></i>Back</a>
+  <span class="me-auto"></span>
+  <form method="post" action="/CambridgeImport/@Model.Id/Later">@Html.AntiForgeryToken()<button class="btn btn-outline-primary" id="saveDraftLater">Save draft</button></form>
+  <form method="post" action="/CambridgeImport/@Model.Id/Save" data-once>
+    @Html.AntiForgeryToken()
+    <button type="submit" class="btn btn-primary" id="saveConfirmed" disabled="@(confirmed == 0)">Save @confirmed confirmed part@(confirmed == 1 ? "" : "s")</button>
+  </form>
+</div>
+
+@section Scripts {
+  <partial name="_ImportScripts" />
+}
