@@ -79,6 +79,10 @@ public class CambridgeImport : BaseEntity
 
     public DateTime? StageStartedAt { get; set; }
 
+    /// <summary>"Suggest missing topics": a text-only call on the stored question text and criteria.</summary>
+    public ImportStage TopicStage { get; set; }
+    public string? TopicError { get; set; }
+
     public List<CambridgeImportPart> Parts { get; set; } = new();
 
     /// <summary>"9709/12", or "9709/01" for a specimen.</summary>
@@ -126,8 +130,11 @@ public class CambridgeImportPart : BaseEntity
     // ── Topic ──────────────────────────────────────────────────────────────────────────────────────────────────
     public Guid?   SyllabusTopicId { get; set; }
     public SyllabusTopic? SyllabusTopic { get; set; }
-    /// <summary>"suggested" (from the paper reading), "teacher" (chosen or changed) or "none" (choose manually).</summary>
+    /// <summary>"suggested" (paper reading), "scheme" (mark scheme reading), "classifier" (Suggest missing topics),
+    /// "teacher" (chosen, changed or deliberately removed — never overwritten) or "none" (not decided yet).</summary>
     public string  TopicSource { get; set; } = "none";
+    /// <summary>Why there is no topic yet, e.g. an unsure suggestion or a code and title that disagree.</summary>
+    public string? TopicNote { get; set; }
 
     // ── Answer key from the mark scheme ────────────────────────────────────────────────────────────────────────
     public string? AnswerKey  { get; set; }

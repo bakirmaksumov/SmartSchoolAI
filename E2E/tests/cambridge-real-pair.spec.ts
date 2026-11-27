@@ -95,6 +95,23 @@ test("real pair: paper read by AI, mismatching scheme refused, matching scheme m
   summary.review = await teacher.locator("#partList tbody tr").evaluateAll(rs => rs.map(r => ({
     number: r.getAttribute("data-row"), status: r.getAttribute("data-status"),
   })));
+  // Every part as the teacher first sees it, before any edit: key, criteria, status, reason and answer format.
+  const details: Record<string, unknown>[] = [];
+  for (const n of (summary.review as { number: string }[]).map(r => r.number)) {
+    await teacher.locator(`#partList tr[data-row="${n}"] a`).click();
+    await expect(teacher.locator("#detailNumber")).toHaveText(n);
+    details.push({
+      number: n,
+      status: (await teacher.locator("#detailStatus").innerText()).trim(),
+      reason: await teacher.locator("#reviewReason").count() ? (await teacher.locator("#reviewReason").innerText()).trim() : null,
+      key: (await teacher.locator("#detailKey").innerText()).trim(),
+      keySource: await teacher.locator("#detailKey [data-latex-source]").first().getAttribute("data-latex-source", { timeout: 2000 }).catch(() => null),
+      criteria: (await teacher.locator("#detailCriteria").innerText()).trim(),
+      format: await teacher.locator("#formatDrawn").isChecked() ? "drawn" : "written",
+      formatQuestion: await teacher.locator("#formatQuestion").count() ? (await teacher.locator("#formatQuestion").innerText()).trim() : null,
+    });
+  }
+  summary.partReview = details;
   const firstNeeds = teacher.locator('#partList tr[data-status="Needs review"] a').first();
   if (await firstNeeds.count()) {
     await firstNeeds.click();

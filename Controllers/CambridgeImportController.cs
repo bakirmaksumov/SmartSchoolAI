@@ -49,7 +49,9 @@ public class CambridgeImportController : Controller
     private async Task<CambridgeImport?> Mine(Guid id) => await _imports.LoadAsync(id, CurrentUserId);
 
     /// <summary>Runs a reading in the background with its own scope; the page polls <see cref="Status"/>.</summary>
-    private void Queue(Guid id, bool markScheme)
+    private void Queue(Guid id, bool markScheme) => Queue(id, markScheme ? "markScheme" : "paper");
+
+    private void Queue(Guid id, string stage)
     {
         _ = Task.Run(async () =>
         {
@@ -57,7 +59,9 @@ public class CambridgeImportController : Controller
             {
                 using var scope = _scopes.CreateScope();
                 var svc = scope.ServiceProvider.GetRequiredService<CambridgeImportService>();
-                if (markScheme) await svc.RunMarkSchemeAsync(id); else await svc.RunPaperAsync(id);
+                if (stage == "markScheme") await svc.RunMarkSchemeAsync(id);
+                else if (stage == "topics") await svc.RunTopicsAsync(id);
+                else await svc.RunPaperAsync(id);
             }
             catch (Exception ex)
             {
@@ -125,6 +129,7 @@ public class CambridgeImportController : Controller
         {
             paper = i.PaperStage.ToString(), paperError = i.PaperError,
             markScheme = i.MarkSchemeStage.ToString(), markSchemeError = i.MarkSchemeError,
+            topics = i.TopicStage.ToString(), topicsError = i.TopicError,
         });
     }
 
@@ -134,9 +139,24 @@ public class CambridgeImportController : Controller
     {
         var i = await Mine(id);
         if (i is null) return NotFound();
+        if (i.PaperStage == ImportStage.Done) await _imports.RefreshTopicsAsync(i);
         ViewBag.Step = 1;
         ViewBag.Figures = FigureKeys(i);
+        ViewBag.TopicBasis = await _imports.TopicBasisAsync(i);
         return View(i);
+    }
+
+    /// <summary>"Suggest missing topics": one text call on the stored text and criteria; no PDF is read again.</summary>
+    [HttpPost("{id:guid}/SuggestTopics")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> SuggestTopics(Guid id)
+    {
+        var i = await Mine(id);
+        if (i is null) return NotFound();
+        await _imports.RefreshTopicsAsync(i);
+        if (await _imports.BeginTopicsAsync(i)) Queue(i.Id, "topics");
+        else TempData["Error"] = "There is nothing to suggest: every part has a topic or was decided by you, or no syllabus topics apply yet.";
+        return Redirect(Url.Action(nameof(Paper), new { id }) + "#topicSummary");
     }
 
     [HttpPost("{id:guid}/RetryPaper")]
@@ -255,6 +275,7 @@ public class CambridgeImportController : Controller
         var i = await Mine(id);
         if (i is null) return NotFound();
         if (i.MarkSchemeStage != ImportStage.Done) return RedirectToAction(i.PaperStage == ImportStage.Done ? nameof(MarkScheme) : nameof(Paper), new { id });
+        await _imports.RefreshTopicsAsync(i);
         ViewBag.Step = 3;
         ViewBag.Figures = FigureKeys(i);
         ViewBag.Filter = filter is "needs" or "open" ? filter : "all";

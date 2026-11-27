@@ -47,7 +47,24 @@ public static class CambridgeImportLogic
         public string? Topic { get; set; }
         public string? TopicConfidence { get; set; }
     }
-    public sealed class SchemeReading { public List<SchemeRow> Rows { get; set; } = new(); }
+    public sealed class SchemeReading
+    {
+        public List<SchemeRow> Rows { get; set; } = new();
+        /// <summary>Topics for the subparts the paper reading left without a confident one, judged from the method
+        /// the marks are given for. Optional: older readings have none.</summary>
+        public List<TopicPick>? Topics { get; set; }
+    }
+    /// <summary>A topic named by the model for one subpart: the official code and/or title, and its confidence.</summary>
+    public sealed class TopicPick
+    {
+        public string Part { get; set; } = "";
+        public string? Topic { get; set; }
+        public string? TopicConfidence { get; set; }
+    }
+    public sealed class TopicReading { public List<TopicPick> Topics { get; set; } = new(); }
+
+    public static TopicReading ParseTopics(string json) =>
+        JsonSerializer.Deserialize<TopicReading>(json, Json) ?? throw new JsonException("Empty reading.");
     public sealed class SchemeRow
     {
         public string Question { get; set; } = "";
@@ -108,7 +125,7 @@ public static class CambridgeImportLogic
     // ── Question Paper → subparts ────────────────────────────────────────────────────────────────────────────────
     /// <summary>The subparts of a reading, in paper order, with their shared text and figure on each, and the
     /// suggested topic (a topic id from the published syllabus version) when the model was confident.</summary>
-    public static List<CambridgeImportPart> BuildParts(PaperReading reading, IReadOnlyDictionary<string, Guid> topicsByNumber)
+    public static List<CambridgeImportPart> BuildParts(PaperReading reading, IReadOnlyList<TopicRef> topics)
     {
         var parts = new List<CambridgeImportPart>();
         var order = 0;
@@ -122,10 +139,7 @@ public static class CambridgeImportLogic
                 if (parts.Any(x => x.Number == number)) continue;   // a repeated label is read once
                 var figure = q.Figure is { Page: > 0, Box.Length: 4 } f ? f : null;
                 var format = AnswerFormat(p.Text, p.NeedsDrawing);
-                Guid? topic = null;
-                if (p.Topic is { } tn && topicsByNumber.TryGetValue(tn.Trim(), out var tid)
-                    && !string.Equals(p.TopicConfidence, "low", StringComparison.OrdinalIgnoreCase))
-                    topic = tid;
+                var (topic, topicNote) = topics.Count == 0 ? (null, null) : ResolveTopic(p.Topic, p.TopicConfidence, topics);
                 parts.Add(new CambridgeImportPart
                 {
                     QuestionNumber = q.Number,
@@ -144,6 +158,7 @@ public static class CambridgeImportLogic
                     FigureDescription = figure?.Description,
                     SyllabusTopicId = topic,
                     TopicSource = topic is null ? "none" : "suggested",
+                    TopicNote = topicNote,
                     Status = ImportPartStatus.Recognised,
                 });
             }
@@ -163,6 +178,47 @@ public static class CambridgeImportLogic
     }
 
     private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    // ── Topics ───────────────────────────────────────────────────────────────────────────────────────────────────
+    /// <summary>A topic of the chosen syllabus edition and component, as offered to the model.</summary>
+    public sealed record TopicRef(Guid Id, string? Number, string Title);
+
+    /// <summary>
+    /// The topic the model named, as a topic of the given list: by its official code ("1.3"), by its exact title
+    /// ("Coordinate geometry", case and "&amp;"/"and" aside), or both ("1.3 Coordinate geometry"). Nothing outside the
+    /// list is ever linked. Low confidence, an unknown code or title, or a code and title that name different topics
+    /// leave the part without a topic and say why (<c>Note</c>), for the teacher to decide.
+    /// </summary>
+    public static (Guid? Id, string? Note) ResolveTopic(string? raw, string? confidence, IReadOnlyList<TopicRef> topics)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return (null, "No topic was suggested.");
+        var text = raw.Trim();
+        var m = Regex.Match(text, @"^(?<code>\d+(?:\.\d+)+)\s*(?:[—–:\-·.)]\s*)?(?<title>.*)$");
+        var code = m.Success ? m.Groups["code"].Value : null;
+        var title = (m.Success ? m.Groups["title"].Value : text).Trim();
+
+        var byCode = code is null ? null : topics.FirstOrDefault(t => t.Number == code);
+        TopicRef? byTitle = null;
+        if (title.Length > 0)
+        {
+            var same = topics.Where(t => TitleKey(t.Title) == TitleKey(title)).ToList();
+            if (same.Count == 1) byTitle = same[0];
+        }
+        if (code is not null && byCode is null)
+            return (null, $"The suggested code {code} is not a topic of this component.");
+        if (byCode is not null && title.Length > 0 && byTitle is not null && byTitle.Id != byCode.Id)
+            return (null, $"The suggestion “{text}” mixes {byCode.Number} {byCode.Title} and {byTitle.Number} {byTitle.Title}.");
+        if (byCode is not null && title.Length > 0 && byTitle is null && !TitleKey(byCode.Title).Contains(TitleKey(title)) && !TitleKey(title).Contains(TitleKey(byCode.Title)))
+            return (null, $"The suggestion “{text}” does not match {byCode.Number} {byCode.Title}.");
+        var chosen = byCode ?? byTitle;
+        if (chosen is null) return (null, $"“{text}” is not a topic of this component.");
+        if (string.Equals(confidence, "low", StringComparison.OrdinalIgnoreCase))
+            return (null, $"Unsure: possibly {chosen.Number} {chosen.Title}.");
+        return (chosen.Id, null);
+    }
+
+    private static string TitleKey(string s) =>
+        Regex.Replace(s.ToLowerInvariant().Replace("&", " and "), @"[^a-z0-9]+", " ").Trim();
 
     // ── Mark Scheme → subparts ───────────────────────────────────────────────────────────────────────────────────
     public sealed record PartMatch(

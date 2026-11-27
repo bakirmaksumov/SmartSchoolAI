@@ -177,8 +177,8 @@ test("step 1: the paper is read into nested parts with topics; a topic is fixed;
   // Questions shown at once, down to 10(b)(ii), with the suggested topic under each.
   await expect(teacher.locator("[data-part]")).toHaveCount(7, { timeout: 30_000 });
   await expect(part(teacher, "10(b)(ii)")).toContainText("Find the");
-  await expect(part(teacher, "10(a)").locator("[data-topic-label]")).toHaveText("9709 · Pure Mathematics 1 · Coordinate geometry");
-  await expect(part(teacher, "12(c)").locator("[data-topic-label]")).toContainText("choose the topic manually");
+  await expect(part(teacher, "10(a)").locator("[data-topic-label]")).toHaveText("9709 · Pure Mathematics 1 · 1.3 Coordinate geometry");
+  await expect(part(teacher, "12(c)").locator("[data-topic-label]")).toContainText("No topic yet");
   // The shared figure of question 12 is cut out of the PDF once and then stored.
   const q12 = teacher.locator('[data-question="12"]');
   await expect(q12.locator("[data-figure]")).toContainText("shared by every part");
@@ -194,7 +194,7 @@ test("step 1: the paper is read into nested parts with topics; a topic is fixed;
   await search.fill("integ");
   await search.press("Enter");
   await expect(teacher).toHaveURL(/#part-/);
-  await expect(part(teacher, "12(c)").locator("[data-topic-label]")).toHaveText("9709 · Pure Mathematics 1 · Integration");
+  await expect(part(teacher, "12(c)").locator("[data-topic-label]")).toHaveText("9709 · Pure Mathematics 1 · 1.8 Integration");
   await shot(teacher, "cambridge-step1-question-paper");
 
   // Save draft & finish later; the Content Library offers to continue.
@@ -207,7 +207,7 @@ test("step 1: the paper is read into nested parts with topics; a topic is fixed;
   await expect(teacher).toHaveURL(new RegExp(`/CambridgeImport/${importId}/MarkScheme`));
   // Back to step 1: the corrected topic and the parts are still there, and nothing was read again.
   await teacher.locator('#importSteps [data-step="1"] a').click();
-  await expect(part(teacher, "12(c)").locator("[data-topic-label]")).toHaveText("9709 · Pure Mathematics 1 · Integration");
+  await expect(part(teacher, "12(c)").locator("[data-topic-label]")).toHaveText("9709 · Pure Mathematics 1 · 1.8 Integration");
   await expect(teacher.locator("[data-part]")).toHaveCount(7);
   const calls = await (await fetch(`${mockAi}/__requests?kind=cambridge-paper`)).json();
   expect(calls).toHaveLength(1);
@@ -385,4 +385,63 @@ test("phone width: the review list and a part open one at a time, and the list p
   await expect(teacher).toHaveURL(/#row-/);
   await expect(row(teacher, "12(b)").locator("a")).toBeFocused();
   await teacher.setViewportSize({ width: 1360, height: 900 });
+});
+
+test("topics: a past paper without topics gets them from the nearest edition, without reading the files again", async () => {
+  test.setTimeout(120_000);
+  // A 2024 paper whose reading named no topics (as when no syllabus was published at the time).
+  const pastPaper = file("TEST-9709_s24_qp_11.pdf", [
+    `TEST DATA - not a Cambridge paper ${stamp}\nCambridge International AS & A Level\nMATHEMATICS 9709/11\nPaper 1 Pure Mathematics 1 May/June 2024`,
+    "1 (a) Express 3y^2 - 12y - 15 in the form 3(y + a)^2 + b. [2]\n(b) Hence find the exact solutions of 3x^4 - 12x^2 - 15 = 0. [3]\n9709/11/M/J/24",
+  ]);
+  const noTopic = { topic: null, topicConfidence: null };
+  await mock("/__script", {
+    cambridgePaperReply: { questions: [
+      { number: 1, stem: null, figure: null, parts: [
+        { label: "(a)", text: "Express $3y^2 - 12y - 15$ in the form $3(y+a)^2 + b$.", marks: 2, page: 2, ...noTopic },
+        { label: "(b)", text: "Hence find the exact solutions of the equation $3x^4 - 12x^2 - 15 = 0$.", marks: 3, page: 2, ...noTopic }] },
+      { number: 4, stem: "The equation of a curve is $y = f(x)$.", figure: null, parts: [
+        { label: "(a)", text: "Find the value of $k$.", marks: 1, page: 2, ...noTopic },
+        { label: "(c)", text: "Deduce the value of $f'(2)$ using the values in the table.", marks: 1, page: 2, ...noTopic }] },
+    ] },
+    cambridgeTopicsReply: { topics: [
+      { part: "1(a)", topic: "1.1 Quadratics", topicConfidence: "high" },
+      { part: "1(b)", topic: "1.1 Quadratics", topicConfidence: "high" },
+      { part: "4(a)", topic: "1.7 Differentiation", topicConfidence: "low" },
+      { part: "4(c)", topic: "1.7 Differentiation", topicConfidence: "high" },
+    ] },
+  });
+  await teacher.goto("/CambridgeImport");
+  await teacher.locator("#paperFile").setInputFiles(pastPaper);
+  await teacher.locator('#paperUploadForm button[type="submit"]').click();
+  await expect(teacher.locator("[data-part]")).toHaveCount(4, { timeout: 30_000 });
+  const pastId = teacher.url().match(/CambridgeImport\/([0-9a-f-]+)/)![1];
+
+  // The paper keeps 2024; topics come from the nearest published edition, said once on the page.
+  await expect(teacher.locator("#topicBasis")).toContainText("Paper 2024 · topics from the 9709 syllabus 2026–2027");
+  await expect(teacher.locator("#topicBasisNearest")).toBeVisible();
+  await expect(teacher.locator("#topicCount")).toContainText("0 of 4 parts have a topic");
+  // The teacher chooses 4(c) before asking: that choice must stay.
+  await part(teacher, "4(c)").locator("[data-change-topic]").click();
+  const search = part(teacher, "4(c)").locator("[data-sp-search]");
+  await search.fill("integ");
+  await search.press("Enter");
+  await expect(part(teacher, "4(c)").locator("[data-topic-label]")).toContainText("Integration");
+
+  await teacher.locator("#suggestTopics").click();
+  await expect(teacher.locator("#topicCount")).toContainText("3 of 4 parts have a topic", { timeout: 30_000 });
+  await expect(part(teacher, "1(a)").locator("[data-topic-label]")).toContainText("1.1 Quadratics");
+  await expect(part(teacher, "1(b)").locator("[data-topic-label]")).toContainText("1.1 Quadratics");
+  await expect(part(teacher, "4(c)").locator("[data-topic-label]")).toContainText("Integration");          // kept
+  await expect(part(teacher, "4(a)").locator("[data-topic-note]")).toContainText("Unsure: possibly 1.7 Differentiation");
+  await shot(teacher, "cambridge-topics-suggested");
+  // Stored text only: the paper was read once and no mark scheme was read; 4(c) was not even asked about.
+  expect(await (await fetch(`${mockAi}/__requests?kind=cambridge-paper`)).json()).toHaveLength(2);
+  const asked = await (await fetch(`${mockAi}/__requests?kind=cambridge-topics`)).json() as { user: string }[];
+  expect(asked).toHaveLength(1);
+  expect(asked[0].user).toContain("1.1 Quadratics");
+  expect(asked[0].user).not.toContain("\"part\":\"4(c)\"");
+  await teacher.request.post(`/CambridgeImport/${pastId}/Discard`, {
+    form: { __RequestVerificationToken: await teacher.locator('input[name="__RequestVerificationToken"]').first().inputValue() },
+  });
 });

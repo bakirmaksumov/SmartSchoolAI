@@ -481,6 +481,12 @@ namespace SmartSchoolAI.Migrations
                     b.Property<Guid?>("SyllabusVersionId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TopicError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TopicStage")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -591,6 +597,9 @@ namespace SmartSchoolAI.Migrations
 
                     b.Property<string>("Text")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TopicNote")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("TopicSource")

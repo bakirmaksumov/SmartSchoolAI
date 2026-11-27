@@ -7,6 +7,11 @@
     var components = new[] { "Pure Mathematics 1", "Pure Mathematics 2", "Pure Mathematics 3", "Mechanics", "Probability & Statistics 1", "Probability & Statistics 2" };
     var sessions = new[] { "February/March", "May/June", "October/November", "Specimen" };
     var questions = Model.Parts.GroupBy(p => p.QuestionNumber).OrderBy(g => g.Key).ToList();
+    var basis = ViewBag.TopicBasis as SmartSchoolAI.Services.CambridgeImportService.TopicBasis;
+    var withTopic = Model.Parts.Count(p => p.SyllabusTopicId is not null);
+    var openTopics = SmartSchoolAI.Services.CambridgeImportService.OpenTopicParts(Model).Count;
+    var topicsRunning = Model.TopicStage == ImportStage.Running;
+    string SourceText(string s) => s switch { "scheme" => "suggested from the mark scheme", "classifier" => "suggested", "teacher" => "your choice", _ => "suggested" };
 }
 <partial name="_Header" model="Model" />
 <partial name="_Stepper" model="Model" />
@@ -80,21 +85,66 @@ else if (Model.PaperStage == ImportStage.Failed)
         <button type="submit" class="btn btn-outline-primary w-100 px-2" id="saveDetails">Save</button>
       </div>
     </form>
-    @if (Model.SyllabusVersionId is null)
-    {
-      <div class="alert alert-warning small mt-3 mb-0" id="noSyllabusVersion">
-        No published Cambridge @Model.SyllabusCode syllabus covers @(Model.Year?.ToString() ?? "this year"), so no topics are suggested.
-        Choose a topic for each part yourself, or ask an administrator to publish the right syllabus.
-      </div>
-    }
   </div>
 </div>
+
+@if (Model.PaperStage == ImportStage.Done && basis is not null)
+{
+  <div class="card mb-4" id="topicSummary" data-topic-state="@basis.State">
+    <div class="card-body">
+      @if (basis.State == "details")
+      {
+        <div class="alert alert-warning mb-0 d-flex flex-wrap align-items-center gap-2" id="topicsNeedDetails" role="alert">
+          <span class="me-auto">Topics are linked by the paper's year and component, and @(Model.Component is null ? "the component" : "the year") could not be read.</span>
+          <a class="btn btn-sm btn-warning" href="#detailsForm" id="fixDetails" onclick="document.getElementById('@(Model.Component is null ? "dComponent" : "dYear")')?.focus()">Fix paper details</a>
+        </div>
+      }
+      else if (basis.State == "none")
+      {
+        <div class="alert alert-warning mb-0" id="noSyllabusTopics" role="alert">
+          <strong>No topics can be linked yet:</strong> no published Cambridge @Model.SyllabusCode syllabus has topics for Paper @Model.Component.
+          An administrator imports and publishes the syllabus PDF under <em>Syllabus</em>@(User.IsInRole("Admin") ? "" : " (ask your administrator)").
+          This draft then picks the topics up when you open it — the files are not uploaded again.
+          @if (User.IsInRole("Admin")) { <a href="/Syllabus" class="ms-1">Open Syllabus</a> }
+        </div>
+      }
+      else
+      {
+        <div class="d-flex flex-wrap align-items-center gap-2">
+          <div class="me-auto">
+            <div class="fw-semibold" id="topicBasis">Paper @Model.Year · topics from the @Model.SyllabusCode syllabus @basis.Years (@basis.ComponentTitle)</div>
+            @if (!basis.Exact)
+            { <div class="small text-muted" id="topicBasisNearest">No published syllabus covers @Model.Year, so the nearest published edition is used. The paper keeps its own year.</div> }
+            <div class="small mt-1" id="topicCount"><strong data-with-topic>@withTopic</strong> of @Model.Parts.Count parts have a topic@(openTopics > 0 ? $" · {openTopics} without one" : "")</div>
+          </div>
+          @if (topicsRunning)
+          {
+            <div class="d-flex align-items-center gap-2" id="topicsStatus" data-poll="topics" data-import="@Model.Id" role="status" aria-live="polite">
+              <span class="spinner-border spinner-border-sm text-primary" aria-hidden="true"></span> Suggesting topics…
+            </div>
+          }
+          else if (openTopics > 0)
+          {
+            <form method="post" action="/CambridgeImport/@Model.Id/SuggestTopics" data-once>
+              @Html.AntiForgeryToken()
+              <button type="submit" class="btn btn-sm btn-outline-primary" id="suggestTopics"><i class="bx bx-bulb me-1" aria-hidden="true"></i>Suggest missing topics</button>
+            </form>
+          }
+        </div>
+        @if (Model.TopicStage == ImportStage.Failed)
+        { <div class="alert alert-danger small mt-2 mb-0" id="topicsError" role="alert">@Model.TopicError</div> }
+        @if (openTopics > 0 && !topicsRunning)
+        { <div class="small text-muted mt-2">Fills only parts without a topic, from their text, the shared stem, the part before and the mark scheme criteria. Topics you chose or removed stay as they are.</div> }
+      }
+    </div>
+  </div>
+}
 
 @if (Model.PaperStage == ImportStage.Done)
 {
   <div class="d-flex flex-wrap align-items-baseline gap-2 mb-2">
     <h5 class="mb-0 me-auto">Recognised questions</h5>
-    <span class="small text-muted" id="partCount">@questions.Count questions · @Model.Parts.Count parts · @Model.Parts.Count(p => p.SyllabusTopicId is null) without a topic</span>
+    <span class="small text-muted" id="partCount">@questions.Count questions · @Model.Parts.Count parts · @withTopic with a topic</span>
   </div>
   @foreach (var g in questions)
   {
@@ -128,13 +178,24 @@ else if (Model.PaperStage == ImportStage.Failed)
               <input type="hidden" name="partId" value="@p.Id" />
               @if (p.SyllabusTopic is { } t)
               {
-                <span class="text-muted" data-topic-label>@Model.SyllabusCode · @t.Component.Title · @t.Title</span>
-                @if (p.TopicSource == "suggested") { <span class="badge bg-label-info ms-1">suggested</span> }
+                <span class="text-muted" data-topic-label>@Model.SyllabusCode · @t.Component.Title · @t.Number @t.Title</span>
+                @if (p.TopicSource != "teacher") { <span class="badge bg-label-info ms-1" data-topic-source="@p.TopicSource">@SourceText(p.TopicSource)</span> }
                 <button type="button" class="btn btn-sm btn-link p-0 ms-2" data-change-topic>Change topic</button>
+              }
+              else if (basis is not { Ok: true })
+              {
+                @* One message above explains why there are no topics; nothing to repeat per part. *@
+                <span class="text-muted small" data-topic-label>No topic</span>
+              }
+              else if (p.TopicSource == "teacher")
+              {
+                <span class="text-muted" data-topic-label>No topic (your choice)</span>
+                <button type="button" class="btn btn-sm btn-link p-0 ms-2" data-change-topic>Choose topic</button>
               }
               else
               {
-                <span class="text-warning" data-topic-label>No confident match — choose the topic manually.</span>
+                <span class="text-warning" data-topic-label>No topic yet</span>
+                @if (p.TopicNote is not null) { <span class="small text-muted ms-1" data-topic-note>— @p.TopicNote</span> }
                 <button type="button" class="btn btn-sm btn-link p-0 ms-2" data-change-topic>Choose topic</button>
               }
               <div class="mt-1" data-picker-slot hidden>

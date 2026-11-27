@@ -50,6 +50,8 @@ public class CambridgeImportService
         { i.PaperStage = ImportStage.Failed; i.PaperError = "The reading was interrupted. Your draft is saved — try again."; changed = true; }
         if (i.MarkSchemeStage == ImportStage.Running && stale)
         { i.MarkSchemeStage = ImportStage.Failed; i.MarkSchemeError = "The reading was interrupted. Your draft is saved — try again."; changed = true; }
+        if (i.TopicStage == ImportStage.Running && stale)
+        { i.TopicStage = ImportStage.Failed; i.TopicError = "The topic suggestion was interrupted — try again."; changed = true; }
         return changed;
     }
 
@@ -97,25 +99,121 @@ public class CambridgeImportService
         return new StartResult(import, false, null);
     }
 
-    /// <summary>The published syllabus version covering the paper's year, if any.</summary>
+    /// <summary>
+    /// The published syllabus edition whose topics the paper's parts are linked to: the one covering the paper's year
+    /// and having topics for its component; otherwise the nearest published edition of the same syllabus with topics
+    /// for that component (a past paper practised under the current syllabus). The paper keeps its own year. None
+    /// while the year or the component is unknown.
+    /// </summary>
     public async Task<Guid?> VersionForAsync(CambridgeImport i)
     {
-        if (i.Year is null) return null;
-        return await _db.SyllabusVersions
+        if (i.Year is not { } year || i.Component is not { } component) return null;
+        var usable = await _db.SyllabusVersions
             .Where(v => v.Status == SyllabusVersionStatus.Published && v.Program.Code == i.SyllabusCode
-                        && v.FirstExamYear <= i.Year && v.LastExamYear >= i.Year)
-            .OrderByDescending(v => v.FirstExamYear).Select(v => (Guid?)v.Id).FirstOrDefaultAsync();
+                        && v.Components.Any(c => c.Number == component && c.Topics.Any()))
+            .Select(v => new { v.Id, v.FirstExamYear, v.LastExamYear }).ToListAsync();
+        if (usable.Count == 0) return null;
+        return usable
+            .OrderBy(v => year < v.FirstExamYear ? v.FirstExamYear - year : year > v.LastExamYear ? year - v.LastExamYear : 0)
+            .ThenByDescending(v => v.FirstExamYear)
+            .First().Id;
     }
 
-    /// <summary>The component's topics of the import's syllabus version: number → id, and a list for the prompt.</summary>
-    public async Task<(Dictionary<string, Guid> ByNumber, string Text)> TopicsAsync(CambridgeImport i)
+    /// <summary>Where the topics come from, for the page: whether there are any, from which edition, and if it is
+    /// the paper's own or the nearest one.</summary>
+    public sealed record TopicBasis(string State, string? Years, bool Exact, string? ComponentTitle, int TopicCount)
     {
-        if (i.SyllabusVersionId is null || i.Component is null) return (new(), "(no published syllabus version for this paper — return \"topic\": null)");
+        /// <summary>"details": the year or component is missing; "none": no published topics for it; "ok".</summary>
+        public bool Ok => State == "ok";
+    }
+
+    public async Task<TopicBasis> TopicBasisAsync(CambridgeImport i)
+    {
+        if (i.Year is null || i.Component is null) return new TopicBasis("details", null, false, null, 0);
+        if (i.SyllabusVersionId is not { } vid) return new TopicBasis("none", null, false, null, 0);
+        var v = await _db.SyllabusVersions.Where(x => x.Id == vid)
+            .Select(x => new
+            {
+                x.FirstExamYear, x.LastExamYear,
+                Component = x.Components.Where(c => c.Number == i.Component).Select(c => new { c.Title, Count = c.Topics.Count }).FirstOrDefault(),
+            }).FirstOrDefaultAsync();
+        if (v?.Component is null || v.Component.Count == 0) return new TopicBasis("none", null, false, null, 0);
+        var years = v.FirstExamYear == v.LastExamYear ? $"{v.FirstExamYear}" : $"{v.FirstExamYear}–{v.LastExamYear}";
+        return new TopicBasis("ok", years, v.FirstExamYear <= i.Year && i.Year <= v.LastExamYear, v.Component.Title, v.Component.Count);
+    }
+
+    /// <summary>The component's topics of the import's syllabus edition, and the list given to the model.</summary>
+    public async Task<(List<CambridgeImportLogic.TopicRef> Topics, string Text)> TopicsAsync(CambridgeImport i)
+    {
+        if (i.SyllabusVersionId is null || i.Component is null) return (new(), "(no published syllabus topics for this paper — return \"topic\": null)");
         var topics = await _db.SyllabusTopics
             .Where(t => t.Component.VersionId == i.SyllabusVersionId && t.Component.Number == i.Component)
-            .OrderBy(t => t.Order).Select(t => new { t.Id, t.Number, t.Title }).ToListAsync();
-        var byNumber = topics.Where(t => t.Number != null).GroupBy(t => t.Number!).ToDictionary(g => g.Key, g => g.First().Id);
-        return (byNumber, topics.Count == 0 ? "(none — return \"topic\": null)" : string.Join("\n", topics.Select(t => $"{t.Number} — {t.Title}")));
+            .OrderBy(t => t.Order).Select(t => new CambridgeImportLogic.TopicRef(t.Id, t.Number, t.Title)).ToListAsync();
+        return (topics, topics.Count == 0 ? "(none — return \"topic\": null)" : string.Join("\n", topics.Select(t => $"{t.Number} {t.Title}")));
+    }
+
+    /// <summary>
+    /// Brings an existing draft up to date with the published syllabus: when an edition now applies (published after
+    /// the paper was read, or a nearer one), the suggestions already stored with the paper and mark scheme readings
+    /// are linked again — no file is read again and no AI is called. Parts the teacher decided are left alone.
+    /// </summary>
+    public async Task RefreshTopicsAsync(CambridgeImport i)
+    {
+        var version = await VersionForAsync(i);
+        if (version == i.SyllabusVersionId) return;
+        i.SyllabusVersionId = version;
+        var (topics, _) = await TopicsAsync(i);
+        foreach (var p in i.Parts.Where(p => p.TopicSource != "teacher"))
+        {
+            p.SyllabusTopicId = null; p.SyllabusTopic = null; p.TopicSource = "none"; p.TopicNote = null;
+        }
+        if (topics.Count > 0) ApplyStoredSuggestions(i, topics);
+        i.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+    }
+
+    /// <summary>The topics named in the stored readings (paper, then mark scheme), for parts not decided yet.</summary>
+    private static void ApplyStoredSuggestions(CambridgeImport i, IReadOnlyList<CambridgeImportLogic.TopicRef> topics)
+    {
+        if (i.PaperJson is not null)
+        {
+            try
+            {
+                foreach (var q in CambridgeImportLogic.ParsePaper(i.PaperJson).Questions)
+                    foreach (var pp in q.Parts.Count > 0 ? q.Parts : new List<CambridgeImportLogic.PaperPart> { new() { Label = "" } })
+                        Pick(i, topics, q.Number + CambridgeImportLogic.Suffix(pp.Label ?? ""), pp.Topic, pp.TopicConfidence, "suggested");
+            }
+            catch (JsonException) { }
+        }
+        if (i.MarkSchemeJson is not null)
+        {
+            try { ApplyPicks(i, CambridgeImportLogic.ParseScheme(i.MarkSchemeJson).Topics, topics, "scheme"); }
+            catch (JsonException) { }
+        }
+    }
+
+    /// <summary>Links the model's topic picks to the parts still without a topic; returns how many were linked.</summary>
+    private static int ApplyPicks(CambridgeImport i, IEnumerable<CambridgeImportLogic.TopicPick>? picks, IReadOnlyList<CambridgeImportLogic.TopicRef> topics, string source)
+    {
+        var n = 0;
+        foreach (var pick in picks ?? Enumerable.Empty<CambridgeImportLogic.TopicPick>())
+            if (Pick(i, topics, CambridgeImportLogic.Normalise(pick.Part), pick.Topic, pick.TopicConfidence, source)) n++;
+        return n;
+    }
+
+    private static bool Pick(CambridgeImport i, IReadOnlyList<CambridgeImportLogic.TopicRef> topics, string number, string? topic, string? confidence, string source)
+    {
+        var p = i.Parts.FirstOrDefault(x => x.Number == number);
+        if (p is null || p.SyllabusTopicId is not null || p.TopicSource == "teacher") return false;
+        var (id, note) = CambridgeImportLogic.ResolveTopic(topic, confidence, topics);
+        if (id is null)
+        {
+            if (topic is not null || p.TopicNote is null) p.TopicNote = note;   // keep an earlier, more useful note
+            return false;
+        }
+        p.SyllabusTopicId = id; p.SyllabusTopic = null; p.TopicSource = source; p.TopicNote = null;
+        p.UpdatedAt = DateTime.UtcNow;
+        return true;
     }
 
     /// <summary>Marks a stage as running before it is handed to the background, so the page shows it at once.</summary>
@@ -147,9 +245,9 @@ public class CambridgeImportService
             }
             if (i.Parts.Count == 0)
             {
-                var (byNumber, _) = await TopicsAsync(i);
+                var (topicRefs, _) = await TopicsAsync(i);
                 // Added through the set: their ids are set in code, which EF would otherwise take for existing rows.
-                foreach (var p in CambridgeImportLogic.BuildParts(CambridgeImportLogic.ParsePaper(i.PaperJson), byNumber))
+                foreach (var p in CambridgeImportLogic.BuildParts(CambridgeImportLogic.ParsePaper(i.PaperJson), topicRefs))
                 {
                     p.ImportId = i.Id;
                     _db.CambridgeImportParts.Add(p);
@@ -184,14 +282,17 @@ public class CambridgeImportService
         i.SyllabusVersionId = await VersionForAsync(i);
         if (i.SyllabusVersionId != oldVersion || i.Component != oldComponent)
         {
-            var (byNumber, _) = await TopicsAsync(i);
+            var (topics, _) = await TopicsAsync(i);
+            var byNumber = topics.Where(t => t.Number != null).GroupBy(t => t.Number!).ToDictionary(g => g.Key, g => g.First().Id);
             foreach (var p in i.Parts.Where(p => p.Status != ImportPartStatus.Saved && p.SyllabusTopicId is not null))
             {
                 var number = p.SyllabusTopic?.Number ?? await _db.SyllabusTopics.Where(t => t.Id == p.SyllabusTopicId).Select(t => t.Number).FirstOrDefaultAsync();
                 p.SyllabusTopicId = number is not null && byNumber.TryGetValue(number, out var id) ? id : null;
                 p.SyllabusTopic = null;
-                if (p.SyllabusTopicId is null) p.TopicSource = "none";
+                if (p.SyllabusTopicId is null && p.TopicSource != "teacher") p.TopicSource = "none";
             }
+            // Parts without a topic get the stored suggestions linked to the new edition.
+            if (topics.Count > 0) ApplyStoredSuggestions(i, topics);
         }
         i.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
@@ -203,7 +304,9 @@ public class CambridgeImportService
         if (topicId is { } t && !await _db.SyllabusTopics.AnyAsync(x => x.Id == t && x.Component.Version.Status == SyllabusVersionStatus.Published))
             return false;
         p.SyllabusTopicId = topicId;
-        p.TopicSource = topicId is null ? "none" : "teacher";
+        p.SyllabusTopic = null;
+        p.TopicSource = "teacher";             // also a deliberate "no topic": never filled in automatically
+        p.TopicNote = null;
         p.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return true;
@@ -275,11 +378,20 @@ public class CambridgeImportService
             {
                 var pdf = await File.ReadAllBytesAsync(LibraryFileStorage.ImportPdfPath(_env, i.Id, "markscheme"), ct);
                 var partList = string.Join("\n", i.Parts.OrderBy(p => p.Order).Select(p => $"{p.Number} [{p.Marks?.ToString() ?? "?"}]"));
+                var (topicRefs, topicText) = await TopicsAsync(i);
+                var open = i.Parts.Where(p => p.SyllabusTopicId is null && p.TopicSource != "teacher").OrderBy(p => p.Order).ToList();
+                if (topicRefs.Count > 0 && open.Count > 0)
+                    partList += "\n\nSUBPARTS WITHOUT A CONFIDENT TOPIC (number: text):\n"
+                              + string.Join("\n", open.Select(p => $"{p.Number}: {Short(p.Stem, 300)} {Short(p.Text, 400)}".Trim()))
+                              + "\n\nSYLLABUS TOPICS OF THIS COMPONENT (code title):\n" + topicText;
                 var json = await _reader.ReadMarkSchemeAsync(pdf, partList, i.Id, ct);
                 CambridgeImportLogic.ParseScheme(json);
                 i.MarkSchemeJson = json;
             }
-            ApplyScheme(i, CambridgeImportLogic.ParseScheme(i.MarkSchemeJson));
+            var reading = CambridgeImportLogic.ParseScheme(i.MarkSchemeJson);
+            ApplyScheme(i, reading);
+            var (refs, _) = await TopicsAsync(i);
+            if (refs.Count > 0) ApplyPicks(i, reading.Topics, refs, "scheme");
             i.MarkSchemeStage = ImportStage.Done;
             i.MarkSchemeError = null;
             i.LastCompletedStep = Math.Max(i.LastCompletedStep, 2);
@@ -293,6 +405,86 @@ public class CambridgeImportService
         i.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(CancellationToken.None);
     }
+
+    // ── Suggest missing topics ───────────────────────────────────────────────────────────────────────────────────
+    /// <summary>The parts a suggestion would fill: no topic yet and not decided by the teacher.</summary>
+    public static List<CambridgeImportPart> OpenTopicParts(CambridgeImport i) =>
+        i.Parts.Where(p => p.SyllabusTopicId is null && p.TopicSource != "teacher").OrderBy(p => p.Order).ToList();
+
+    public async Task<bool> BeginTopicsAsync(CambridgeImport i)
+    {
+        if (i.TopicStage == ImportStage.Running || i.PaperStage != ImportStage.Done || OpenTopicParts(i).Count == 0) return false;
+        if ((await TopicsAsync(i)).Topics.Count == 0) return false;
+        i.TopicStage = ImportStage.Running; i.TopicError = null; i.StageStartedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
+    /// <summary>
+    /// Suggests topics for the parts still without one from what is already stored — each part's text, the shared
+    /// stem, the figure's description, the part before it (for "Hence …") and its mark scheme criteria — in one
+    /// text-only call; no PDF is read again. Only parts that are still open when the answer arrives are filled, so a
+    /// choice the teacher made meanwhile stays.
+    /// </summary>
+    public async Task RunTopicsAsync(Guid importId, CancellationToken ct = default)
+    {
+        var i = await _db.CambridgeImports.Include(x => x.Parts).FirstOrDefaultAsync(x => x.Id == importId, ct);
+        if (i is null) return;
+        try
+        {
+            var (topics, topicText) = await TopicsAsync(i);
+            var ordered = i.Parts.OrderBy(p => p.Order).ToList();
+            var open = OpenTopicParts(i);
+            var payload = open.Select(p =>
+            {
+                var before = ordered.LastOrDefault(x => x.QuestionNumber == p.QuestionNumber && x.Order < p.Order);
+                return new
+                {
+                    part = p.Number, stem = p.Stem, figure = p.FigureDescription, text = p.Text,
+                    previousPart = before is null ? null : new { number = before.Number, text = Short(before.Text, 400) },
+                    markScheme = Short(p.Criteria, 900),
+                };
+            }).ToList();
+            // Mathematics as written ("+", "<"), not as escapes: the model reads this text.
+            var partsJson = JsonSerializer.Serialize(payload, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            var json = await _reader.SuggestTopicsAsync(partsJson, topicText, i.Id, ct);
+            var picks = CambridgeImportLogic.ParseTopics(json).Topics;
+
+            // The teacher may have changed topics while the model was thinking: apply to the parts as they are now.
+            _db.ChangeTracker.Clear();
+            i = await _db.CambridgeImports.Include(x => x.Parts).FirstAsync(x => x.Id == importId, CancellationToken.None);
+            var linked = ApplyPicks(i, picks, topics, "classifier");
+            await FillSavedQuestionsAsync(i);
+            i.TopicStage = ImportStage.Done;
+            i.TopicError = null;
+            _logger.LogInformation("Cambridge import {Import}: {Linked} of {Open} open parts got a topic", i.Id, linked, open.Count);
+        }
+        catch (Exception ex) when (ex is AiCallException or JsonException)
+        {
+            _logger.LogWarning("Cambridge import {Import}: topic suggestion failed ({Kind})", i.Id, (ex as AiCallException)?.Kind ?? ex.GetType().Name);
+            _db.ChangeTracker.Clear();
+            i = await _db.CambridgeImports.FirstAsync(x => x.Id == importId, CancellationToken.None);
+            i.TopicStage = ImportStage.Failed;
+            i.TopicError = Friendly(ex);
+        }
+        i.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(CancellationToken.None);
+    }
+
+    /// <summary>A part saved to the library before it had a topic: its library question gets the topic too, but only
+    /// while that question is untouched since it was saved (no topic, never edited) — a teacher's edit, including
+    /// removing a topic there, is kept.</summary>
+    private async Task FillSavedQuestionsAsync(CambridgeImport i)
+    {
+        foreach (var p in i.Parts.Where(p => p.Status == ImportPartStatus.Saved && p.SavedQuestionId is not null && p.SyllabusTopicId is not null && p.TopicSource != "teacher"))
+        {
+            var q = await _db.Questions.FirstOrDefaultAsync(x => x.Id == p.SavedQuestionId);
+            if (q is not null && q.SyllabusTopicId is null && q.UpdatedAt is null) q.SyllabusTopicId = p.SyllabusTopicId;
+        }
+    }
+
+    private static string? Short(string? s, int max) =>
+        string.IsNullOrWhiteSpace(s) ? null : s.Length <= max ? s.Trim() : s[..max].Trim() + " …";
 
     /// <summary>Mark scheme rows that matched no subpart in the last reading (shown on step 2).</summary>
     public static List<string> UnusedRows(CambridgeImport i)

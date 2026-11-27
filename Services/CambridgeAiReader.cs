@@ -6,6 +6,8 @@ public interface ICambridgeAiReader
 {
     Task<string> ReadPaperAsync(byte[] pdf, string topicList, Guid importId, CancellationToken ct = default);
     Task<string> ReadMarkSchemeAsync(byte[] pdf, string partList, Guid importId, CancellationToken ct = default);
+    /// <summary>Topics for subparts from their stored text and criteria (JSON list), without any PDF.</summary>
+    Task<string> SuggestTopicsAsync(string partsJson, string topicList, Guid importId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -33,7 +35,7 @@ public class OpenRouterCambridgeReader : ICambridgeAiReader
     public async Task<string> ReadPaperAsync(byte[] pdf, string topicList, Guid importId, CancellationToken ct = default)
     {
         var reply = await _client.CompleteAsync(Model, Messages(PaperPrompt, pdf,
-                "Read every question of this Cambridge Question Paper.\n\nSyllabus topics for this component (number — title):\n" + topicList),
+                "Read every question of this Cambridge Question Paper.\n\nSYLLABUS TOPICS OF THIS COMPONENT (code title) — the only allowed topics:\n" + topicList),
             new AiCallContext("cambridge-paper", CacheKey: importId.ToString()), temperature: 0.1, timeout: Timeout, cancellationToken: ct);
         return OpenRouterClient.CleanJson(reply.Content);
     }
@@ -43,6 +45,18 @@ public class OpenRouterCambridgeReader : ICambridgeAiReader
         var reply = await _client.CompleteAsync(Model, Messages(MarkSchemePrompt, pdf,
                 "Read every marking row of this Cambridge Mark Scheme.\n\nThe question paper has these subparts (full numbers, marks):\n" + partList),
             new AiCallContext("cambridge-mark-scheme", CacheKey: importId.ToString()), temperature: 0.1, timeout: Timeout, cancellationToken: ct);
+        return OpenRouterClient.CleanJson(reply.Content);
+    }
+
+    public async Task<string> SuggestTopicsAsync(string partsJson, string topicList, Guid importId, CancellationToken ct = default)
+    {
+        var reply = await _client.CompleteAsync(Model, new object[]
+            {
+                new { role = "system", content = TopicPrompt },
+                new { role = "user", content = "SYLLABUS TOPICS OF THIS COMPONENT (code title) — the only allowed topics:\n" + topicList
+                                               + "\n\nSUBPARTS (JSON):\n" + partsJson },
+            },
+            new AiCallContext("cambridge-topics", CacheKey: importId.ToString()), temperature: 0.1, timeout: Timeout, cancellationToken: ct);
         return OpenRouterClient.CleanJson(reply.Content);
     }
 
@@ -59,6 +73,21 @@ public class OpenRouterCambridgeReader : ICambridgeAiReader
             }
         }
     };
+
+    internal const string TopicPrompt = """
+        You are a Cambridge topic classifier for Cambridge International AS & A Level Mathematics (9709).
+        For every subpart given, choose the ONE syllabus topic from the list that the subpart mainly assesses.
+
+        Judge from the mathematics the student must do, using the part's text with its stem, the figure description,
+        the part before it ("Hence …" continues that part's method) and the mark scheme criteria (the method the
+        marks are given for). Parts of one question may have different topics.
+
+        Write the topic exactly as listed: code and title, e.g. "1.6 Series". "topicConfidence": "high" when the
+        mathematics clearly belongs to that topic, "low" when unsure. Use null only when no listed topic fits.
+
+        Return JSON only:
+        {"topics":[{"part":"1(a)","topic":"1.1 Quadratics","topicConfidence":"high"}]}
+        """;
 
     // The prompts are the contract with the mock AI used by the browser tests (E2E/scripts/mock-ai.mjs recognises
     // them by "Cambridge Question Paper reader" and "Cambridge Mark Scheme reader").
@@ -85,13 +114,18 @@ public class OpenRouterCambridgeReader : ICambridgeAiReader
           "needsDrawing": true only when the STUDENT must answer by drawing ("Sketch the graph …", "On the diagram,
           draw …", "Shade the region …", "Plot …"). A diagram or graph printed in the question for the student to use
           ("The diagram shows a sketch of …") is a figure, not a drawing task: needsDrawing false.
-        - "topic": the number of the ONE syllabus topic (from the list given) this subpart mainly assesses, and
-          "topicConfidence": "high" or "low". Use null when no listed topic fits.
+        - "topic": the code and title of the ONE syllabus topic from the list given that this subpart mainly
+          assesses, written exactly as listed, e.g. "1.1 Quadratics". Judge it from the mathematics the student has to
+          do: the part's own text together with the stem, the figure and the part before it ("Hence …" continues that
+          part's method — e.g. an equation in x^{4} solved through the quadratic just completed is Quadratics). Parts
+          of one question may have different topics. A bare "Find the value of k" says little: decide from the stem.
+          "topicConfidence": "high" when the mathematics clearly belongs to that topic, "low" when unsure.
+          Use null only when no listed topic fits.
 
         JSON:
         {"questions":[{"number":1,"stem":null,"figure":null,
           "parts":[{"label":"(a)","text":"...","marks":2,"page":2,"usesFigure":false,"kind":"ShortAnswer",
-                    "needsDrawing":false,"topic":"1.2","topicConfidence":"high"}]}]}
+                    "needsDrawing":false,"topic":"1.2 Functions","topicConfidence":"high"}]}]}
         """;
 
     internal const string MarkSchemePrompt = """
@@ -116,9 +150,13 @@ public class OpenRouterCambridgeReader : ICambridgeAiReader
           way of reaching the same answer is an alternative method, not a second final row.
         - "unreadable": true when a formula or value in the row cannot be read reliably.
         - "page": the 1-based PDF page of the row.
+        - "topics": only when the request lists SUBPARTS WITHOUT A CONFIDENT TOPIC — for each of them, the ONE
+          syllabus topic from the given list that the method credited by its marks belongs to (e.g. M1 for
+          differentiating → Differentiation), as {"part":"4(a)","topic":"1.7 Differentiation","topicConfidence":"high"}.
+          Use "low" when unsure and null when no listed topic fits. Otherwise return "topics": [].
 
         JSON:
-        {"rows":[{"question":"1(a)","appliesTo":["1(a)"],"answer":"...","codes":"B1","marks":1,"guidance":"...",
+        {"topics":[],"rows":[{"question":"1(a)","appliesTo":["1(a)"],"answer":"...","codes":"B1","marks":1,"guidance":"...",
                   "alternative":null,"final":true,"unreadable":false,"page":4}]}
         """;
 }

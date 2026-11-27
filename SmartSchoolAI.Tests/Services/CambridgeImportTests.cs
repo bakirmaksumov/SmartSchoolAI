@@ -64,26 +64,36 @@ public class CambridgeImportTests : IDisposable
 
     private sealed class FakeReader : ICambridgeAiReader
     {
-        public int PaperCalls, SchemeCalls;
-        public string Paper = PaperJson, Scheme = SchemeJson;
+        public int PaperCalls, SchemeCalls, TopicCalls;
+        public string Paper = PaperJson, Scheme = SchemeJson, Topics = """{"topics":[]}""";
+        public string? LastTopicList, LastPartList, LastPartsJson;
+        public Func<Task>? DuringTopicCall;
         public Exception? Fail;
+        public async Task<string> SuggestTopicsAsync(string partsJson, string topicList, Guid importId, CancellationToken ct = default)
+        {
+            TopicCalls++; LastPartsJson = partsJson; LastTopicList = topicList;
+            if (DuringTopicCall is not null) await DuringTopicCall();
+            if (Fail is not null) throw Fail;
+            return Topics;
+        }
         public Task<string> ReadPaperAsync(byte[] pdf, string topicList, Guid importId, CancellationToken ct = default)
-        { PaperCalls++; if (Fail is not null) throw Fail; return Task.FromResult(Paper); }
+        { PaperCalls++; LastTopicList = topicList; if (Fail is not null) throw Fail; return Task.FromResult(Paper); }
         public Task<string> ReadMarkSchemeAsync(byte[] pdf, string partList, Guid importId, CancellationToken ct = default)
-        { SchemeCalls++; if (Fail is not null) throw Fail; return Task.FromResult(Scheme); }
+        { SchemeCalls++; LastPartList = partList; if (Fail is not null) throw Fail; return Task.FromResult(Scheme); }
     }
 
     private readonly FakeReader _reader = new();
     private CambridgeImportService Svc() => new(_factory.Context, _env, _reader, NullLogger<CambridgeImportService>.Instance);
 
-    private async Task<Dictionary<string, Guid>> SeedSyllabusAsync()
+    private async Task<Dictionary<string, Guid>> SeedSyllabusAsync(int first = 2026, int last = 2027)
     {
-        var program = new SyllabusProgram { Code = "9709", Title = "Mathematics" };
-        var v = new SyllabusVersion { Program = program, FirstExamYear = 2026, LastExamYear = 2027, SourceName = "test", SourceSha256 = "x",
+        var program = await _factory.Context.SyllabusPrograms.FirstOrDefaultAsync(x => x.Code == "9709") ?? new SyllabusProgram { Code = "9709", Title = "Mathematics" };
+        var v = new SyllabusVersion { Program = program, FirstExamYear = first, LastExamYear = last, SourceName = "test", SourceSha256 = "x" + first,
                                       Status = SyllabusVersionStatus.Published };
         var c = new SyllabusComponent { Number = 1, Title = "Pure Mathematics 1", SourcePage = 19 };
         var order = 0;
-        foreach (var (n, t) in new[] { ("1.1", "Quadratics"), ("1.2", "Functions"), ("1.3", "Coordinate geometry"), ("1.7", "Differentiation"), ("1.8", "Integration") })
+        foreach (var (n, t) in new[] { ("1.1", "Quadratics"), ("1.2", "Functions"), ("1.3", "Coordinate geometry"), ("1.5", "Trigonometry"),
+                                       ("1.6", "Series"), ("1.7", "Differentiation"), ("1.8", "Integration") })
             c.Topics.Add(new SyllabusTopic { Number = n, Title = t, Order = ++order, SourcePage = 19 });
         v.Components.Add(c);
         _factory.Context.SyllabusVersions.Add(v);
@@ -151,7 +161,7 @@ public class CambridgeImportTests : IDisposable
           {"label":"(b)(i)","text":"Find the equation of AB.","marks":4},
           {"label":"(b)(ii)","text":"It is given that D is the midpoint of AB. Find A and B.","marks":3}]}]}
         """);
-        var parts = CambridgeImportLogic.BuildParts(reading, new Dictionary<string, Guid>());
+        var parts = CambridgeImportLogic.BuildParts(reading, new List<CambridgeImportLogic.TopicRef>());
         Assert.Equal(new[] { "10(a)", "10(b)(i)", "10(b)(ii)" }, parts.Select(p => p.Number));
         Assert.Equal("It is given that D is the midpoint of AB. Find the equation of AB.", parts[1].Text);
         Assert.Equal("It is given that D is the midpoint of AB. Find A and B.", parts[2].Text);   // not repeated
@@ -551,5 +561,210 @@ public class CambridgeImportTests : IDisposable
         Assert.False(dtos[0].RequireDrawing);                                     // the shared question
         Assert.Equal(new[] { false, true, true }, dtos.Skip(1).Select(d => d.RequireDrawing));
         Assert.Equal(new[] { true, false, false }, dtos.Skip(1).Select(d => d.RequireWork));
+    }
+
+    // ── Topics ───────────────────────────────────────────────────────────────────────────────────────────────────
+    private static readonly List<CambridgeImportLogic.TopicRef> P1Topics = new()
+    {
+        new(Guid.Parse("00000000-0000-0000-0000-000000000011"), "1.1", "Quadratics"),
+        new(Guid.Parse("00000000-0000-0000-0000-000000000012"), "1.2", "Functions"),
+        new(Guid.Parse("00000000-0000-0000-0000-000000000015"), "1.5", "Trigonometry"),
+        new(Guid.Parse("00000000-0000-0000-0000-000000000017"), "1.7", "Differentiation"),
+    };
+
+    [Theory]
+    [InlineData("1.1", "high", "1.1", null)]
+    [InlineData("1.1 Quadratics", "high", "1.1", null)]
+    [InlineData("1.1 — Quadratics", null, "1.1", null)]
+    [InlineData("quadratics", "high", "1.1", null)]                                   // an unambiguous title alone
+    [InlineData("1.5 Trigonometry", "high", "1.5", null)]
+    [InlineData("1.1 Functions", "high", null, "mixes 1.1 Quadratics and 1.2 Functions")]   // code and title disagree
+    [InlineData("1.1 Vectors", "high", null, "does not match 1.1 Quadratics")]
+    [InlineData("4.2 Vectors", "high", null, "not a topic of this component")]          // another component's code
+    [InlineData("Vectors", "high", null, "not a topic of this component")]
+    [InlineData("1.7 Differentiation", "low", null, "Unsure: possibly 1.7 Differentiation")]
+    [InlineData(null, null, null, "No topic was suggested.")]
+    public void A_suggested_topic_links_only_to_a_topic_of_the_list(string? raw, string? confidence, string? number, string? note)
+    {
+        var (id, why) = CambridgeImportLogic.ResolveTopic(raw, confidence, P1Topics);
+        Assert.Equal(number, P1Topics.FirstOrDefault(t => t.Id == id)?.Number);
+        if (note is null) Assert.Null(why); else Assert.Contains(note, why);
+    }
+
+    // The cause found on a teacher's draft (2024 Paper 11): no 9709 syllabus was published when the paper was read,
+    // and the edition lookup demanded one covering the paper's own year. The model was told there were no topics,
+    // returned none, and nothing could be linked — later publishing changed nothing for the draft.
+    private const string PastPaper2024 = """
+    {"questions":[
+      {"number":1,"stem":null,"figure":null,"parts":[
+        {"label":"(a)","text":"Express $3y^2 - 12y - 15$ in the form $3(y+a)^2 + b$.","marks":2,"page":2,"topic":null,"topicConfidence":null},
+        {"label":"(b)","text":"Hence find the exact solutions of the equation $3x^4 - 12x^2 - 15 = 0$.","marks":3,"page":2,"topic":null,"topicConfidence":null}]},
+      {"number":4,"stem":"The equation of a curve is $y = f(x)$, where $f(x) = kx^{3}$. The curve passes through $(2, 1)$.","figure":null,"parts":[
+        {"label":"(a)","text":"Find the value of $k$.","marks":1,"page":4,"topic":null,"topicConfidence":null},
+        {"label":"(c)","text":"Deduce the value of $f'(2)$ using the values in the table.","marks":1,"page":4,"topic":null,"topicConfidence":null}]},
+      {"number":5,"stem":null,"figure":null,"parts":[
+        {"label":"(a)","text":"Prove the identity $\\frac{\\sin^2 x - \\cos x - 1}{1 + \\cos x} \\equiv -\\cos x$.","marks":2,"page":5,"topic":null,"topicConfidence":null},
+        {"label":"(b)","text":"Hence solve the equation … for $0 < x < 2\\pi$.","marks":3,"page":5,"topic":null,"topicConfidence":null}]}
+    ]}
+    """;
+    private static byte[] Paper2024() => PaperPdf("9709/11", "May/June 2024", "2024");
+
+    private async Task<CambridgeImport> ReadWithoutSyllabusAsync(CambridgeImportService svc)
+    {
+        _reader.Paper = PastPaper2024;
+        var i = await ReadPaperAsync(svc, Paper2024());
+        Assert.Equal((2024, 1), (i.Year, i.Component));
+        Assert.Null(i.SyllabusVersionId);
+        Assert.Contains("no published syllabus topics", _reader.LastTopicList);
+        Assert.All(i.Parts, p => Assert.Null(p.SyllabusTopicId));
+        Assert.Equal("none", (await svc.TopicBasisAsync(i)).State);                    // one message, not one per part
+        return i;
+    }
+
+    [Fact]
+    public async Task A_past_paper_read_before_the_syllabus_was_published_gets_topics_from_the_nearest_edition_without_rereading()
+    {
+        var svc = Svc();
+        var i = await ReadWithoutSyllabusAsync(svc);
+        var topics = await SeedSyllabusAsync();                                         // published later: 2026–2027
+
+        await svc.RefreshTopicsAsync(i);                                                // opening the draft
+        Assert.NotNull(i.SyllabusVersionId);
+        var basis = await svc.TopicBasisAsync(i);
+        Assert.Equal(("ok", "2026–2027", false), (basis.State, basis.Years, basis.Exact));   // nearest edition; the paper stays 2024
+        Assert.Equal(2024, i.Year);
+
+        // Old draft: its stored reading names no topics, so "Suggest missing topics" asks once, from stored text only.
+        _reader.Topics = """
+        {"topics":[
+          {"part":"1(a)","topic":"1.1 Quadratics","topicConfidence":"high"},
+          {"part":"1(b)","topic":"1.1 Quadratics","topicConfidence":"high"},
+          {"part":"4(a)","topic":"1.7 Differentiation","topicConfidence":"low"},
+          {"part":"4(c)","topic":"1.7 Differentiation","topicConfidence":"high"},
+          {"part":"5(a)","topic":"1.5 Trigonometry","topicConfidence":"high"},
+          {"part":"5(b)","topic":"1.5 Functions","topicConfidence":"high"}
+        ]}
+        """;
+        Assert.True(await svc.BeginTopicsAsync(i));
+        await svc.RunTopicsAsync(i.Id);
+        Assert.Equal((1, 1, 0), (_reader.PaperCalls, _reader.TopicCalls, _reader.SchemeCalls));   // no PDF read again
+        Assert.Contains("1.1 Quadratics", _reader.LastTopicList);
+        Assert.Contains("\"previousPart\":{\"number\":\"1(a)\"", _reader.LastPartsJson);          // "Hence" sees the part before
+        Assert.Contains("passes through", _reader.LastPartsJson);                                // and the shared stem
+
+        var j = (await Svc().LoadAsync(i.Id, Owner))!;
+        Topic(j, "1(a)", topics["1.1"]); Topic(j, "1(b)", topics["1.1"]); Topic(j, "4(c)", topics["1.7"]); Topic(j, "5(a)", topics["1.5"]);
+        var k = j.Parts.Single(p => p.Number == "4(a)");
+        Assert.Null(k.SyllabusTopicId);
+        Assert.Contains("Unsure: possibly 1.7 Differentiation", k.TopicNote);
+        var b = j.Parts.Single(p => p.Number == "5(b)");
+        Assert.Null(b.SyllabusTopicId);                                                  // code and title disagree: left to check
+        Assert.Contains("mixes", b.TopicNote);
+        Assert.Equal(ImportStage.Done, j.TopicStage);
+    }
+
+    private static void Topic(CambridgeImport i, string number, Guid expected)
+    {
+        var p = i.Parts.Single(x => x.Number == number);
+        Assert.Equal(expected, p.SyllabusTopicId);
+        Assert.Equal("classifier", p.TopicSource);
+    }
+
+    [Fact]
+    public async Task Topics_the_model_named_before_the_syllabus_was_published_are_linked_once_it_is_with_no_AI_call()
+    {
+        var svc = Svc();
+        _reader.Paper = PastPaper2024.Replace("\"marks\":2,\"page\":2,\"topic\":null,\"topicConfidence\":null", "\"marks\":2,\"page\":2,\"topic\":\"1.1 Quadratics\",\"topicConfidence\":\"high\"");
+        var i = await ReadPaperAsync(svc, Paper2024());
+        Assert.All(i.Parts, p => Assert.Null(p.SyllabusTopicId));
+        var topics = await SeedSyllabusAsync(2023, 2025);                               // the paper's own edition
+        await svc.RefreshTopicsAsync(i);
+        Assert.True((await svc.TopicBasisAsync(i)).Exact);
+        Assert.Equal(topics["1.1"], i.Parts.Single(p => p.Number == "1(a)").SyllabusTopicId);
+        Assert.Equal((1, 0), (_reader.PaperCalls, _reader.TopicCalls));
+    }
+
+    [Fact]
+    public async Task The_teachers_choice_and_removal_are_kept_also_when_made_while_topics_are_being_suggested()
+    {
+        var svc = Svc();
+        var i = await ReadWithoutSyllabusAsync(svc);
+        var topics = await SeedSyllabusAsync();
+        await svc.RefreshTopicsAsync(i);
+        Assert.True(await svc.SetTopicAsync(i.Parts.Single(p => p.Number == "1(a)"), topics["1.2"]));   // the teacher's topic
+        Assert.True(await svc.SetTopicAsync(i.Parts.Single(p => p.Number == "1(b)"), null));             // deliberately none
+        _reader.DuringTopicCall = async () =>
+        {
+            // Meanwhile, in another request, the teacher picks a topic for 5(a).
+            await using var db = _factory.NewContext();
+            var other = new CambridgeImportService(db, _env, _reader, NullLogger<CambridgeImportService>.Instance);
+            var mine = (await other.LoadAsync(i.Id, Owner))!;
+            Assert.True(await other.SetTopicAsync(mine.Parts.Single(p => p.Number == "5(a)"), topics["1.8"]));
+        };
+        _reader.Topics = """
+        {"topics":[{"part":"1(a)","topic":"1.1 Quadratics","topicConfidence":"high"},{"part":"1(b)","topic":"1.1","topicConfidence":"high"},
+                   {"part":"5(a)","topic":"1.5","topicConfidence":"high"},{"part":"5(b)","topic":"1.5","topicConfidence":"high"}]}
+        """;
+        Assert.True(await svc.BeginTopicsAsync(i));
+        Assert.DoesNotContain("\"part\":\"1(a)\"", _reader.LastPartsJson ?? "");
+        await svc.RunTopicsAsync(i.Id);
+        Assert.DoesNotContain("\"part\":\"1(a)\"", _reader.LastPartsJson);              // decided parts are not even asked about
+
+        var j = (await Svc().LoadAsync(i.Id, Owner))!;
+        Assert.Equal(topics["1.2"], j.Parts.Single(p => p.Number == "1(a)").SyllabusTopicId);
+        Assert.Equal((null, "teacher"), (j.Parts.Single(p => p.Number == "1(b)").SyllabusTopicId, j.Parts.Single(p => p.Number == "1(b)").TopicSource));
+        Assert.Equal((topics["1.8"], "teacher"), (j.Parts.Single(p => p.Number == "5(a)").SyllabusTopicId, j.Parts.Single(p => p.Number == "5(a)").TopicSource));
+        Assert.Equal((topics["1.5"], "classifier"), (j.Parts.Single(p => p.Number == "5(b)").SyllabusTopicId, j.Parts.Single(p => p.Number == "5(b)").TopicSource));
+    }
+
+    [Fact]
+    public async Task The_mark_scheme_reading_is_a_second_chance_for_parts_without_a_confident_topic()
+    {
+        var topics = await SeedSyllabusAsync();
+        var svc = Svc();
+        var i = await ReadPaperAsync(svc);
+        Assert.Null(i.Parts.Single(p => p.Number == "12(c)").SyllabusTopicId);             // "low" on the paper
+        _reader.Scheme = SchemeJson.Replace("{\"rows\":[", "{\"topics\":[{\"part\":\"12(c)\",\"topic\":\"1.8 Integration\",\"topicConfidence\":\"high\"},{\"part\":\"10(a)\",\"topic\":\"1.1\",\"topicConfidence\":\"high\"}],\"rows\":[");
+        i = await ReadSchemeAsync(svc, i);
+        Assert.Contains("SUBPARTS WITHOUT A CONFIDENT TOPIC", _reader.LastPartList);
+        Assert.Contains("12(c): The diagram shows", _reader.LastPartList);
+        Assert.DoesNotContain("10(a): ", _reader.LastPartList);                           // already has a topic
+        Assert.Contains("1.8 Integration", _reader.LastPartList);
+        Assert.Equal((topics["1.8"], "scheme"), (i.Parts.Single(p => p.Number == "12(c)").SyllabusTopicId, i.Parts.Single(p => p.Number == "12(c)").TopicSource));
+        Assert.Equal((topics["1.3"], "suggested"), (i.Parts.Single(p => p.Number == "10(a)").SyllabusTopicId, i.Parts.Single(p => p.Number == "10(a)").TopicSource));
+        Assert.Equal(1, _reader.SchemeCalls);
+    }
+
+    [Fact]
+    public async Task Missing_year_or_component_asks_for_the_details_once()
+    {
+        await SeedSyllabusAsync();
+        var svc = Svc();
+        _reader.Paper = PastPaper2024;
+        var i = await ReadPaperAsync(svc, TestPdf.Build("TEST DATA\nA paper without readable details", "1 (a) Express ..."));
+        Assert.Equal("details", (await svc.TopicBasisAsync(i)).State);
+        Assert.False(await svc.BeginTopicsAsync(i));
+        await svc.SaveDetailsAsync(i, 1, "1", "May/June", 2024, "Mathematics");
+        Assert.Equal("ok", (await svc.TopicBasisAsync(i)).State);
+    }
+
+    [Fact]
+    public async Task A_part_saved_before_it_had_a_topic_fills_its_library_question_only_while_untouched()
+    {
+        var svc = Svc();
+        var i = await ReadWithoutSyllabusAsync(svc);
+        foreach (var p in i.Parts) { await svc.EditAsync(p, "k", "B1 c", p.Marks); await svc.ConfirmAsync(p); }
+        await svc.SaveConfirmedAsync(i);
+        var edited = await _factory.Context.Questions.SingleAsync(q => q.SourceKey!.EndsWith(":5(a)"));
+        edited.UpdatedAt = DateTime.UtcNow;                                             // the teacher edited it in the library
+        await _factory.Context.SaveChangesAsync();
+        var topics = await SeedSyllabusAsync();
+        await svc.RefreshTopicsAsync(i);
+        _reader.Topics = """{"topics":[{"part":"1(a)","topic":"1.1","topicConfidence":"high"},{"part":"5(a)","topic":"1.5","topicConfidence":"high"}]}""";
+        Assert.True(await svc.BeginTopicsAsync(i));
+        await svc.RunTopicsAsync(i.Id);
+        var q = await _factory.NewContext().Questions.ToDictionaryAsync(x => x.SourceKey![(x.SourceKey!.LastIndexOf(':') + 1)..]);
+        Assert.Equal(topics["1.1"], q["1(a)"].SyllabusTopicId);
+        Assert.Null(q["5(a)"].SyllabusTopicId);
     }
 }
