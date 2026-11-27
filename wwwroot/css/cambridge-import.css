@@ -48,5 +48,7 @@
 /* The theme fades every card in on load; on the review screen each click reloads the page, so the list would fade in
    again every time — show it at once instead. */
 .ci-review .card { animation: none; }
+.ci-part-cell { max-width: 8.5rem; }
+.ci-row-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 8.5rem; }
 /* Keep the main button clear of the floating chat button in the bottom-right corner. */
 .ci-actionbar { padding-right: 4.75rem; }

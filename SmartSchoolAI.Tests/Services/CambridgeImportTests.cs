@@ -313,6 +313,24 @@ public class CambridgeImportTests : IDisposable
 
     // ── Step 3 and saving ────────────────────────────────────────────────────────────────────────────────────────
     [Fact]
+    public async Task The_teacher_corrects_a_parts_wording_and_the_shared_stem_before_saving()
+    {
+        var svc = Svc();
+        var i = await ReadSchemeAsync(svc, await ReadPaperAsync(svc));
+        var b = i.Parts.Single(p => p.Number == "12(b)");
+        Assert.Null(await svc.EditAsync(b, b.AnswerKey, b.Criteria, b.Marks, text: "Calculate the exact value of $b$.", stem: "The diagram shows $y = x(x-2)^{2}$.", import: i));
+        Assert.Equal("Calculate the exact value of $b$.", b.Text);
+        Assert.All(i.Parts.Where(p => p.QuestionNumber == 12), p => Assert.Equal("The diagram shows $y = x(x-2)^{2}$.", p.Stem));   // every part of Q12
+        Assert.Equal("The circle $x^{2} + y^{2} + 4x - 2y - 20 = 0$ has centre $C$.", i.Parts.Single(p => p.Number == "10(a)").Stem);
+        Assert.Equal("The question text cannot be empty.", await svc.EditAsync(b, b.AnswerKey, b.Criteria, b.Marks, text: "  "));
+        Assert.Null(await svc.ConfirmAsync(b));
+        await svc.SaveConfirmedAsync(i);
+        var q = await _factory.Context.Questions.SingleAsync();
+        Assert.Equal(("Calculate the exact value of $b$.", "The diagram shows $y = x(x-2)^{2}$."), (q.Title, q.Stem));
+        Assert.Equal("This part is already in your Content Library; edit it there.", await svc.EditAsync(b, "x", null, null, text: "changed"));
+    }
+
+    [Fact]
     public async Task A_new_reading_never_overwrites_the_teachers_version_without_a_choice()
     {
         var svc = Svc();

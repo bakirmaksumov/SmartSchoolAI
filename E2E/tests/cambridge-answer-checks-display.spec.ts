@@ -141,9 +141,14 @@ test("an incomplete key: 1(a) needs review, names the missing result, and can be
   expect(await reason.innerText()).not.toContain("$");                     // shown as maths, not raw LaTeX
   await shot(teacher, "cambridge-incomplete-key", false);
 
+  // The list shows each part's question, and the question itself can be corrected here, not only the key.
+  await expect(row(teacher, "1(a)").locator("[data-row-text]")).toContainText("Complete the table");
   await teacher.locator("#editKey summary").click();
+  await teacher.locator("#editText").fill("Complete the table to show the gradients of $CE$ and $DE$, correct to 1 decimal place.");
+  await expect(teacher.locator('[data-preview-of="#editText"] [data-preview-body]')).toContainText("gradients of CE and DE, correct to 1 decimal place");
   await teacher.locator("#editAnswerKey").fill("Gradient of $CE = 2.5$; Gradient of $DE = 2.1$");
   await teacher.locator("#saveKey").click();
+  await expect(teacher.locator("#detailText")).toContainText("correct to 1 decimal place");
   await expect(teacher.locator("#confirmPart")).toBeEnabled();
   await teacher.locator("#confirmPart").click();
   await expect(row(teacher, "1(a)")).toHaveAttribute("data-status", "Confirmed");
@@ -170,9 +175,29 @@ test("a drawn answer: an unclear format is chosen on review; the clear one is al
   await teacher.goto(`/CambridgeImport/${importId}/Review`);
   await teacher.locator("#selectAllMatched").check();
   await expect(teacher.locator("#confirmSelected")).toContainText("Confirm 3 selected");
+  // The selection survives switching to "Needs review", opening a part and coming back.
+  await row(teacher, "8(a)").locator("input[data-bulk]").uncheck();
+  await expect(teacher.locator("#confirmSelected")).toContainText("Confirm 2 selected");
+  await teacher.locator("#needsReviewTab").click();
+  await expect(teacher.locator("#confirmSelected")).toContainText("Confirm 2 selected");
+  await teacher.locator("#reviewTabs a").first().click();
+  await row(teacher, "8(b)").locator("a").click();
+  await expect(row(teacher, "8(b)").locator("input[data-bulk]")).toBeChecked();
+  await expect(row(teacher, "8(c)").locator("input[data-bulk]")).toBeChecked();
+  await expect(row(teacher, "8(a)").locator("input[data-bulk]")).not.toBeChecked();
+  await expect(teacher.locator("#confirmSelected")).toContainText("Confirm 2 selected");
+  await row(teacher, "8(a)").locator("input[data-bulk]").check();
+  await expect(teacher.locator("#confirmSelected")).toContainText("Confirm 3 selected");
   await teacher.locator("#confirmSelected").click();
   await teacher.locator("#saveConfirmed").click();
   await expect(teacher.locator("#finishCounts")).toHaveText("4 parts saved · 0 waiting for review");
+
+  // After saving, a part opens its library question for further changes.
+  await teacher.goto(`/CambridgeImport/${importId}/Review`);
+  await row(teacher, "1(a)").locator("a").click();
+  await teacher.locator("#editSavedQuestion").click();
+  await expect(teacher).toHaveURL(/\/ContentLibrary\/Edit\//);
+  await expect(teacher.locator("#questionEditor")).toContainText("correct to 1 decimal place");
 });
 
 test("the student draws on the sketch pad over the figure and submits; the teacher sees the drawing", async () => {

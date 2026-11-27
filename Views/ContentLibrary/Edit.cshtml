@@ -155,6 +155,12 @@
                  data-placeholder="Type your question here…"
                  data-content="@System.Text.Json.JsonSerializer.Serialize(Model.Title)"></div>
           </div>
+          <div class="px-3 pb-3">
+            <div class="math-preview mt-2" id="titlePreview" data-preview-of="#questionEditor" hidden>
+              <div class="math-preview-label">How students see it</div>
+              <div class="math-block" data-preview-body></div>
+            </div>
+          </div>
 
         </div>
       </div>
@@ -344,6 +350,10 @@
           <div class="card-body">
             <label class="form-label small fw-semibold" for="examStem">Shared question text (stem)</label>
             <textarea class="form-control mb-2" id="examStem" name="stem" rows="3">@Model.Stem</textarea>
+            <div class="math-preview mt-2 mb-3" id="stemPreview" data-preview-of="#examStem" hidden>
+              <div class="math-preview-label">How students see it</div>
+              <div class="math-block" data-preview-body></div>
+            </div>
             @if (Model.ImagePath is not null)
             {
               <img src="@Model.ImagePath" alt="Figure of this question" class="img-fluid border rounded mb-3" style="max-height:18rem" id="examFigure" />
@@ -356,6 +366,10 @@
               <div class="col-sm-9">
                 <label class="form-label small fw-semibold" for="examMarkScheme">Marking criteria (used by the marker)</label>
                 <textarea class="form-control" id="examMarkScheme" name="markScheme" rows="5">@Model.MarkScheme</textarea>
+                <div class="math-preview mt-2" id="markSchemePreview" data-preview-of="#examMarkScheme" hidden>
+              <div class="math-preview-label">How students see it</div>
+              <div class="math-block" data-preview-body></div>
+            </div>
               </div>
             </div>
             <input type="hidden" name="requireDrawingField" value="1" />
@@ -377,8 +391,12 @@
             <label class="form-label fw-semibold">
               Correct Answer <span class="text-danger">*</span>
             </label>
-            <input type="text" class="form-control" name="answerKey"
+            <input type="text" class="form-control" name="answerKey" id="answerKeyInput"
                    value="@Model.AnswerKey" required />
+            <div class="math-preview mt-2" id="answerKeyPreview" data-preview-of="#answerKeyInput" hidden>
+              <div class="math-preview-label">How students see it</div>
+              <div class="math-block" data-preview-body></div>
+            </div>
           </div>
           <div>
             <label class="form-label fw-semibold">
@@ -1025,6 +1043,8 @@
 @section Scripts {
 <script src="~/js/syllabus-topic-picker.js" asp-append-version="true"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" crossorigin="anonymous"></script>
+<script src="~/js/math-text.js" asp-append-version="true"></script>
+<script src="~/js/math-preview.js" asp-append-version="true"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" crossorigin="anonymous"></script>
 <script>
 // ════════════════════════════════════════════
@@ -1049,7 +1069,10 @@ function extractEditorTitle() {
 (function loadEditorContent() {
   const raw = editor.dataset.content;
   if (raw) {
-    try { editor.innerHTML = JSON.parse(raw); } catch { editor.innerHTML = raw; }
+    let value;
+    try { value = JSON.parse(raw); } catch { value = raw; }
+    const editorHtml = /<\/?(b|i|u|em|strong|br|p|div|span|table|thead|tbody|tr|td|th|img|sup|sub|ul|ol|li|font)\b[^>]*>/i;
+    if (editorHtml.test(value)) editor.innerHTML = value; else editor.textContent = value;
   }
 })();
 

@@ -15,6 +15,8 @@
     };
     var confirmed = Model.Parts.Count(p => p.Status == ImportPartStatus.Confirmed);
     var matchedRows = shown.Where(p => p.Status == ImportPartStatus.Matched && p.PendingReplacement == null).ToList();
+    var matchable = Model.Parts.Where(p => p.Status == ImportPartStatus.Matched && p.PendingReplacement == null && p.FormatQuestion == null).Select(p => p.Id).ToList();
+    string Short(string? s) => string.IsNullOrWhiteSpace(s) ? "" : s.Length <= 90 ? s : s[..90] + " …";
     string StatusText(CambridgeImportPart p) => p.PendingReplacement != null ? "Needs review" : p.Status switch
     {
         ImportPartStatus.Matched => "Matched", ImportPartStatus.NeedsReview => "Needs review", ImportPartStatus.Confirmed => "Confirmed",
@@ -45,7 +47,8 @@
 <div class="ci-review @(part is null ? "" : "has-part")">
   <!-- List -->
   <div class="card ci-list">
-    <form method="post" action="/CambridgeImport/@Model.Id/ConfirmMatched" id="bulkForm">
+    <form method="post" action="/CambridgeImport/@Model.Id/ConfirmMatched" id="bulkForm"
+          data-import="@Model.Id" data-matchable="@string.Join(",", matchable)">
       @Html.AntiForgeryToken()
       <input type="hidden" name="filter" value="@filter" />
       <div class="table-responsive">
@@ -68,7 +71,8 @@
               var canBulk = p.Status == ImportPartStatus.Matched && p.PendingReplacement == null;
               <tr id="row-@p.Id" class="@(part?.Id == p.Id ? "is-selected" : "")" data-row="@p.Number" data-status="@StatusText(p)">
                 <td>@if (canBulk) { <input class="form-check-input" type="checkbox" name="partIds" value="@p.Id" data-bulk aria-label="Select @p.Number" /> }</td>
-                <td><a class="ci-row-link" href="@Link(p)" @(part?.Id == p.Id ? "aria-current=true" : null)>@p.Number</a></td>
+                <td class="ci-part-cell"><a class="ci-row-link" href="@Link(p)" @(part?.Id == p.Id ? "aria-current=true" : null)>@p.Number</a>
+                  <div class="ci-row-text small text-muted math-text" data-row-text>@Short(p.Text)</div></td>
                 <td>@if (p.SyllabusTopic is { } t) { <span class="badge bg-label-info syllabus-chip">@t.Title</span> } else { <span class="small text-warning">choose</span> }</td>
                 <td class="text-end">@(p.Marks?.ToString() ?? "—")</td>
                 <td><span class="badge @StatusBadge(p) ci-status"><i class="bx @StatusIcon(p) me-1" aria-hidden="true"></i>@StatusText(p)</span></td>
@@ -77,7 +81,7 @@
           </tbody>
         </table>
       </div>
-      @if (matchedRows.Count > 0)
+      @if (matchable.Count > 0)
       {
         <div class="p-2 border-top d-flex flex-wrap align-items-center gap-2">
           <span class="small text-muted me-auto">Matched rows are clear-cut; confirm several at once.</span>
@@ -194,18 +198,28 @@
         @if (part.Status != ImportPartStatus.Saved)
         {
           <details class="mb-3" id="editKey" @(TempData["Error"] is not null ? "open" : null)>
-            <summary class="btn btn-sm btn-outline-secondary">Edit answer key</summary>
+            <summary class="btn btn-sm btn-outline-secondary">Edit question or answer key</summary>
             <form method="post" action="/CambridgeImport/@Model.Id/Edit" class="mt-2">
               @Html.AntiForgeryToken()
               <input type="hidden" name="partId" value="@part.Id" /><input type="hidden" name="filter" value="@filter" />
+              <label class="form-label small" for="editText">Question text (LaTeX in $…$)</label>
+              <textarea class="form-control mb-1" id="editText" name="text" rows="3" required>@part.Text</textarea>
+              <div class="math-preview mb-2" data-preview-of="#editText" hidden><div class="math-preview-label">How students see it</div><div class="math-block" data-preview-body></div></div>
+              @if (part.Stem is not null || Model.Parts.Count(x => x.QuestionNumber == part.QuestionNumber) > 1)
+              {
+                <label class="form-label small" for="editStem">Shared question text (stem) — for every part of question @part.QuestionNumber</label>
+                <textarea class="form-control mb-1" id="editStem" name="stem" rows="2">@part.Stem</textarea>
+                <div class="math-preview mb-2" data-preview-of="#editStem" hidden><div class="math-preview-label">How students see it</div><div class="math-block" data-preview-body></div></div>
+              }
               <label class="form-label small" for="editAnswerKey">Answer key (LaTeX in $…$)</label>
-              <textarea class="form-control mb-2" id="editAnswerKey" name="answerKey" rows="2">@part.AnswerKey</textarea>
+              <textarea class="form-control mb-1" id="editAnswerKey" name="answerKey" rows="2">@part.AnswerKey</textarea>
+              <div class="math-preview mb-2" data-preview-of="#editAnswerKey" hidden><div class="math-preview-label">How students see it</div><div class="math-block" data-preview-body></div></div>
               <label class="form-label small" for="editCriteria">Marking criteria</label>
               <textarea class="form-control mb-2" id="editCriteria" name="criteria" rows="6">@part.Criteria</textarea>
               <div class="d-flex flex-wrap gap-2 align-items-end">
                 <div><label class="form-label small" for="editMarks">Marks</label>
                   <input class="form-control form-control-sm" id="editMarks" name="marks" type="number" min="1" max="100" value="@part.Marks" style="width:6rem" /></div>
-                <button type="submit" class="btn btn-sm btn-primary" id="saveKey">Save answer key</button>
+                <button type="submit" class="btn btn-sm btn-primary" id="saveKey">Save changes</button>
               </div>
             </form>
           </details>
@@ -225,7 +239,10 @@
         }
         else
         {
-          <p class="small mb-0" id="savedNote"><i class="bx bx-archive me-1" aria-hidden="true"></i>Saved to your Content Library. <a href="/ContentLibrary/Edit/@part.SavedQuestionId">Open the question</a></p>
+          <div class="d-flex flex-wrap align-items-center gap-2" id="savedNote">
+            <span class="small me-auto"><i class="bx bx-archive me-1" aria-hidden="true"></i>Saved to your Content Library. Changes are made there now.</span>
+            <a class="btn btn-sm btn-outline-primary" id="editSavedQuestion" href="/ContentLibrary/Edit/@part.SavedQuestionId"><i class="bx bx-edit me-1" aria-hidden="true"></i>Edit question</a>
+          </div>
         }
       }
     </div>

@@ -268,7 +268,7 @@ else
             };
             <tr>
               <td>
-                <div class="fw-semibold">@q.Title</div>
+                <div class="fw-semibold math-text" data-question-title>@q.Title</div>
                 @if (!string.IsNullOrEmpty(q.Explanation))
                 {
                   <small class="text-muted">
@@ -296,14 +296,24 @@ else
                 }
                 @if (q.SourceLabel is not null)
                 {
-                  <span class="badge bg-label-secondary syllabus-chip d-inline-block mt-1" data-source-label>@q.SourceLabel@(q.Marks is > 0 ? $" · [{q.Marks}]" : "")</span>
+                  // "9709/11 · May/June 2024 · Q11(b)" → the paper on one line, the question and its marks on the next.
+                  var sourceParts = q.SourceLabel.Split(" · ");
+                  var sourceQuestion = sourceParts.Length > 1 && sourceParts[^1].StartsWith("Q") ? sourceParts[^1][1..] : null;
+                  var sourcePaper = sourceQuestion is null ? q.SourceLabel : string.Join(" · ", sourceParts[..^1]);
+                  <div class="lib-source mt-1" data-source-label title="From @q.SourceLabel">
+                    <div class="lib-source-paper">@sourcePaper</div>
+                    @if (sourceQuestion is not null || q.Marks is > 0)
+                    {
+                      <div class="lib-source-question">@(sourceQuestion is null ? "" : $"Question {sourceQuestion}")@(sourceQuestion is not null && q.Marks is > 0 ? " · " : "")@(q.Marks is > 0 ? $"{q.Marks} mark{(q.Marks == 1 ? "" : "s")}" : "")</div>
+                    }
+                  </div>
                 }
               </td>
               <td>
                 <span class="badge bg-label-@diffColor">@diffEmoji @diffLabel</span>
               </td>
               <td>
-                <code class="text-success fw-semibold small">@q.AnswerKey</code>
+                <span class="text-success fw-semibold small math-text" data-answer-key>@q.AnswerKey</span>
               </td>
               <td>
                 <div class="d-flex gap-1 align-items-center">
@@ -341,6 +351,9 @@ else
   </div>
 }
 
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" crossorigin="anonymous"></script>
+<script src="~/js/math-text.js" asp-append-version="true"></script>
+<script src="~/js/math-display.js" asp-append-version="true"></script>
 <script>
   // Syllabus filters narrow step by step: changing the syllabus or component clears the narrower choices, then applies.
   document.querySelectorAll('#libraryFilters select[name^="syllabus"]').forEach(sel => sel.addEventListener('change', () => {

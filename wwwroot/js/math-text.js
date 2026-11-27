@@ -109,6 +109,11 @@
 
     function script(kind) {               // after ^ or _
       var arg = sub(readArgSource());
+      if (kind === '^') {
+        if (/^[°∘]$/.test(arg)) return '°';                    // 360^\circ → 360°
+        if (/^['′]+$/.test(arg)) return arg;                   // f^{\prime}, f^' → f′
+        if (/^(st|nd|rd|th)$/.test(arg)) return arg;           // 10^{\text{th}} → 10th
+      }
       var mapped = mapAll(arg, kind === '^' ? SUP : SUB);
       if (mapped !== null && arg !== '') return mapped;
       return kind + (arg.length > 1 ? '(' + arg + ')' : arg);
@@ -147,7 +152,10 @@
         if (name === 'frac' || name === 'dfrac' || name === 'tfrac') {
           var num = sub(readArgSource());
           var den = sub(readArgSource());
-          out += wrap(num) + '/' + wrap(den);
+          var fraction = wrap(num) + '/' + wrap(den);
+          // A function's argument keeps its brackets: "cos⁻¹(10/15)", not "cos⁻¹10/15".
+          var afterFunction = /(sin|cos|tan|cot|sec|csc|log|ln|exp|arcsin|arccos|arctan)[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]*\s*$/.test(out);
+          out += afterFunction && !isBracketed(fraction) ? '(' + fraction + ')' : fraction;
           continue;
         }
         if (name === 'sqrt') {

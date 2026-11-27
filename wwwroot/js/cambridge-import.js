@@ -79,17 +79,38 @@
   });
 
   // ── Step 3: "Confirm N selected" follows the ticked rows ───────────────────────────────────────────────────────
+  // The selection is kept for this import while the teacher switches tabs or opens a part (each is a new page), and
+  // only for parts that can still be confirmed in one go. Parts selected but not on this tab are sent too.
   const bulk = document.getElementById("confirmSelected");
-  if (bulk) {
+  const bulkForm = document.getElementById("bulkForm");
+  if (bulk && bulkForm) {
+    const key = `ci-selected-${bulkForm.dataset.import}`;
+    const matchable = new Set((bulkForm.dataset.matchable || "").split(",").filter(Boolean));
+    const load = () => { try { return new Set(JSON.parse(sessionStorage.getItem(key) || "[]").filter(id => matchable.has(id))); } catch { return new Set(); } };
+    const save = s => { try { sessionStorage.setItem(key, JSON.stringify([...s])); } catch { /* private mode: this page only */ } };
+    let chosen = load();
     const boxes = [...document.querySelectorAll("input[data-bulk]")];
+    const all = document.getElementById("selectAllMatched");
     const update = () => {
-      const n = boxes.filter(b => b.checked).length;
-      bulk.disabled = n === 0;
-      bulk.querySelector("[data-count]").textContent = n;
+      boxes.forEach(b => { if (b.checked) chosen.add(b.value); else chosen.delete(b.value); });
+      save(chosen);
+      bulk.disabled = chosen.size === 0;
+      bulk.querySelector("[data-count]").textContent = chosen.size;
+      if (all) all.checked = boxes.length > 0 && boxes.every(b => b.checked);
     };
-    boxes.forEach(b => b.addEventListener("change", update));
-    document.getElementById("selectAllMatched")?.addEventListener("change", e => { boxes.forEach(b => b.checked = e.target.checked); update(); });
+    boxes.forEach(b => { b.checked = chosen.has(b.value); b.addEventListener("change", update); });
+    all?.addEventListener("change", e => { boxes.forEach(b => b.checked = e.target.checked); update(); });
     update();
+    bulkForm.addEventListener("submit", () => {
+      const onPage = new Set(boxes.map(b => b.value));
+      chosen.forEach(id => {
+        if (onPage.has(id)) return;
+        const input = document.createElement("input");
+        input.type = "hidden"; input.name = "partIds"; input.value = id;
+        bulkForm.appendChild(input);
+      });
+      try { sessionStorage.removeItem(key); } catch { }
+    });
   }
 
   // Back to the list on a phone: return to the row the teacher came from.

@@ -445,3 +445,52 @@ test("topics: a past paper without topics gets them from the nearest edition, wi
     form: { __RequestVerificationToken: await teacher.locator('input[name="__RequestVerificationToken"]').first().inputValue() },
   });
 });
+
+test("imported maths is shown as maths in the library list and previewed on the edit page; saving keeps the text", async () => {
+  await teacher.goto(`/ContentLibrary?cambridgeImport=${importId}`);
+  const titles = teacher.locator("[data-question-title]");
+  await expect(titles).toHaveCount(7);
+  for (const text of await titles.allInnerTexts()) expect(text, "library list").not.toMatch(/\$|\\frac|\^\{/);
+  for (const text of await teacher.locator("[data-answer-key]").allInnerTexts()) expect(text, "answer column").not.toMatch(/\$|\\frac/);
+  await expect(titles.filter({ hasText: "State the coordinates of C" })).toHaveAttribute("data-latex-source", /\$C\$/);
+  // Where each question came from, readable: the paper, then the question and its marks.
+  const source = teacher.locator("table tbody tr").filter({ hasText: "Calculate the value of" }).locator("[data-source-label]");
+  await expect(source.locator(".lib-source-paper")).toHaveText("9709/12 · May/June 2026");
+  await expect(source.locator(".lib-source-question")).toHaveText("Question 12(b) · 4 marks");
+  // Notation from real Cambridge papers reads as maths (degrees, ordinals, an inverse function of a fraction).
+  const readable = await teacher.evaluate((cases: string[]) => cases.map(c => (window as any).MathText.inline(c).text), [
+    String.raw`rotated through $360^\circ$ about the $x$-axis`,
+    String.raw`for $0^\circ \le x \le 360^\circ$`,
+    String.raw`$10^{\text{th}}$ term = $25+9d=-49$`,
+    String.raw`$\sin^{-1}\frac{10}{15} = 0.7297$`,
+  ]);
+  expect(readable).toEqual([
+    "rotated through 360° about the x-axis",
+    "for 0° ≤ x ≤ 360°",
+    "10th term = 25 + 9d = −49",
+    "sin⁻¹(10/15) = 0.7297",
+  ]);
+  await shot(teacher, "cambridge-library-maths");
+
+  // The edit page: the source stays editable as written, and the preview shows what students see.
+  const row = teacher.locator("table tbody tr").filter({ hasText: "Calculate the value of" });
+  await row.locator('a[href*="/ContentLibrary/Edit/"]').first().click();
+  await expect(teacher.locator("#questionEditor")).toContainText("$b$");
+  await expect(teacher.locator("#titlePreview")).toBeVisible();
+  expect(await teacher.locator("#titlePreview [data-preview-body]").innerText()).not.toContain("$");
+  await expect(teacher.locator("#stemPreview")).toBeVisible();
+  await expect(teacher.locator("#markSchemePreview")).toBeVisible();
+  expect(await teacher.locator("#markSchemePreview [data-preview-body]").innerText()).not.toMatch(/\\frac/);
+  await expect(teacher.locator("#answerKeyPreview")).toBeVisible();
+  // Typing updates the preview.
+  await teacher.locator("#answerKeyInput").fill("$b = \\frac{2}{3}$, reject $x < 0$");
+  await expect(teacher.locator("#answerKeyPreview [data-preview-body]")).toContainText("reject x < 0");   // updated
+  await expect(teacher.locator("#answerKeyPreview [data-preview-body]")).toContainText("b = 2/3");
+  expect(await teacher.locator("#answerKeyPreview [data-preview-body]").innerText()).not.toMatch(/\$|\\frac|rac/);
+  await shot(teacher, "cambridge-edit-preview");
+  await teacher.getByRole("button", { name: /Save/ }).last().click();
+  await expect(teacher).toHaveURL(/\/ContentLibrary/);
+  // A "<" in a saved answer or title is kept as text, not read as markup, when the question is opened again.
+  await teacher.goto(`/ContentLibrary?cambridgeImport=${importId}`);
+  await expect(teacher.locator("[data-answer-key]").filter({ hasText: "reject" })).toContainText("x < 0");
+});

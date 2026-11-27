@@ -148,7 +148,7 @@ else
                         <div class="d-flex justify-content-between align-items-center mb-1">
                             <div class="text-truncate" style="max-width:70%;">
                                 <span class="badge bg-label-secondary me-1">Q@(s.Index + 1)</span>
-                                <span class="small">@s.Title</span>
+                                <span class="small math-text">@s.Title</span>
                             </div>
                             <div class="small text-muted">
                                 @if (s.SolveRate < 0)
@@ -169,4 +169,10 @@ else
             </div>
         </div>
     }
+}
+
+@section Scripts {
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" crossorigin="anonymous"></script>
+<script src="~/js/math-text.js" asp-append-version="true"></script>
+<script src="~/js/math-display.js" asp-append-version="true"></script>
 }

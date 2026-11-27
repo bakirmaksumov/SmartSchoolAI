@@ -557,9 +557,24 @@ public class CambridgeImportService
         return n;
     }
 
-    public async Task<string?> EditAsync(CambridgeImportPart p, string? answerKey, string? criteria, int? marks)
+    /// <summary>The teacher's correction of a part before it is saved: answer key, criteria and marks, and — when the
+    /// form sends them — the part's wording and the question's shared stem (which every unsaved part of that
+    /// question shows).</summary>
+    public async Task<string?> EditAsync(CambridgeImportPart p, string? answerKey, string? criteria, int? marks,
+                                         string? text = null, string? stem = null, CambridgeImport? import = null)
     {
         if (p.Status == ImportPartStatus.Saved) return "This part is already in your Content Library; edit it there.";
+        if (text is not null)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "The question text cannot be empty.";
+            p.Text = text.Trim();
+        }
+        if (stem is not null)
+        {
+            var newStem = string.IsNullOrWhiteSpace(stem) ? null : stem.Trim();
+            var siblings = import?.Parts.Where(x => x.QuestionNumber == p.QuestionNumber && x.Status != ImportPartStatus.Saved) ?? new[] { p };
+            foreach (var x in siblings) { x.Stem = newStem; x.UpdatedAt = DateTime.UtcNow; }
+        }
         p.AnswerKey = string.IsNullOrWhiteSpace(answerKey) ? null : answerKey.Trim();
         p.Criteria = string.IsNullOrWhiteSpace(criteria) ? null : criteria.Trim();
         if (marks is > 0 and <= 100) p.Marks = marks;

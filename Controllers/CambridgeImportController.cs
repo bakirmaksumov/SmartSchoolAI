@@ -318,13 +318,14 @@ public class CambridgeImportController : Controller
 
     [HttpPost("{id:guid}/Edit")]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Edit(Guid id, Guid partId, string? answerKey, string? criteria, int? marks, string? filter)
+    public async Task<IActionResult> Edit(Guid id, Guid partId, string? answerKey, string? criteria, int? marks, string? filter,
+                                          string? text = null, string? stem = null)
     {
         var i = await Mine(id);
         var p = i?.Parts.FirstOrDefault(x => x.Id == partId);
         if (i is null || p is null) return NotFound();
-        if (await _imports.EditAsync(p, answerKey, criteria, marks) is { } error) TempData["Error"] = error;
-        else TempData["Success"] = $"Answer key for {p.Number} updated. Confirm the part when it is right.";
+        if (await _imports.EditAsync(p, answerKey, criteria, marks, text, stem, i) is { } error) TempData["Error"] = error;
+        else TempData["Success"] = $"{p.Number} updated. Confirm the part when it is right.";
         return BackToPart(id, partId, filter);
     }
 
