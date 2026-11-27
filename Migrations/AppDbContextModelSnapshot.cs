@@ -1542,6 +1542,9 @@ namespace SmartSchoolAI.Migrations
                     b.Property<bool>("MustChangePassword")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("NotificationsSeenAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasMaxLength(255)

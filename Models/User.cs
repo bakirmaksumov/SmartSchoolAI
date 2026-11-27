@@ -15,6 +15,8 @@ public class User : BaseEntity
     public DateTime? LastLoginAt      { get; set; }
     public string? School             { get; set; }
     public string? Bio                { get; set; }
+    /// <summary>When the user last opened the notifications bell: anything newer counts as unread.</summary>
+    public DateTime? NotificationsSeenAt { get; set; }
 
     // FK
     public Guid RoleId { get; set; }
