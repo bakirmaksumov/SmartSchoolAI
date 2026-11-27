@@ -1,0 +1,52 @@
+@model SmartSchoolAI.Services.NotificationService.Feed
+@* The bell's menu, loaded only when it is opened (GET /Notifications/Menu), so pages carry no notification text. *@
+@{
+    string Ago(DateTime at)
+    {
+        var d = DateTime.UtcNow - at;
+        if (d.TotalMinutes < 1) return "just now";
+        if (d.TotalMinutes < 60) return $"{(int)d.TotalMinutes} min ago";
+        if (d.TotalHours < 24) return $"{(int)d.TotalHours} h ago";
+        if (d.TotalDays < 2) return "yesterday";
+        return $"{(int)d.TotalDays} days ago";
+    }
+}
+<li class="dropdown-menu-header border-bottom">
+  <div class="dropdown-header d-flex align-items-center py-3">
+    <h6 class="mb-0 me-auto fw-bold text-primary">Notifications</h6>
+    @if (Model.Unread > 0)
+    { <span class="badge bg-label-primary rounded-pill" id="notificationsNewCount">@Model.Unread new</span> }
+  </div>
+</li>
+<li class="dropdown-notifications-list scrollable-container" style="max-height: 420px; overflow-y: auto;">
+  @if (Model.Items.Count == 0)
+  {
+    <div class="text-center text-muted small py-4 px-3" id="notificationsEmpty">
+      <i class="bx bx-bell-off d-block fs-3 mb-1" aria-hidden="true"></i>Nothing new. Updates about assignments and checked work appear here.
+    </div>
+  }
+  else
+  {
+    <ul class="list-group list-group-flush">
+      @foreach (var n in Model.Items)
+      {
+        var isNew = n.IsNewSince(Model.SeenAt);
+        <li class="list-group-item list-group-item-action dropdown-notifications-item @(isNew ? "notification-new" : "")" data-notification="@n.Kind">
+          <a class="d-flex text-reset text-decoration-none" href="@(n.Url ?? "javascript:void(0);")">
+            <div class="flex-shrink-0 me-3">
+              <div class="avatar avatar-sm">
+                <span class="avatar-initial rounded-circle bg-label-@n.Color"><i class="bx @n.Icon"></i></span>
+              </div>
+            </div>
+            <div class="flex-grow-1 min-w-0">
+              <h6 class="mb-1 small fw-semibold">@n.Title</h6>
+              @if (n.Detail is not null) { <p class="mb-0 small text-muted text-truncate">@n.Detail</p> }
+              <small class="text-muted" title="@n.At.ToString("u")">@Ago(n.At)</small>
+            </div>
+            @if (isNew) { <span class="flex-shrink-0 ms-2 mt-1 rounded-circle bg-primary" style="width:8px;height:8px;" aria-label="new"></span> }
+          </a>
+        </li>
+      }
+    </ul>
+  }
+</li>

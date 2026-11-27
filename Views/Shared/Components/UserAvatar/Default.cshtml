@@ -2,6 +2,8 @@
     string avatarUrl = ViewBag.AvatarUrl ?? "/sneat/img/avatars/1.png";
     string fullName  = ViewBag.FullName  ?? "User";
     string role      = ViewBag.Role      ?? "Teacher";
+    bool hasPhoto    = ViewBag.HasPhoto  ?? false;
+    var here = Context.Request.Path + Context.Request.QueryString;
 }
 
 <li class="nav-item navbar-dropdown dropdown-user dropdown">
@@ -35,6 +37,28 @@
         <span class="align-middle">My Profile</span>
       </a>
     </li>
+    <li>
+      @* Change the photo from any page: pick a file and it is uploaded at once, then this page comes back. *@
+      <form method="post" action="/Profile/UploadPhoto" enctype="multipart/form-data" id="navPhotoForm">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="returnUrl" value="@here" />
+        <input type="file" name="photo" id="navPhotoInput" class="d-none" accept="image/jpeg,image/png,image/gif,image/webp"
+               onchange="if (this.files.length) { if (this.files[0].size > 2*1024*1024) { alert('The image must be smaller than 2 MB.'); this.value=''; } else this.form.submit(); }" />
+        <button type="button" class="dropdown-item" id="navChangePhoto" onclick="document.getElementById('navPhotoInput').click()">
+          <i class="bx bx-camera me-2"></i><span class="align-middle">Change photo</span>
+        </button>
+      </form>
+    </li>
+    @if (hasPhoto)
+    {
+      <li>
+        <form method="post" action="/Profile/RemovePhoto" id="navRemovePhotoForm">
+          @Html.AntiForgeryToken()
+          <input type="hidden" name="returnUrl" value="@here" />
+          <button type="submit" class="dropdown-item" id="navRemovePhoto"><i class="bx bx-trash me-2"></i><span class="align-middle">Remove photo</span></button>
+        </form>
+      </li>
+    }
     <li><div class="dropdown-divider"></div></li>
     <li>
       <a class="dropdown-item" href="/Auth/Logout">

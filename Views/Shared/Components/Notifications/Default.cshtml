@@ -1,0 +1,13 @@
+@model SmartSchoolAI.Services.NotificationService.Feed
+<li class="nav-item dropdown-notifications navbar-dropdown dropdown me-3" id="notifications">
+  @Html.AntiForgeryToken()
+  <a class="nav-link dropdown-toggle hide-arrow position-relative" href="javascript:void(0);" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+     aria-expanded="false" aria-label="Notifications@(Model.Unread > 0 ? $", {Model.Unread} new" : "")" id="notificationsToggle">
+    <i class="bx bx-bell bx-sm"></i>
+    <span class="badge bg-danger rounded-pill badge-notifications" id="notificationsBadge" @(Model.Unread == 0 ? "hidden" : null)
+          style="font-size:0.65rem; padding: 0.2em 0.45em; position: absolute; top: 8px; right: 2px;">@(Model.Unread > 9 ? "9+" : Model.Unread.ToString())</span>
+  </a>
+  <ul class="dropdown-menu dropdown-menu-end py-0 shadow" style="min-width: 340px; max-width: 380px;" id="notificationsMenu">
+    <li class="text-center text-muted small py-4" data-loading><span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Loading…</li>
+  </ul>
+</li>

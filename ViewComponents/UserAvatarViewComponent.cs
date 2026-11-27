@@ -39,6 +39,7 @@ public class UserAvatarViewComponent : ViewComponent
             }
         }
 
+        ViewBag.HasPhoto  = avatarUrl != "/sneat/img/avatars/1.png";
         ViewBag.AvatarUrl = avatarUrl;
         ViewBag.FullName  = fullName;
         ViewBag.Role      = role;

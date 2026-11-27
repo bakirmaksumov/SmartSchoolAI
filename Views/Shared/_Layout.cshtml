@@ -42,6 +42,7 @@
       /* "How students see it" under fields that hold maths as LaTeX (math-preview.js) */
       .math-preview { border: 1px dashed #d9dee3; border-radius: .375rem; padding: .5rem .75rem; background: #fafbfc; }
       .math-preview-label { font-size: .75rem; color: #8592a3; margin-bottom: .25rem; }
+      .dropdown-notifications-item.notification-new { background: rgba(105, 108, 255, .06); }
     </style>
 
     <!-- Page-specific CSS -->
@@ -240,67 +241,8 @@
                 </a>
               </li>
 
-              <!-- Notifications bell dropdown -->
-              <li class="nav-item dropdown-notifications navbar-dropdown dropdown me-3">
-                <a class="nav-link dropdown-toggle hide-arrow" href="javascript:void(0);" data-bs-toggle="dropdown" aria-expanded="false">
-                  <i class="bx bx-bell bx-sm"></i>
-                  <span class="badge bg-danger rounded-pill badge-notifications" style="font-size:0.65rem; padding: 0.2em 0.45em; position: absolute; top: 8px; right: 2px;">3</span>
-                </a>
-                <ul class="dropdown-menu dropdown-menu-end py-0 shadow" style="min-width: 320px;">
-                  <li class="dropdown-menu-header border-bottom">
-                    <div class="dropdown-header d-flex align-items-center py-3">
-                      <h6 class="mb-0 me-auto fw-bold text-primary">Notifications</h6>
-                      <span class="badge bg-label-primary rounded-pill">3 New</span>
-                    </div>
-                  </li>
-                  <li class="dropdown-notifications-list scrollable-container">
-                    <ul class="list-group list-group-flush">
-                      <li class="list-group-item list-group-item-action dropdown-notifications-item">
-                        <div class="d-flex">
-                          <div class="flex-shrink-0 me-3">
-                            <div class="avatar avatar-sm">
-                              <span class="avatar-initial rounded-circle bg-label-primary"><i class="bx bx-book-open"></i></span>
-                            </div>
-                          </div>
-                          <div class="flex-grow-1">
-                            <h6 class="mb-1 text-sm fw-semibold">New Assignment Posted</h6>
-                            <p class="mb-0 text-muted small">Math Assignment #4 has been published.</p>
-                            <small class="text-muted">10 mins ago</small>
-                          </div>
-                        </div>
-                      </li>
-                      <li class="list-group-item list-group-item-action dropdown-notifications-item">
-                        <div class="d-flex">
-                          <div class="flex-shrink-0 me-3">
-                            <div class="avatar avatar-sm">
-                              <span class="avatar-initial rounded-circle bg-label-success"><i class="bx bx-check-circle"></i></span>
-                            </div>
-                          </div>
-                          <div class="flex-grow-1">
-                            <h6 class="mb-1 text-sm fw-semibold">Grade Verified</h6>
-                            <p class="mb-0 text-muted small">Your teacher reviewed Quiz #2.</p>
-                            <small class="text-muted">1 hour ago</small>
-                          </div>
-                        </div>
-                      </li>
-                      <li class="list-group-item list-group-item-action dropdown-notifications-item">
-                        <div class="d-flex">
-                          <div class="flex-shrink-0 me-3">
-                            <div class="avatar avatar-sm">
-                              <span class="avatar-initial rounded-circle bg-label-warning"><i class="bx bx-award"></i></span>
-                            </div>
-                          </div>
-                          <div class="flex-grow-1">
-                            <h6 class="mb-1 text-sm fw-semibold">Badge Unlocked!</h6>
-                            <p class="mb-0 text-muted small">You unlocked WIUT Academic Scholar badge.</p>
-                            <small class="text-muted"> Yesterday</small>
-                          </div>
-                        </div>
-                      </li>
-                    </ul>
-                  </li>
-                </ul>
-              </li>
+              <!-- Notifications bell (recent events for this user) -->
+              @await Component.InvokeAsync("Notifications")
 
               <!-- User dropdown (avatar loaded from DB via ViewComponent) -->
               @await Component.InvokeAsync("UserAvatar")
@@ -527,6 +469,7 @@
   </script>
 
   <!-- ApexCharts (load on analytics pages only) -->
+  <script src="~/js/notifications.js" asp-append-version="true"></script>
   @RenderSection("Scripts", required: false)
 </body>
 </html>

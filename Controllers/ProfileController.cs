@@ -66,15 +66,16 @@ public class ProfileController : Controller
     // ── POST /Profile/UploadPhoto ─────────────────────────────────────────────
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> UploadPhoto(IFormFile photo)
+    public async Task<IActionResult> UploadPhoto(IFormFile photo, string? returnUrl = null)
     {
         var user = await GetCurrentUserAsync();
         if (user is null) return RedirectToAction("Login", "Auth");
+        IActionResult Back() => Url.IsLocalUrl(returnUrl) ? LocalRedirect(returnUrl!) : RedirectToAction(nameof(Index));
 
         if (photo is null || photo.Length == 0)
         {
             TempData["Error"] = "Please select a valid image file.";
-            return RedirectToAction(nameof(Index));
+            return Back();
         }
 
         var allowed = new[] { ".jpg", ".jpeg", ".png", ".gif", ".webp" };
@@ -83,13 +84,13 @@ public class ProfileController : Controller
         if (!allowed.Contains(ext))
         {
             TempData["Error"] = "Only JPG, PNG, GIF or WEBP images are accepted.";
-            return RedirectToAction(nameof(Index));
+            return Back();
         }
 
         if (photo.Length > 2 * 1024 * 1024)
         {
             TempData["Error"] = "Image must be smaller than 2 MB.";
-            return RedirectToAction(nameof(Index));
+            return Back();
         }
 
         byte[] bytes;
@@ -103,7 +104,7 @@ public class ProfileController : Controller
         if (!FileSignature.IsSupportedImage(bytes))
         {
             TempData["Error"] = "File is not a valid image.";
-            return RedirectToAction(nameof(Index));
+            return Back();
         }
 
         // Replace any previous custom avatar, then save the new one to protected
@@ -115,7 +116,26 @@ public class ProfileController : Controller
         await _db.SaveChangesAsync();
 
         TempData["Success"] = "Profile photo updated!";
-        return RedirectToAction(nameof(Index));
+        return Back();
+    }
+
+    // ── POST /Profile/RemovePhoto ─────────────────────────────────────────────
+    /// <summary>Back to the default picture; the uploaded file is deleted.</summary>
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> RemovePhoto(string? returnUrl = null)
+    {
+        var user = await GetCurrentUserAsync();
+        if (user is null) return RedirectToAction("Login", "Auth");
+        if (!string.IsNullOrEmpty(user.AvatarUrl))
+        {
+            AvatarStorage.DeleteByWebPath(_env, user.AvatarUrl);
+            user.AvatarUrl = null;
+            user.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+            TempData["Success"] = "Profile photo removed.";
+        }
+        return Url.IsLocalUrl(returnUrl) ? LocalRedirect(returnUrl!) : RedirectToAction(nameof(Index));
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
